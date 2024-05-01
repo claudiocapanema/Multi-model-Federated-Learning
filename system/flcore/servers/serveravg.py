@@ -41,14 +41,16 @@ class FedAvg(Server):
             s_t = time.time()
             self.selected_clients = self.select_clients()
             self.send_models()
+            for m in range(len(self.selected_clients)):
+                if i%self.eval_gap == 0:
+                    print(f"\n-------------Round number: {i}-------------")
+                    print("\nEvaluate global model")
+                    self.evaluate(m)
 
-            if i%self.eval_gap == 0:
-                print(f"\n-------------Round number: {i}-------------")
-                print("\nEvaluate global model")
-                self.evaluate()
 
-            for client in self.selected_clients:
-                client.train()
+                    clients_m = self.selected_clients[m]
+                    for client in clients_m:
+                        client.train(m)
 
             # threads = [Thread(target=client.train)
             #            for client in self.selected_clients]
@@ -73,12 +75,13 @@ class FedAvg(Server):
         print("\nAverage time cost per round.")
         print(sum(self.Budget[1:])/len(self.Budget[1:]))
 
-        self.save_results()
-        self.save_global_model()
+        for m in range(self.M):
+            self.save_results()
+            self.save_global_model(m)
 
-        if self.num_new_clients > 0:
-            self.eval_new_clients = True
-            self.set_new_clients(clientAVG)
-            print(f"\n-------------Fine tuning round-------------")
-            print("\nEvaluate new clients")
-            self.evaluate()
+            if self.num_new_clients > 0:
+                self.eval_new_clients = True
+                self.set_new_clients(clientAVG)
+                print(f"\n-------------Fine tuning round-------------")
+                print("\nEvaluate new clients")
+                self.evaluate(m)

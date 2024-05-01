@@ -33,6 +33,7 @@ class Client(object):
 
     def __init__(self, args, id, train_samples, test_samples, **kwargs):
         torch.manual_seed(0)
+        self.M = len(args.dataset)
         self.model = copy.deepcopy(args.model)
         self.algorithm = args.algorithm
         self.dataset = args.dataset
@@ -49,10 +50,12 @@ class Client(object):
 
         # check BatchNorm
         self.has_BatchNorm = False
-        for layer in self.model.children():
-            if isinstance(layer, nn.BatchNorm2d):
-                self.has_BatchNorm = True
-                break
+        for m in range(self.M):
+            print(self.model)
+            for layer in self.model[m].children():
+                if isinstance(layer, nn.BatchNorm2d):
+                    self.has_BatchNorm = True
+                    break
 
         self.train_slow = kwargs['train_slow']
         self.send_slow = kwargs['send_slow']
@@ -63,29 +66,40 @@ class Client(object):
         self.dp_sigma = args.dp_sigma
 
         self.loss = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.learning_rate)
-        self.learning_rate_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-            optimizer=self.optimizer, 
-            gamma=args.learning_rate_decay_gamma
-        )
+        self.optimizer = []
+        self.learning_rate_scheduler = []
+        for m in range(self.M):
+            self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=self.learning_rate))
+            self.learning_rate_scheduler.append(torch.optim.lr_scheduler.ExponentialLR(
+                optimizer=self.optimizer[m],
+                gamma=args.learning_rate_decay_gamma
+            ))
         self.learning_rate_decay = args.learning_rate_decay
 
 
-    def load_train_data(self, batch_size=None):
+    def load_train_data(self, m, batch_size=None):
         if batch_size == None:
             batch_size = self.batch_size
-        train_data = read_client_data(self.dataset, self.id, is_train=True)
+        print("indices: ", m, self.dataset[m])
+        train_data = read_client_data(self.dataset[m], self.id, is_train=True)
         return DataLoader(train_data, batch_size, drop_last=True, shuffle=True)
 
-    def load_test_data(self, batch_size=None):
+    def load_test_data(self, m, batch_size=None):
         if batch_size == None:
             batch_size = self.batch_size
-        test_data = read_client_data(self.dataset, self.id, is_train=False)
+        test_data = read_client_data(self.dataset[m], self.id, is_train=False)
         return DataLoader(test_data, batch_size, drop_last=False, shuffle=True)
         
     def set_parameters(self, model):
         for new_param, old_param in zip(model.parameters(), self.model.parameters()):
             old_param.data = new_param.data.clone()
+
+    def set_parameters_all_models(self, models):
+
+        for m in range(len(models)):
+            model = models[m]
+            for new_param, old_param in zip(model.parameters(), self.model[m].parameters()):
+                old_param.data = new_param.data.clone()
 
     def clone_model(self, model, target):
         for param, target_param in zip(model.parameters(), target.parameters()):
@@ -96,11 +110,11 @@ class Client(object):
         for param, new_param in zip(model.parameters(), new_params):
             param.data = new_param.data.clone()
 
-    def test_metrics(self):
-        testloaderfull = self.load_test_data()
+    def test_metrics(self, m):
+        testloaderfull = self.load_test_data(m)
         # self.model = self.load_model('model')
         # self.model.to(self.device)
-        self.model.eval()
+        self.model[m].eval()
 
         test_acc = 0
         test_num = 0
@@ -114,7 +128,7 @@ class Client(object):
                 else:
                     x = x.to(self.device)
                 y = y.to(self.device)
-                output = self.model(x)
+                output = self.model[m](x)
 
                 test_acc += (torch.sum(torch.argmax(output, dim=1) == y)).item()
                 test_num += y.shape[0]
@@ -138,11 +152,11 @@ class Client(object):
         
         return test_acc, test_num, auc
 
-    def train_metrics(self):
-        trainloader = self.load_train_data()
+    def train_metrics(self, m):
+        trainloader = self.load_train_data(m)
         # self.model = self.load_model('model')
         # self.model.to(self.device)
-        self.model.eval()
+        self.model[m].eval()
 
         train_num = 0
         losses = 0
@@ -153,7 +167,7 @@ class Client(object):
                 else:
                     x = x.to(self.device)
                 y = y.to(self.device)
-                output = self.model(x)
+                output = self.model[m](x)
                 loss = self.loss(output, y)
                 train_num += y.shape[0]
                 losses += loss.item() * y.shape[0]

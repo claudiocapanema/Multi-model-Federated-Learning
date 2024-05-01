@@ -25,6 +25,17 @@ import random
 from utils.data_utils import read_client_data
 from utils.dlg import DLG
 
+from functools import reduce
+from typing import List, Tuple
+
+import numpy as np
+
+import numpy.typing as npt
+
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+NDArray = npt.NDArray[Any]
+NDArrays = List[NDArray]
+
 
 class Server(object):
     def __init__(self, args, times):
@@ -37,6 +48,7 @@ class Server(object):
         self.local_epochs = args.local_epochs
         self.batch_size = args.batch_size
         self.learning_rate = args.local_learning_rate
+        self.M = len(self.dataset)
         self.global_model = copy.deepcopy(args.model)
         self.num_clients = args.num_clients
         self.join_ratio = args.join_ratio
@@ -81,13 +93,16 @@ class Server(object):
 
     def set_clients(self, clientObj):
         for i, train_slow, send_slow in zip(range(self.num_clients), self.train_slow_clients, self.send_slow_clients):
-            train_data = read_client_data(self.dataset, i, is_train=True)
-            test_data = read_client_data(self.dataset, i, is_train=False)
-            client = clientObj(self.args, 
-                            id=i, 
-                            train_samples=len(train_data), 
-                            test_samples=len(test_data), 
-                            train_slow=train_slow, 
+            train_data = []
+            test_data = []
+            for m in range(self.M):
+                train_data.append(len(read_client_data(self.dataset[m], i, is_train=True)))
+                test_data.append(len(read_client_data(self.dataset[m], i, is_train=False)))
+            client = clientObj(self.args,
+                            id=i,
+                            train_samples=train_data,
+                            test_samples=test_data,
+                            train_slow=train_slow,
                             send_slow=send_slow)
             self.clients.append(client)
 
@@ -114,6 +129,14 @@ class Server(object):
             self.current_num_join_clients = self.num_join_clients
         selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
 
+        n = len(selected_clients) // self.M
+        selected_clients = [selected_clients[i:i+n] for i in range(0, len(selected_clients), n)]
+
+        # print(np.array(selected_clients).shape)
+        # print(np.array(selected_clients)[0])
+        # print(n)
+        # exit()
+
         return selected_clients
 
     def send_models(self):
@@ -122,55 +145,95 @@ class Server(object):
         for client in self.clients:
             start_time = time.time()
             
-            client.set_parameters(self.global_model)
+            client.set_parameters_all_models(self.global_model)
 
             client.send_time_cost['num_rounds'] += 1
             client.send_time_cost['total_cost'] += 2 * (time.time() - start_time)
 
     def receive_models(self):
         assert (len(self.selected_clients) > 0)
-
-        active_clients = random.sample(
-            self.selected_clients, int((1-self.client_drop_rate) * self.current_num_join_clients))
+        print("aa: ", len(self.selected_clients), int((1-self.client_drop_rate) * self.current_num_join_clients))
+        # active_clients_m = random.sample(
+        #     self.selected_clients, int((1-self.client_drop_rate) * self.current_num_join_clients))
 
         self.uploaded_ids = []
         self.uploaded_weights = []
         self.uploaded_models = []
-        tot_samples = 0
-        for client in active_clients:
-            try:
-                client_time_cost = client.train_time_cost['total_cost'] / client.train_time_cost['num_rounds'] + \
-                        client.send_time_cost['total_cost'] / client.send_time_cost['num_rounds']
-            except ZeroDivisionError:
-                client_time_cost = 0
-            if client_time_cost <= self.time_threthold:
-                tot_samples += client.train_samples
-                self.uploaded_ids.append(client.id)
-                self.uploaded_weights.append(client.train_samples)
-                self.uploaded_models.append(client.model)
-        for i, w in enumerate(self.uploaded_weights):
-            self.uploaded_weights[i] = w / tot_samples
+
+        for m in range(len(self.selected_clients)):
+            tot_samples = 0
+            active_clients_m = self.selected_clients[m]
+            print("m: ", m, " ativos: ", len(active_clients_m))
+            m_uploaded_ids = []
+            m_uploaded_weights = []
+            m_uploaded_models = []
+            for client in active_clients_m:
+                try:
+                    client_time_cost = client.train_time_cost['total_cost'] / client.train_time_cost['num_rounds'] + \
+                            client.send_time_cost['total_cost'] / client.send_time_cost['num_rounds']
+                except ZeroDivisionError:
+                    client_time_cost = 0
+                if client_time_cost <= self.time_threthold:
+                    tot_samples += client.train_samples[m]
+                    m_uploaded_ids.append(client.id)
+                    m_uploaded_weights.append(client.train_samples[m])
+                    m_uploaded_models.append(client.model[m])
+            for i, w in enumerate(m_uploaded_weights):
+                m_uploaded_weights[i] = w / tot_samples
+
+            self.uploaded_ids.append(copy.deepcopy(m_uploaded_ids))
+            self.uploaded_weights.append(copy.deepcopy(m_uploaded_weights))
+            self.uploaded_models.append(copy.deepcopy(m_uploaded_models))
+
+    def aggregate(self, results: List[Tuple[NDArrays, float]]) -> NDArrays:
+        """Compute weighted average."""
+        # Calculate the total number of examples used during training
+        num_examples_total = sum([num_examples for _, num_examples in results])
+
+        # Create a list of weights, each multiplied by the related number of examples
+        weighted_weights = [
+            [layer.parameters() * num_examples for layer in weights] for weights, num_examples in results
+        ]
+
+        # Compute average weights of each layer
+        weights_prime: NDArrays = [
+            reduce(np.add, layer_updates) / num_examples_total
+            for layer_updates in zip(*weighted_weights)
+        ]
+        return weights_prime
 
     def aggregate_parameters(self):
         assert (len(self.uploaded_models) > 0)
 
-        self.global_model = copy.deepcopy(self.uploaded_models[0])
-        for param in self.global_model.parameters():
-            param.data.zero_()
-            
-        for w, client_model in zip(self.uploaded_weights, self.uploaded_models):
-            self.add_parameters(w, client_model)
+        for m in range(len(self.uploaded_models)):
+            self.global_model[m] = copy.deepcopy(self.uploaded_models[m][0])
+            print("antes: ", self.global_model[m])
+            for param in self.global_model[m].parameters():
+                param.data.zero_()
+            print("moo: ", self.uploaded_models[m])
+            parameters_tuple = []
+            for w, client_model in zip(self.uploaded_weights[m], self.uploaded_models[m]):
+                self.add_parameters(w, client_model, m)
+                # parameters_tuple.append((client_model, w))
 
-    def add_parameters(self, w, client_model):
-        for server_param, client_param in zip(self.global_model.parameters(), client_model.parameters()):
+            # self.global_model[m] = self.aggregate(parameters_tuple)
+
+
+    def add_parameters(self, w, client_model, m):
+        # if type(self.global_model[m]) == list:
+        #     if len(self.global_model[m]) == 0:
+        #         self.global_model[m] = client_model
+        # else:
+        for server_param, client_param in zip(self.global_model[m].parameters(), client_model.parameters()):
+            print(": ", server_param.data.shape, client_param.data.clone().shape)
             server_param.data += client_param.data.clone() * w
 
-    def save_global_model(self):
-        model_path = os.path.join("models", self.dataset)
+    def save_global_model(self, m):
+        model_path = os.path.join("models", self.dataset[m])
         if not os.path.exists(model_path):
             os.makedirs(model_path)
         model_path = os.path.join(model_path, self.algorithm + "_server" + ".pt")
-        torch.save(self.global_model, model_path)
+        torch.save(self.global_model[m], model_path)
 
     def load_model(self):
         model_path = os.path.join("models", self.dataset)
@@ -183,8 +246,8 @@ class Server(object):
         model_path = os.path.join(model_path, self.algorithm + "_server" + ".pt")
         return os.path.exists(model_path)
         
-    def save_results(self):
-        algo = self.dataset + "_" + self.algorithm
+    def save_results(self, m):
+        algo = self.dataset[m] + "_" + self.algorithm
         result_path = "../results/"
         if not os.path.exists(result_path):
             os.makedirs(result_path)
@@ -207,16 +270,16 @@ class Server(object):
     def load_item(self, item_name):
         return torch.load(os.path.join(self.save_folder_name, "server_" + item_name + ".pt"))
 
-    def test_metrics(self):
+    def test_metrics(self, m):
         if self.eval_new_clients and self.num_new_clients > 0:
             self.fine_tuning_new_clients()
-            return self.test_metrics_new_clients()
-        
+            return self.test_metrics_new_clients(m)
+
         num_samples = []
         tot_correct = []
         tot_auc = []
         for c in self.clients:
-            ct, ns, auc = c.test_metrics()
+            ct, ns, auc = c.test_metrics(m)
             tot_correct.append(ct*1.0)
             tot_auc.append(auc*ns)
             num_samples.append(ns)
@@ -225,14 +288,14 @@ class Server(object):
 
         return ids, num_samples, tot_correct, tot_auc
 
-    def train_metrics(self):
+    def train_metrics(self, m):
         if self.eval_new_clients and self.num_new_clients > 0:
             return [0], [1], [0]
         
         num_samples = []
         losses = []
         for c in self.clients:
-            cl, ns = c.train_metrics()
+            cl, ns = c.train_metrics(m)
             num_samples.append(ns)
             losses.append(cl*1.0)
 
@@ -241,9 +304,9 @@ class Server(object):
         return ids, num_samples, losses
 
     # evaluate selected clients
-    def evaluate(self, acc=None, loss=None):
-        stats = self.test_metrics()
-        stats_train = self.train_metrics()
+    def evaluate(self, m, acc=None, loss=None):
+        stats = self.test_metrics(m)
+        stats_train = self.train_metrics(m)
 
         test_acc = sum(stats[2])*1.0 / sum(stats[1])
         test_auc = sum(stats[3])*1.0 / sum(stats[1])
@@ -261,6 +324,7 @@ class Server(object):
         else:
             loss.append(train_loss)
 
+        print("Evaluate model {}".format(m))
         print("Averaged Train Loss: {:.4f}".format(train_loss))
         print("Averaged Test Accurancy: {:.4f}".format(test_acc))
         print("Averaged Test AUC: {:.4f}".format(test_auc))
@@ -371,12 +435,12 @@ class Server(object):
                     opt.step()
 
     # evaluating on new clients
-    def test_metrics_new_clients(self):
+    def test_metrics_new_clients(self, m):
         num_samples = []
         tot_correct = []
         tot_auc = []
         for c in self.new_clients:
-            ct, ns, auc = c.test_metrics()
+            ct, ns, auc = c.test_metrics(m)
             tot_correct.append(ct*1.0)
             tot_auc.append(auc*ns)
             num_samples.append(ns)

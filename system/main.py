@@ -89,283 +89,294 @@ def run(args):
 
     time_list = []
     reporter = MemReporter()
-    model_str = args.model
+    models_str = args.model
 
     for i in range(args.prev, args.times):
         print(f"\n============= Running time: {i}th =============")
         print("Creating server and clients ...")
         start = time.time()
+        models = []
 
-        # Generate args.model
-        if model_str == "mlr": # convex
-            if "MNIST" in args.dataset:
-                args.model = Mclr_Logistic(1*28*28, num_classes=args.num_classes).to(args.device)
-            elif "Cifar10" in args.dataset:
-                args.model = Mclr_Logistic(3*32*32, num_classes=args.num_classes).to(args.device)
+        for m in range(len(models_str)):
+            # Generate args.model
+            model_str = models_str[m]
+            dt = args.dataset[m]
+            print(model_str, models_str)
+            if "mlr" in model_str: # convex
+                if "MNIST" == dt:
+                    model = Mclr_Logistic(1*28*28, num_classes=args.num_classes).to(args.device)
+                elif "Cifar10" == dt:
+                    model = Mclr_Logistic(3*32*32, num_classes=args.num_classes).to(args.device)
+                else:
+                    model = Mclr_Logistic(60, num_classes=args.num_classes).to(args.device)
+
+            elif "cnn" in model_str: # non-convex
+                if "MNIST" == dt:
+                    model = FedAvgCNN(in_features=1, num_classes=args.num_classes, dim=1024).to(args.device)
+                elif "Cifar10" == dt:
+                    model = FedAvgCNN(in_features=3, num_classes=args.num_classes, dim=1600).to(args.device)
+                elif "Omniglot" == dt:
+                    model = FedAvgCNN(in_features=1, num_classes=args.num_classes, dim=33856).to(args.device)
+                    # model = CifarNet(num_classes=args.num_classes).to(args.device)
+                elif "Digit5" == dt:
+                    model = Digit5CNN().to(args.device)
+                else:
+                    model = FedAvgCNN(in_features=3, num_classes=args.num_classes, dim=10816).to(args.device)
+
+            elif "dnn" in model_str: # non-convex
+                if "MNIST" == dt:
+                    model = DNN(1*28*28, 100, num_classes=args.num_classes).to(args.device)
+                elif "Cifar10" == dt:
+                    model = DNN(3*32*32, 100, num_classes=args.num_classes).to(args.device)
+                else:
+                    model = DNN(60, 20, num_classes=args.num_classes).to(args.device)
+
+            elif "resnet" in model_str:
+                model = torchvision.models.resnet18(pretrained=False, num_classes=args.num_classes).to(args.device)
+
+                # model = torchvision.models.resnet18(pretrained=True).to(args.device)
+                # feature_dim = list(model.fc.parameters())[0].shape[1]
+                # model.fc = nn.Linear(feature_dim, args.num_classes).to(args.device)
+
+                # model = resnet18(num_classes=args.num_classes, has_bn=True, bn_block_num=4).to(args.device)
+
+            elif "resnet10" in model_str:
+                model = resnet10(num_classes=args.num_classes).to(args.device)
+
+            elif "resnet34" in model_str:
+                model = torchvision.models.resnet34(pretrained=False, num_classes=args.num_classes).to(args.device)
+
+            elif "alexnet" in model_str:
+                model = alexnet(pretrained=False, num_classes=args.num_classes).to(args.device)
+
+                # model = alexnet(pretrained=True).to(args.device)
+                # feature_dim = list(model.fc.parameters())[0].shape[1]
+                # model.fc = nn.Linear(feature_dim, args.num_classes).to(args.device)
+
+            elif "googlenet" in model_str:
+                model = torchvision.models.googlenet(pretrained=False, aux_logits=False,
+                                                          num_classes=args.num_classes).to(args.device)
+
+                # model = torchvision.models.googlenet(pretrained=True, aux_logits=False).to(args.device)
+                # feature_dim = list(model.fc.parameters())[0].shape[1]
+                # model.fc = nn.Linear(feature_dim, args.num_classes).to(args.device)
+
+            elif "mobilenet_v2" in model_str:
+                model = mobilenet_v2(pretrained=False, num_classes=args.num_classes).to(args.device)
+
+                # model = mobilenet_v2(pretrained=True).to(args.device)
+                # feature_dim = list(model.fc.parameters())[0].shape[1]
+                # model.fc = nn.Linear(feature_dim, args.num_classes).to(args.device)
+
+            elif "lstm" in model_str:
+                model = LSTMNet(hidden_dim=emb_dim, vocab_size=vocab_size, num_classes=args.num_classes).to(args.device)
+
+            elif "bilstm" in model_str:
+                model = BiLSTM_TextClassification(input_size=vocab_size, hidden_size=emb_dim,
+                                                       output_size=args.num_classes, num_layers=1,
+                                                       embedding_dropout=0, lstm_dropout=0, attention_dropout=0,
+                                                       embedding_length=emb_dim).to(args.device)
+
+            elif "fastText" in model_str:
+                model = fastText(hidden_dim=emb_dim, vocab_size=vocab_size, num_classes=args.num_classes).to(args.device)
+
+            elif "TextCNN" in model_str:
+                model = TextCNN(hidden_dim=emb_dim, max_len=max_len, vocab_size=vocab_size,
+                                     num_classes=args.num_classes).to(args.device)
+
+            elif "Transformer" in model_str:
+                model = TransformerModel(ntoken=vocab_size, d_model=emb_dim, nhead=8, nlayers=2,
+                                              num_classes=args.num_classes, max_len=max_len).to(args.device)
+
+            elif "AmazonMLP" in model_str:
+                model = AmazonMLP().to(args.device)
+
+            elif "harcnn" in model_str:
+                if args.dataset == 'HAR':
+                    model = HARCNN(9, dim_hidden=1664, num_classes=args.num_classes, conv_kernel_size=(1, 9),
+                                        pool_kernel_size=(1, 2)).to(args.device)
+                elif args.dataset == 'PAMAP2':
+                    model = HARCNN(9, dim_hidden=3712, num_classes=args.num_classes, conv_kernel_size=(1, 9),
+                                        pool_kernel_size=(1, 2)).to(args.device)
+
             else:
-                args.model = Mclr_Logistic(60, num_classes=args.num_classes).to(args.device)
+                print(models_str)
+                raise NotImplementedError
 
-        elif model_str == "cnn": # non-convex
-            if "MNIST" in args.dataset:
-                args.model = FedAvgCNN(in_features=1, num_classes=args.num_classes, dim=1024).to(args.device)
-            elif "Cifar10" in args.dataset:
-                args.model = FedAvgCNN(in_features=3, num_classes=args.num_classes, dim=1600).to(args.device)
-            elif "Omniglot" in args.dataset:
-                args.model = FedAvgCNN(in_features=1, num_classes=args.num_classes, dim=33856).to(args.device)
-                # args.model = CifarNet(num_classes=args.num_classes).to(args.device)
-            elif "Digit5" in args.dataset:
-                args.model = Digit5CNN().to(args.device)
+            print(model)
+
+            # select algorithm
+            if args.algorithm == "FedAvg":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = FedAvg
+
+            elif args.algorithm == "Local":
+                server = Local
+
+            elif args.algorithm == "FedMTL":
+                server = FedMTL
+
+            elif args.algorithm == "PerAvg":
+                server = PerAvg
+
+            elif args.algorithm == "pFedMe":
+                server = pFedMe
+
+            elif args.algorithm == "FedProx":
+                server = FedProx
+
+            elif args.algorithm == "FedFomo":
+                server = FedFomo
+
+            elif args.algorithm == "FedAMP":
+                server = FedAMP
+
+            elif args.algorithm == "APFL":
+                server = APFL
+
+            elif args.algorithm == "FedPer":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = FedPer
+
+            elif args.algorithm == "Ditto":
+                server = Ditto
+
+            elif args.algorithm == "FedRep":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = FedRep
+
+            elif args.algorithm == "FedPHP":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = FedPHP
+
+            elif args.algorithm == "FedBN":
+                server = FedBN
+
+            elif args.algorithm == "FedROD":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = FedROD
+
+            elif args.algorithm == "FedProto":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = FedProto(args, i)
+
+            elif args.algorithm == "FedDyn":
+                server = FedDyn(args, i)
+
+            elif args.algorithm == "MOON":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = MOON
+
+            elif args.algorithm == "FedBABU":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = FedBABU
+
+            elif args.algorithm == "APPLE":
+                server = APPLE
+
+            elif args.algorithm == "FedGen":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = FedGen
+
+            elif args.algorithm == "SCAFFOLD":
+                server = SCAFFOLD
+
+            elif args.algorithm == "FedDistill":
+                server = FedDistill
+
+            elif args.algorithm == "FedALA":
+                server = FedALA
+
+            elif args.algorithm == "FedPAC":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = FedPAC
+
+            elif args.algorithm == "LG-FedAvg":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = LG_FedAvg
+
+            elif args.algorithm == "FedGC":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = FedGC
+
+            elif args.algorithm == "FML":
+                server = FML
+
+            elif args.algorithm == "FedKD":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = FedKD
+
+            elif args.algorithm == "FedPCL":
+                model.fc = nn.Identity()
+                server = FedPCL
+
+            elif args.algorithm == "FedCP":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = FedCP
+
+            elif args.algorithm == "GPFL":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = GPFL
+
+            elif args.algorithm == "FedNTD":
+                server = FedNTD
+
+            elif args.algorithm == "FedGH":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = FedGH
+
+            elif args.algorithm == "FedAvgDBE":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = FedAvgDBE
+
+            elif args.algorithm == "FedAvgWithFedPredict":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = FedAvgWithFedPredict
+
             else:
-                args.model = FedAvgCNN(in_features=3, num_classes=args.num_classes, dim=10816).to(args.device)
+                print(args.algorithm)
+                raise NotImplementedError
 
-        elif model_str == "dnn": # non-convex
-            if "MNIST" in args.dataset:
-                args.model = DNN(1*28*28, 100, num_classes=args.num_classes).to(args.device)
-            elif "Cifar10" in args.dataset:
-                args.model = DNN(3*32*32, 100, num_classes=args.num_classes).to(args.device)
-            else:
-                args.model = DNN(60, 20, num_classes=args.num_classes).to(args.device)
-        
-        elif model_str == "resnet":
-            args.model = torchvision.models.resnet18(pretrained=False, num_classes=args.num_classes).to(args.device)
-            
-            # args.model = torchvision.models.resnet18(pretrained=True).to(args.device)
-            # feature_dim = list(args.model.fc.parameters())[0].shape[1]
-            # args.model.fc = nn.Linear(feature_dim, args.num_classes).to(args.device)
-            
-            # args.model = resnet18(num_classes=args.num_classes, has_bn=True, bn_block_num=4).to(args.device)
-        
-        elif model_str == "resnet10":
-            args.model = resnet10(num_classes=args.num_classes).to(args.device)
-        
-        elif model_str == "resnet34":
-            args.model = torchvision.models.resnet34(pretrained=False, num_classes=args.num_classes).to(args.device)
+            models.append(model)
 
-        elif model_str == "alexnet":
-            args.model = alexnet(pretrained=False, num_classes=args.num_classes).to(args.device)
-            
-            # args.model = alexnet(pretrained=True).to(args.device)
-            # feature_dim = list(args.model.fc.parameters())[0].shape[1]
-            # args.model.fc = nn.Linear(feature_dim, args.num_classes).to(args.device)
-            
-        elif model_str == "googlenet":
-            args.model = torchvision.models.googlenet(pretrained=False, aux_logits=False, 
-                                                      num_classes=args.num_classes).to(args.device)
-            
-            # args.model = torchvision.models.googlenet(pretrained=True, aux_logits=False).to(args.device)
-            # feature_dim = list(args.model.fc.parameters())[0].shape[1]
-            # args.model.fc = nn.Linear(feature_dim, args.num_classes).to(args.device)
-
-        elif model_str == "mobilenet_v2":
-            args.model = mobilenet_v2(pretrained=False, num_classes=args.num_classes).to(args.device)
-            
-            # args.model = mobilenet_v2(pretrained=True).to(args.device)
-            # feature_dim = list(args.model.fc.parameters())[0].shape[1]
-            # args.model.fc = nn.Linear(feature_dim, args.num_classes).to(args.device)
-            
-        elif model_str == "lstm":
-            args.model = LSTMNet(hidden_dim=emb_dim, vocab_size=vocab_size, num_classes=args.num_classes).to(args.device)
-
-        elif model_str == "bilstm":
-            args.model = BiLSTM_TextClassification(input_size=vocab_size, hidden_size=emb_dim, 
-                                                   output_size=args.num_classes, num_layers=1, 
-                                                   embedding_dropout=0, lstm_dropout=0, attention_dropout=0, 
-                                                   embedding_length=emb_dim).to(args.device)
-
-        elif model_str == "fastText":
-            args.model = fastText(hidden_dim=emb_dim, vocab_size=vocab_size, num_classes=args.num_classes).to(args.device)
-
-        elif model_str == "TextCNN":
-            args.model = TextCNN(hidden_dim=emb_dim, max_len=max_len, vocab_size=vocab_size, 
-                                 num_classes=args.num_classes).to(args.device)
-
-        elif model_str == "Transformer":
-            args.model = TransformerModel(ntoken=vocab_size, d_model=emb_dim, nhead=8, nlayers=2, 
-                                          num_classes=args.num_classes, max_len=max_len).to(args.device)
-        
-        elif model_str == "AmazonMLP":
-            args.model = AmazonMLP().to(args.device)
-
-        elif model_str == "harcnn":
-            if args.dataset == 'HAR':
-                args.model = HARCNN(9, dim_hidden=1664, num_classes=args.num_classes, conv_kernel_size=(1, 9), 
-                                    pool_kernel_size=(1, 2)).to(args.device)
-            elif args.dataset == 'PAMAP2':
-                args.model = HARCNN(9, dim_hidden=3712, num_classes=args.num_classes, conv_kernel_size=(1, 9), 
-                                    pool_kernel_size=(1, 2)).to(args.device)
-
-        else:
-            raise NotImplementedError
-
-        print(args.model)
-
-        # select algorithm
-        if args.algorithm == "FedAvg":
-            args.head = copy.deepcopy(args.model.fc)
-            args.model.fc = nn.Identity()
-            args.model = BaseHeadSplit(args.model, args.head)
-            server = FedAvg(args, i)
-
-        elif args.algorithm == "Local":
-            server = Local(args, i)
-
-        elif args.algorithm == "FedMTL":
-            server = FedMTL(args, i)
-
-        elif args.algorithm == "PerAvg":
-            server = PerAvg(args, i)
-
-        elif args.algorithm == "pFedMe":
-            server = pFedMe(args, i)
-
-        elif args.algorithm == "FedProx":
-            server = FedProx(args, i)
-
-        elif args.algorithm == "FedFomo":
-            server = FedFomo(args, i)
-
-        elif args.algorithm == "FedAMP":
-            server = FedAMP(args, i)
-
-        elif args.algorithm == "APFL":
-            server = APFL(args, i)
-
-        elif args.algorithm == "FedPer":
-            args.head = copy.deepcopy(args.model.fc)
-            args.model.fc = nn.Identity()
-            args.model = BaseHeadSplit(args.model, args.head)
-            server = FedPer(args, i)
-
-        elif args.algorithm == "Ditto":
-            server = Ditto(args, i)
-
-        elif args.algorithm == "FedRep":
-            args.head = copy.deepcopy(args.model.fc)
-            args.model.fc = nn.Identity()
-            args.model = BaseHeadSplit(args.model, args.head)
-            server = FedRep(args, i)
-
-        elif args.algorithm == "FedPHP":
-            args.head = copy.deepcopy(args.model.fc)
-            args.model.fc = nn.Identity()
-            args.model = BaseHeadSplit(args.model, args.head)
-            server = FedPHP(args, i)
-
-        elif args.algorithm == "FedBN":
-            server = FedBN(args, i)
-
-        elif args.algorithm == "FedROD":
-            args.head = copy.deepcopy(args.model.fc)
-            args.model.fc = nn.Identity()
-            args.model = BaseHeadSplit(args.model, args.head)
-            server = FedROD(args, i)
-
-        elif args.algorithm == "FedProto":
-            args.head = copy.deepcopy(args.model.fc)
-            args.model.fc = nn.Identity()
-            args.model = BaseHeadSplit(args.model, args.head)
-            server = FedProto(args, i)
-
-        elif args.algorithm == "FedDyn":
-            server = FedDyn(args, i)
-
-        elif args.algorithm == "MOON":
-            args.head = copy.deepcopy(args.model.fc)
-            args.model.fc = nn.Identity()
-            args.model = BaseHeadSplit(args.model, args.head)
-            server = MOON(args, i)
-
-        elif args.algorithm == "FedBABU":
-            args.head = copy.deepcopy(args.model.fc)
-            args.model.fc = nn.Identity()
-            args.model = BaseHeadSplit(args.model, args.head)
-            server = FedBABU(args, i)
-
-        elif args.algorithm == "APPLE":
-            server = APPLE(args, i)
-
-        elif args.algorithm == "FedGen":
-            args.head = copy.deepcopy(args.model.fc)
-            args.model.fc = nn.Identity()
-            args.model = BaseHeadSplit(args.model, args.head)
-            server = FedGen(args, i)
-
-        elif args.algorithm == "SCAFFOLD":
-            server = SCAFFOLD(args, i)
-
-        elif args.algorithm == "FedDistill":
-            server = FedDistill(args, i)
-
-        elif args.algorithm == "FedALA":
-            server = FedALA(args, i)
-
-        elif args.algorithm == "FedPAC":
-            args.head = copy.deepcopy(args.model.fc)
-            args.model.fc = nn.Identity()
-            args.model = BaseHeadSplit(args.model, args.head)
-            server = FedPAC(args, i)
-
-        elif args.algorithm == "LG-FedAvg":
-            args.head = copy.deepcopy(args.model.fc)
-            args.model.fc = nn.Identity()
-            args.model = BaseHeadSplit(args.model, args.head)
-            server = LG_FedAvg(args, i)
-
-        elif args.algorithm == "FedGC":
-            args.head = copy.deepcopy(args.model.fc)
-            args.model.fc = nn.Identity()
-            args.model = BaseHeadSplit(args.model, args.head)
-            server = FedGC(args, i)
-
-        elif args.algorithm == "FML":
-            server = FML(args, i)
-
-        elif args.algorithm == "FedKD":
-            args.head = copy.deepcopy(args.model.fc)
-            args.model.fc = nn.Identity()
-            args.model = BaseHeadSplit(args.model, args.head)
-            server = FedKD(args, i)
-
-        elif args.algorithm == "FedPCL":
-            args.model.fc = nn.Identity()
-            server = FedPCL(args, i)
-
-        elif args.algorithm == "FedCP":
-            args.head = copy.deepcopy(args.model.fc)
-            args.model.fc = nn.Identity()
-            args.model = BaseHeadSplit(args.model, args.head)
-            server = FedCP(args, i)
-
-        elif args.algorithm == "GPFL":
-            args.head = copy.deepcopy(args.model.fc)
-            args.model.fc = nn.Identity()
-            args.model = BaseHeadSplit(args.model, args.head)
-            server = GPFL(args, i)
-
-        elif args.algorithm == "FedNTD":
-            server = FedNTD(args, i)
-
-        elif args.algorithm == "FedGH":
-            args.head = copy.deepcopy(args.model.fc)
-            args.model.fc = nn.Identity()
-            args.model = BaseHeadSplit(args.model, args.head)
-            server = FedGH(args, i)
-
-        elif args.algorithm == "FedAvgDBE":
-            args.head = copy.deepcopy(args.model.fc)
-            args.model.fc = nn.Identity()
-            args.model = BaseHeadSplit(args.model, args.head)
-            server = FedAvgDBE(args, i)
-
-        elif args.algorithm == "FedAvgWithFedPredict":
-            args.head = copy.deepcopy(args.model.fc)
-            args.model.fc = nn.Identity()
-            args.model = BaseHeadSplit(args.model, args.head)
-            server = FedAvgWithFedPredict(args, i)
-            
-        else:
-            raise NotImplementedError
-
+        args.model = models
+        server = server(args, i)
         server.train()
 
         time_list.append(time.time()-start)
@@ -386,14 +397,16 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     # general
+    # parser.add_argument('-dts', "--datasets", action="append", type=str, default=['MNIST', 'Cifar10'])
+    parser.add_argument('-mds', "--models",  default=['dnn', 'cnn'])
     parser.add_argument('-go', "--goal", type=str, default="test", 
                         help="The goal for this experiment")
-    parser.add_argument('-dev', "--device", type=str, default="cuda",
+    parser.add_argument('-dev', "--device", type=str, default="cuda:0",
                         choices=["cpu", "cuda"])
     parser.add_argument('-did', "--device_id", type=str, default="0")
-    parser.add_argument('-data', "--dataset", type=str, default="MNIST")
+    parser.add_argument('-data', "--dataset", action="append")
     parser.add_argument('-nb', "--num_classes", type=int, default=10)
-    parser.add_argument('-m', "--model", type=str, default="cnn")
+    parser.add_argument('-m', "--model",  action="append")
     parser.add_argument('-lbs', "--batch_size", type=int, default=10)
     parser.add_argument('-lr', "--local_learning_rate", type=float, default=0.005,
                         help="Local learning rate")
@@ -434,7 +447,7 @@ if __name__ == "__main__":
                         help="The rate for slow clients when sending global model")
     parser.add_argument('-ts', "--time_select", type=bool, default=False,
                         help="Whether to group and select clients at each round according to time cost")
-    parser.add_argument('-tth', "--time_threthold", type=float, default=10000,
+    parser.add_argument('-tth', "--time_threthold", type=float, default=100000,
                         help="The threthold for droping slow clients")
     # pFedMe / PerAvg / FedProx / FedAMP / FedPHP / GPFL
     parser.add_argument('-bt', "--beta", type=float, default=0.0)
