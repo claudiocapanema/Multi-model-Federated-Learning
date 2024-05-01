@@ -1,4 +1,6 @@
-# PFLlib: Personalized Federated Learning Algorithm Library
+# Multi-model Federated Learning
+
+This project extends [PFLlib (Personalized Federated Learning Algorithm Library)](https://github.com/TsingZ0/PFLlib) to train multiple models simultaneously.
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPL_v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html) [![arXiv](https://img.shields.io/badge/arXiv-2312.04992-b31b1b.svg)](https://arxiv.org/abs/2312.04992)
 
@@ -117,7 +119,7 @@ For the ***real-world (or IoT)*** scenario, we also introduce **3** naturally se
 
 *If you need another data set, just write another code to download it and then use the utils.*
 
-### Examples for **MNIST**
+### Simulate multiple datasets
 - MNIST
     ```
     cd ./dataset
@@ -126,6 +128,12 @@ For the ***real-world (or IoT)*** scenario, we also introduce **3** naturally se
     # python generate_MNIST.py noniid - pat # for pathological noniid and unbalanced scenario
     python generate_MNIST.py noniid - dir # for practical noniid and unbalanced scenario
     # python generate_MNIST.py noniid - exdir # for Extended Dirichlet strategy 
+    ```
+  
+- CIFAR-10
+
+    ```
+    python generate_Cifar10.py noniid - dir
     ```
 
 The output of `python generate_MNIST.py noniid - dir`
@@ -246,7 +254,7 @@ Install [conda](https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_
 conda env create -f env_cuda_latest.yaml # You may need to downgrade the torch using pip to match the CUDA version
 ```
 
-## How to start simulating (examples for FedAvg)
+## How to start simulating (examples for Multi-model FedAvg)
 
 - Create proper environments (see [Environments](#environments)).
 
@@ -260,7 +268,7 @@ conda env create -f env_cuda_latest.yaml # You may need to downgrade the torch u
 - Run evaluation: 
     ```bash
     cd ./system
-    python main.py -data MNIST -m cnn -algo FedAvg -gr 2000 -did 0 # using the MNIST dataset, the FedAvg algorithm, and the 4-layer CNN model
+    python main.py -data MNIST -data Cifar10 -m dnn -m cnn -algo FedAvg -gr 2000 -did 0 # using the MNIST and Cifar-10 datasets, the FedAvg algorithm, and the one DNN and one CNN models
     ```
 
 **Note**: It is preferable to tune algorithm-specific hyper-parameters before using any algorithm on a new machine. 
@@ -286,42 +294,24 @@ It is easy to add new algorithms and datasets to this library.
 - The evaluation platform is also convenient for users to build a new platform for specific applications, such as our [FL-IoT](https://github.com/TsingZ0/FL-IoT) and [HtFL](https://github.com/TsingZ0/HtFL). 
 
 
-## Experimental results
-
-If you are interested in **the experimental results (e.g., the accuracy) of the above algorithms**, you can find some results in our accepted FL papers (i.e., [FedALA](https://github.com/TsingZ0/FedALA), [FedCP](https://github.com/TsingZ0/FedCP), [GPFL](https://github.com/TsingZ0/GPFL), and [DBE](https://github.com/TsingZ0/DBE)) listed as follows that also use this library. *Please note that this developing project may not be able to reproduce the results on these papers, since some basic settings may change due to the requests of the community. For example, we previously set `shuffle=False` in clientbase.py* 
-
+## Citing
+f FedPredict has been useful to you, please cite our [paper](https://ieeexplore.ieee.org/abstract/document/10257293). The BibTeX is presented as follows:
 ```
-@inproceedings{zhang2023fedala,
-  title={Fedala: Adaptive local aggregation for personalized federated learning},
-  author={Zhang, Jianqing and Hua, Yang and Wang, Hao and Song, Tao and Xue, Zhengui and Ma, Ruhui and Guan, Haibing},
-  booktitle={Proceedings of the AAAI Conference on Artificial Intelligence},
-  volume={37},
-  number={9},
-  pages={11237--11244},
-  year={2023}
-}
-
-@inproceedings{Zhang2023fedcp,
-  author = {Zhang, Jianqing and Hua, Yang and Wang, Hao and Song, Tao and Xue, Zhengui and Ma, Ruhui and Guan, Haibing},
-  title = {FedCP: Separating Feature Information for Personalized Federated Learning via Conditional Policy},
-  year = {2023},
-  booktitle = {Proceedings of the 29th ACM SIGKDD Conference on Knowledge Discovery and Data Mining}
-}
-
-@inproceedings{zhang2023gpfl,
-  title={GPFL: Simultaneously Learning Global and Personalized Feature Information for Personalized Federated Learning},
-  author={Zhang, Jianqing and Hua, Yang and Wang, Hao and Song, Tao and Xue, Zhengui and Ma, Ruhui and Cao, Jian and Guan, Haibing},
-  booktitle={Proceedings of the IEEE/CVF International Conference on Computer Vision},
-  pages={5041--5051},
-  year={2023}
-}
-
-@inproceedings{
-  zhang2023eliminating,
-  title={Eliminating Domain Bias for Federated Learning in Representation Space},
-  author={Jianqing Zhang and Yang Hua and Jian Cao and Hao Wang and Tao Song and Zhengui XUE and Ruhui Ma and Haibing Guan},
-  booktitle={Thirty-seventh Conference on Neural Information Processing Systems},
+@inproceedings{capanema2023fedpredict,
+  title={FedPredict: Combining Global and Local Parameters in the Prediction Step of Federated Learning},
+  author={Capanema, Cl{\'a}udio GS and de Souza, Allan M and Silva, Fabr{\'\i}cio A and Villas, Leandro A and Loureiro, Antonio AF},
+  booktitle={2023 19th International Conference on Distributed Computing in Smart Systems and the Internet of Things (DCOSS-IoT)},
+  pages={17--24},
   year={2023},
-  url={https://openreview.net/forum?id=nO5i1XdUS0}
+  doi={https://doi.org/10.1109/DCOSS-IoT58021.2023.00012},
+  organization={IEEE}
+}
+@inproceedings{capanema2024modular,
+  title={A Modular Plugin for Concept Drift in Federated Learning},
+  author={Capanema, Cl{\'a}udio GS and de Souza, Joahannes B D da Costa, Fabr{\'\i}cio A and Villas, Leandro A and Loureiro, Antonio AF Loureiro},
+  booktitle={2024 20th International Conference on Distributed Computing in Smart Systems and the Internet of Things (DCOSS-IoT)},
+  pubstate={inpress},
+  year={2024},
+  organization={IEEE}
 }
 ```
