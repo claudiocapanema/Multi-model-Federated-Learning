@@ -295,7 +295,7 @@ It is easy to add new algorithms and datasets to this library.
 
 
 ## Citing
-f FedPredict has been useful to you, please cite our [paper](https://ieeexplore.ieee.org/abstract/document/10257293). The BibTeX is presented as follows:
+f FedPredict has been useful to you, please cite our papers: [IEEE DCOSS-IoT 2023](https://ieeexplore.ieee.org/abstract/document/10257293) and IEEE DOCSS-IoT 2024(to appear). The BibTeX is presented as follows:
 ```
 @inproceedings{capanema2023fedpredict,
   title={FedPredict: Combining Global and Local Parameters in the Prediction Step of Federated Learning},
