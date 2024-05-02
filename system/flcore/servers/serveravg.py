@@ -76,7 +76,7 @@ class FedAvg(Server):
         print(sum(self.Budget[1:])/len(self.Budget[1:]))
 
         for m in range(self.M):
-            self.save_results()
+            self.save_results(m)
             self.save_global_model(m)
 
             if self.num_new_clients > 0:

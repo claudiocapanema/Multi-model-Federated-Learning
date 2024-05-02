@@ -18,7 +18,7 @@
 import torch
 import os
 import numpy as np
-import h5py
+import csv
 import copy
 import time
 import random
@@ -225,7 +225,7 @@ class Server(object):
         #         self.global_model[m] = client_model
         # else:
         for server_param, client_param in zip(self.global_model[m].parameters(), client_model.parameters()):
-            print(": ", server_param.data.shape, client_param.data.clone().shape)
+            # print(": ", server_param.data.shape, client_param.data.clone().shape)
             server_param.data += client_param.data.clone() * w
 
     def save_global_model(self, m):
@@ -254,13 +254,17 @@ class Server(object):
 
         if (len(self.rs_test_acc)):
             algo = algo + "_" + self.goal + "_" + str(self.times)
-            file_path = result_path + "{}.h5".format(algo)
+            file_path = result_path + "{}.csv".format(algo)
+            header = ["Accuracy", "Loss"]
+            print(self.rs_test_acc)
+            print(self.rs_test_auc)
+            print(self.rs_train_loss)
+            data = [[i, j] for i,j in zip(self.rs_test_acc, self.rs_train_loss)]
             print("File path: " + file_path)
 
-            with h5py.File(file_path, 'w') as hf:
-                hf.create_dataset('rs_test_acc', data=self.rs_test_acc)
-                hf.create_dataset('rs_test_auc', data=self.rs_test_auc)
-                hf.create_dataset('rs_train_loss', data=self.rs_train_loss)
+            print("me: ", self.rs_test_acc)
+            self._write_header(file_path, header=header)
+            self._write_outputs(file_path, data=data)
 
     def save_item(self, item, item_name):
         if not os.path.exists(self.save_folder_name):
@@ -448,3 +452,22 @@ class Server(object):
         ids = [c.id for c in self.new_clients]
 
         return ids, num_samples, tot_correct, tot_auc
+
+    def _write_header(self, filename, header):
+
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        with open(filename, 'w') as server_log_file:
+            writer = csv.writer(server_log_file)
+            writer.writerow(header)
+
+    def _write_outputs(self, filename, data, mode='a'):
+
+        for i in range(len(data)):
+            for j in range(len(data[i])):
+                element = data[i][j]
+                if type(element) == float:
+                    element = round(element, 6)
+                    data[i][j] = element
+        with open(filename, mode) as server_log_file:
+            writer = csv.writer(server_log_file)
+            writer.writerows(data)
