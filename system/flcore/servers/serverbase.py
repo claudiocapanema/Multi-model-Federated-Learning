@@ -72,9 +72,12 @@ class Server(object):
         self.uploaded_ids = []
         self.uploaded_models = []
 
+        self.train_metrics_names = ["Accuracy", "Loss", "AUC"]
+        self.test_metrics_names = ["Accuracy", "Loss", "AUC", "Balanced accuracy", "Micro f1-score", "Weighted f1-score", "Macro f1-score", "Round", "Fraction fit"]
         self.rs_test_acc = []
         self.rs_test_auc = []
         self.rs_train_loss = []
+        self.results_test_metrics = {m: {metric: [] for metric in self.test_metrics_names} for m in range(self.M)}
 
         self.times = times
         self.eval_gap = args.eval_gap
@@ -255,11 +258,24 @@ class Server(object):
         if (len(self.rs_test_acc)):
             algo = algo + "_" + self.goal + "_" + str(self.times)
             file_path = result_path + "{}.csv".format(algo)
-            header = ["Accuracy", "Loss"]
+            header = self.test_metrics_names
             print(self.rs_test_acc)
             print(self.rs_test_auc)
             print(self.rs_train_loss)
-            data = [[i, j] for i,j in zip(self.rs_test_acc, self.rs_train_loss)]
+            list_of_metrics = []
+            for me in self.results_test_metrics[m]:
+                print(me, len(self.results_test_metrics[m][me]))
+                length = len(self.results_test_metrics[m][me])
+                list_of_metrics.append(self.results_test_metrics[m][me])
+
+            data = []
+            for i in range(length):
+                row = []
+                for j in range(len(list_of_metrics)):
+                    row.append(list_of_metrics[j][i])
+
+                data.append(row)
+
             print("File path: " + file_path)
 
             print("me: ", self.rs_test_acc)
@@ -277,20 +293,43 @@ class Server(object):
     def test_metrics(self, m):
         if self.eval_new_clients and self.num_new_clients > 0:
             self.fine_tuning_new_clients()
-            return self.test_metrics_new_clients(m)
+            test_clients = self.new_clients
+        else:
+            test_clients = self.clients
 
         num_samples = []
-        tot_correct = []
-        tot_auc = []
-        for c in self.clients:
-            ct, ns, auc = c.test_metrics(m)
-            tot_correct.append(ct*1.0)
-            tot_auc.append(auc*ns)
-            num_samples.append(ns)
+        acc = []
+        loss = []
+        auc = []
+        balanced_acc = []
+        micro_fscore = []
+        weighted_fscore = []
+        macro_fscore = []
+        for c in test_clients:
+            test_acc, test_loss, test_num, test_auc, test_balanced_acc, test_micro_fscore, test_macro_fscore, test_weighted_fscore = c.test_metrics(m)
+            acc.append(test_acc*1.0)
+            auc.append(test_auc*test_num)
+            num_samples.append(test_num)
+            loss.append(test_loss)
+            balanced_acc.append(test_balanced_acc*1.0)
+            micro_fscore.append(test_micro_fscore*1.0)
+            weighted_fscore.append(test_weighted_fscore*1.0)
+            macro_fscore.append(test_macro_fscore*1.0)
 
-        ids = [c.id for c in self.clients]
+        ids = [c.id for c in test_clients]
 
-        return ids, num_samples, tot_correct, tot_auc
+        decimals = 5
+        acc = round(sum(acc) / sum(num_samples), decimals)
+        auc = round(sum(auc) / sum(num_samples), decimals)
+        loss = round(sum(loss) / sum(num_samples), decimals)
+        balanced_acc = round(sum(balanced_acc) / sum(num_samples), decimals)
+        micro_fscore = round(sum(micro_fscore) / sum(num_samples), decimals)
+        weighted_fscore = round(sum(weighted_fscore) / sum(num_samples), decimals)
+        macro_fscore = round(sum(macro_fscore) / sum(num_samples), decimals)
+
+        return {'ids': ids, 'num_samples': num_samples, 'Accuracy': acc, 'AUC': auc,
+                "Loss": loss, "Balanced accuracy": balanced_acc, "Micro f1-score": micro_fscore,
+                "Weighted f1-score": weighted_fscore, "Macro f1-score": macro_fscore}
 
     def train_metrics(self, m):
         if self.eval_new_clients and self.num_new_clients > 0:
@@ -308,15 +347,26 @@ class Server(object):
         return ids, num_samples, losses
 
     # evaluate selected clients
-    def evaluate(self, m, acc=None, loss=None):
-        stats = self.test_metrics(m)
+    def evaluate(self, m, t, acc=None, loss=None):
+        test_metrics = self.test_metrics(m)
+        test_acc = test_metrics['Accuracy']
+        test_loss = test_metrics['Loss']
+        test_auc = test_metrics['AUC']
         stats_train = self.train_metrics(m)
 
-        test_acc = sum(stats[2])*1.0 / sum(stats[1])
-        test_auc = sum(stats[3])*1.0 / sum(stats[1])
+        # test_acc = sum(stats[2])*1.0 / sum(stats[1])
+        # test_auc = sum(stats[3])*1.0 / sum(stats[1])
         train_loss = sum(stats_train[2])*1.0 / sum(stats_train[1])
-        accs = [a / n for a, n in zip(stats[2], stats[1])]
-        aucs = [a / n for a, n in zip(stats[3], stats[1])]
+        # accs = [a / n for a, n in zip(stats[2], stats[1])]
+        # aucs = [a / n for a, n in zip(stats[3], stats[1])]
+
+        for metric in test_metrics:
+            if metric in ['ids', 'num_samples']:
+                continue
+            self.results_test_metrics[m][metric].append(test_metrics[metric])
+        self.results_test_metrics[m]['Round'].append(t)
+        self.results_test_metrics[m]['Fraction fit'].append(self.join_ratio)
+
         
         if acc == None:
             self.rs_test_acc.append(test_acc)
@@ -333,8 +383,8 @@ class Server(object):
         print("Averaged Test Accurancy: {:.4f}".format(test_acc))
         print("Averaged Test AUC: {:.4f}".format(test_auc))
         # self.print_(test_acc, train_acc, train_loss)
-        print("Std Test Accurancy: {:.4f}".format(np.std(accs)))
-        print("Std Test AUC: {:.4f}".format(np.std(aucs)))
+        print("Std Test Accurancy: {:.4f}".format(np.std(test_acc)))
+        print("Std Test AUC: {:.4f}".format(np.std(test_auc)))
 
     def print_(self, test_acc, test_auc, train_loss):
         print("Average Test Accurancy: {:.4f}".format(test_acc))
@@ -439,19 +489,19 @@ class Server(object):
                     opt.step()
 
     # evaluating on new clients
-    def test_metrics_new_clients(self, m):
-        num_samples = []
-        tot_correct = []
-        tot_auc = []
-        for c in self.new_clients:
-            ct, ns, auc = c.test_metrics(m)
-            tot_correct.append(ct*1.0)
-            tot_auc.append(auc*ns)
-            num_samples.append(ns)
-
-        ids = [c.id for c in self.new_clients]
-
-        return ids, num_samples, tot_correct, tot_auc
+    # def test_metrics_new_clients(self, m):
+    #     num_samples = []
+    #     tot_correct = []
+    #     tot_auc = []
+    #     for c in self.new_clients:
+    #         ct, ns, auc = c.test_metrics(m)
+    #         tot_correct.append(ct*1.0)
+    #         tot_auc.append(auc*ns)
+    #         num_samples.append(ns)
+    #
+    #     ids = [c.id for c in self.new_clients]
+    #
+    #     return ids, num_samples, tot_correct, tot_auc
 
     def _write_header(self, filename, header):
 

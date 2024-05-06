@@ -31,53 +31,15 @@ class ClientAvgWithFedPredict(clientAVG):
         super().__init__(args, id, train_samples, test_samples, **kwargs)
         self.last_training_round = 0
 
-    def train(self, t):
+    def train(self, m, t):
         self.last_training_round = t
-        return super().train()
+        return super().train(m)
 
 
-    def test_metrics(self, global_model, t, T):
-        testloaderfull = self.load_test_data()
-        # self.model = self.load_model('model')
-        # self.model.to(self.device)
+    def test_metrics(self, m, global_model, t, T):
         nt = t - self.last_training_round
-        combinel_model = fedpredict_client_torch(local_model=self.model, global_model=global_model,
+        combinel_model = fedpredict_client_torch(local_model=self.model[m], global_model=global_model,
                                   t=t, T=100, nt=nt)
-        self.model = combinel_model
-        self.model.eval()
+        self.model[m] = combinel_model
 
-        test_acc = 0
-        test_num = 0
-        y_prob = []
-        y_true = []
-
-        with torch.no_grad():
-            for x, y in testloaderfull:
-                if type(x) == type([]):
-                    x[0] = x[0].to(self.device)
-                else:
-                    x = x.to(self.device)
-                y = y.to(self.device)
-                output = self.model(x)
-
-                test_acc += (torch.sum(torch.argmax(output, dim=1) == y)).item()
-                test_num += y.shape[0]
-
-                y_prob.append(output.detach().cpu().numpy())
-                nc = self.num_classes
-                if self.num_classes == 2:
-                    nc += 1
-                lb = label_binarize(y.detach().cpu().numpy(), classes=np.arange(nc))
-                if self.num_classes == 2:
-                    lb = lb[:, :2]
-                y_true.append(lb)
-
-        # self.model.cpu()
-        # self.save_model(self.model, 'model')
-
-        y_prob = np.concatenate(y_prob, axis=0)
-        y_true = np.concatenate(y_true, axis=0)
-
-        auc = metrics.roc_auc_score(y_true, y_prob, average='micro')
-
-        return test_acc, test_num, auc
+        return super().test_metrics(m=m)

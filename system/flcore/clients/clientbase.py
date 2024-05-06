@@ -117,6 +117,7 @@ class Client(object):
         self.model[m].eval()
 
         test_acc = 0
+        test_loss = 0
         test_num = 0
         y_prob = []
         y_true = []
@@ -129,6 +130,8 @@ class Client(object):
                     x = x.to(self.device)
                 y = y.to(self.device)
                 output = self.model[m](x)
+                loss = self.loss(output, y)
+                test_loss += loss.item()
 
                 test_acc += (torch.sum(torch.argmax(output, dim=1) == y)).item()
                 test_num += y.shape[0]
@@ -148,9 +151,26 @@ class Client(object):
         y_prob = np.concatenate(y_prob, axis=0)
         y_true = np.concatenate(y_true, axis=0)
 
-        auc = metrics.roc_auc_score(y_true, y_prob, average='micro')
+
+
+        test_auc = metrics.roc_auc_score(y_true, y_prob, average='micro')
+
+        y_prob = y_prob.argmax(axis=1)
+        y_true = y_true.argmax(axis=1)
+
+        test_balanced_acc = 0
+        test_micro_fscore = metrics.f1_score(y_true, y_prob, average='micro')
+        test_macro_fscore = metrics.f1_score(y_true, y_prob, average='macro')
+        test_weighted_fscore = metrics.f1_score(y_true, y_prob, average='weighted')
         
-        return test_acc, test_num, auc
+        return (test_acc,
+                test_loss,
+                test_num,
+                test_auc,
+                test_balanced_acc,
+                test_micro_fscore,
+                test_macro_fscore,
+                test_weighted_fscore)
 
     def train_metrics(self, m):
         trainloader = self.load_train_data(m)

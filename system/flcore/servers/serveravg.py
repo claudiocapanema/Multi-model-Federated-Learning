@@ -37,7 +37,7 @@ class FedAvg(Server):
 
 
     def train(self):
-        for i in range(self.global_rounds+1):
+        for i in range(1, self.global_rounds+1):
             s_t = time.time()
             self.selected_clients = self.select_clients()
             self.send_models()
@@ -45,7 +45,7 @@ class FedAvg(Server):
                 if i%self.eval_gap == 0:
                     print(f"\n-------------Round number: {i}-------------")
                     print("\nEvaluate global model")
-                    self.evaluate(m)
+                    self.evaluate(m, t=i)
 
 
                     clients_m = self.selected_clients[m]
@@ -84,4 +84,4 @@ class FedAvg(Server):
                 self.set_new_clients(clientAVG)
                 print(f"\n-------------Fine tuning round-------------")
                 print("\nEvaluate new clients")
-                self.evaluate(m)
+                self.evaluate(m, t=i)
