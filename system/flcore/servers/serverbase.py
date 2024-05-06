@@ -210,10 +210,8 @@ class Server(object):
 
         for m in range(len(self.uploaded_models)):
             self.global_model[m] = copy.deepcopy(self.uploaded_models[m][0])
-            print("antes: ", self.global_model[m])
             for param in self.global_model[m].parameters():
                 param.data.zero_()
-            print("moo: ", self.uploaded_models[m])
             parameters_tuple = []
             for w, client_model in zip(self.uploaded_weights[m], self.uploaded_models[m]):
                 self.add_parameters(w, client_model, m)
