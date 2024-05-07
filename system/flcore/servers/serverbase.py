@@ -125,20 +125,16 @@ class Server(object):
         self.send_slow_clients = self.select_slow_clients(
             self.send_slow_rate)
 
-    def select_clients(self):
+    def select_clients(self, t):
         if self.random_join_ratio:
             self.current_num_join_clients = np.random.choice(range(self.num_join_clients, self.num_clients+1), 1, replace=False)[0]
         else:
             self.current_num_join_clients = self.num_join_clients
+        np.random.seed(t)
         selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
 
         n = len(selected_clients) // self.M
         selected_clients = [selected_clients[i:i+n] for i in range(0, len(selected_clients), n)]
-
-        # print(np.array(selected_clients).shape)
-        # print(np.array(selected_clients)[0])
-        # print(n)
-        # exit()
 
         return selected_clients
 
@@ -305,14 +301,17 @@ class Server(object):
         macro_fscore = []
         for c in test_clients:
             test_acc, test_loss, test_num, test_auc, test_balanced_acc, test_micro_fscore, test_macro_fscore, test_weighted_fscore = c.test_metrics(m)
-            acc.append(test_acc*1.0)
+            acc.append(test_acc*test_num)
             auc.append(test_auc*test_num)
             num_samples.append(test_num)
-            loss.append(test_loss)
-            balanced_acc.append(test_balanced_acc*1.0)
-            micro_fscore.append(test_micro_fscore*1.0)
-            weighted_fscore.append(test_weighted_fscore*1.0)
-            macro_fscore.append(test_macro_fscore*1.0)
+            loss.append(test_loss*test_num)
+            balanced_acc.append(test_balanced_acc*test_num)
+            micro_fscore.append(test_micro_fscore*test_num)
+            weighted_fscore.append(test_weighted_fscore*test_num)
+            macro_fscore.append(test_macro_fscore*test_num)
+
+            # print(test_num)
+            # exit()
 
         ids = [c.id for c in test_clients]
 

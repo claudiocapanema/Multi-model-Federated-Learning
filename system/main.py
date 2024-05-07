@@ -26,7 +26,7 @@ import numpy as np
 import torchvision
 import logging
 
-from flcore.servers.serveravg import FedAvg
+from flcore.servers.serveravg import MultiFedAvg
 from flcore.servers.serverpFedMe import pFedMe
 from flcore.servers.serverperavg import PerAvg
 from flcore.servers.serverprox import FedProx
@@ -61,7 +61,7 @@ from flcore.servers.servergpfl import GPFL
 from flcore.servers.serverntd import FedNTD
 from flcore.servers.servergh import FedGH
 from flcore.servers.serveravgDBE import FedAvgDBE
-from flcore.servers.serveravg_with_fedpredict import FedAvgWithFedPredict
+from flcore.servers.serveravg_with_fedpredict import MultiFedAvgWithFedPredict
 
 from flcore.trainmodel.models import *
 
@@ -210,7 +210,7 @@ def run(args):
                 head = copy.deepcopy(model.fc)
                 model.fc = nn.Identity()
                 model = BaseHeadSplit(model, head)
-                server = FedAvg
+                server = MultiFedAvg
 
             elif args.algorithm == "Local":
                 server = Local
@@ -367,7 +367,7 @@ def run(args):
                 head = copy.deepcopy(model.fc)
                 model.fc = nn.Identity()
                 model = BaseHeadSplit(model, head)
-                server = FedAvgWithFedPredict
+                server = MultiFedAvgWithFedPredict
 
             else:
                 print(args.algorithm)

@@ -39,7 +39,7 @@ class ClientAvgWithFedPredict(clientAVG):
     def test_metrics(self, m, global_model, t, T):
         nt = t - self.last_training_round
         combinel_model = fedpredict_client_torch(local_model=self.model[m], global_model=global_model,
-                                  t=t, T=100, nt=nt)
+                                  t=t, T=10, nt=nt)
         self.model[m] = combinel_model
 
         return super().test_metrics(m=m)

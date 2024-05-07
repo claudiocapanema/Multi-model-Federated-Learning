@@ -21,7 +21,7 @@ from flcore.servers.serverbase import Server
 from threading import Thread
 
 
-class FedAvg(Server):
+class MultiFedAvg(Server):
     def __init__(self, args, times):
         super().__init__(args, times)
 
@@ -37,15 +37,15 @@ class FedAvg(Server):
 
 
     def train(self):
-        for i in range(1, self.global_rounds+1):
+        for t in range(1, self.global_rounds+1):
             s_t = time.time()
-            self.selected_clients = self.select_clients()
+            self.selected_clients = self.select_clients(t)
             self.send_models()
             for m in range(len(self.selected_clients)):
-                if i%self.eval_gap == 0:
-                    print(f"\n-------------Round number: {i}-------------")
+                if t%self.eval_gap == 0:
+                    print(f"\n-------------Round number: {t}-------------")
                     print("\nEvaluate global model")
-                    self.evaluate(m, t=i)
+                    self.evaluate(m, t=t)
 
 
                     clients_m = self.selected_clients[m]
@@ -58,8 +58,8 @@ class FedAvg(Server):
             # [t.join() for t in threads]
 
             self.receive_models()
-            if self.dlg_eval and i%self.dlg_gap == 0:
-                self.call_dlg(i)
+            if self.dlg_eval and t%self.dlg_gap == 0:
+                self.call_dlg(t)
             self.aggregate_parameters()
 
             self.Budget.append(time.time() - s_t)
@@ -84,4 +84,4 @@ class FedAvg(Server):
                 self.set_new_clients(clientAVG)
                 print(f"\n-------------Fine tuning round-------------")
                 print("\nEvaluate new clients")
-                self.evaluate(m, t=i)
+                self.evaluate(m, t=t)

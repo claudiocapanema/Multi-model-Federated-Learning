@@ -21,7 +21,7 @@ from flcore.servers.serverbase import Server
 from threading import Thread
 
 
-class FedAvgWithFedPredict(Server):
+class MultiFedAvgWithFedPredict(Server):
     def __init__(self, args, times):
         super().__init__(args, times)
 
@@ -37,19 +37,19 @@ class FedAvgWithFedPredict(Server):
         self.Budget = []
 
     def train(self):
-        for i in range(1, self.global_rounds + 1):
+        for t in range(1, self.global_rounds + 1):
             s_t = time.time()
-            self.selected_clients = self.select_clients()
+            self.selected_clients = self.select_clients(t)
             self.send_models()
             for m in range(len(self.selected_clients)):
-                if i % self.eval_gap == 0:
-                    print(f"\n-------------Round number: {i}-------------")
+                if t % self.eval_gap == 0:
+                    print(f"\n-------------Round number: {t}-------------")
                     print("\nEvaluate global model")
-                    self.evaluate(m, t=i)
+                    self.evaluate(m, t=t)
 
                     clients_m = self.selected_clients[m]
                     for client in clients_m:
-                        client.train(m, i)
+                        client.train(m, t)
 
             # threads = [Thread(target=client.train)
             #            for client in self.selected_clients]
@@ -57,8 +57,8 @@ class FedAvgWithFedPredict(Server):
             # [t.join() for t in threads]
 
             self.receive_models()
-            if self.dlg_eval and i % self.dlg_gap == 0:
-                self.call_dlg(i)
+            if self.dlg_eval and t % self.dlg_gap == 0:
+                self.call_dlg(t)
             self.aggregate_parameters()
 
             self.Budget.append(time.time() - s_t)
@@ -83,7 +83,7 @@ class FedAvgWithFedPredict(Server):
                 self.set_new_clients(ClientAvgWithFedPredict)
                 print(f"\n-------------Fine tuning round-------------")
                 print("\nEvaluate new clients")
-                self.evaluate(m, t=i)
+                self.evaluate(m, t=t)
 
     def test_metrics(self, m):
         if self.eval_new_clients and self.num_new_clients > 0:
@@ -101,14 +101,14 @@ class FedAvgWithFedPredict(Server):
         macro_fscore = []
         for c in test_clients:
             test_acc, test_loss, test_num, test_auc, test_balanced_acc, test_micro_fscore, test_macro_fscore, test_weighted_fscore = c.test_metrics(m=m, global_model=self.global_model[m], t=self.current_round, T=self.global_rounds)
-            acc.append(test_acc * 1.0)
+            acc.append(test_acc * test_num)
             auc.append(test_auc * test_num)
             num_samples.append(test_num)
-            loss.append(test_loss)
-            balanced_acc.append(test_balanced_acc * 1.0)
-            micro_fscore.append(test_micro_fscore * 1.0)
-            weighted_fscore.append(test_weighted_fscore * 1.0)
-            macro_fscore.append(test_macro_fscore * 1.0)
+            loss.append(test_loss * test_num)
+            balanced_acc.append(test_balanced_acc * test_num)
+            micro_fscore.append(test_micro_fscore * test_num)
+            weighted_fscore.append(test_weighted_fscore * test_num)
+            macro_fscore.append(test_macro_fscore * test_num)
 
         ids = [c.id for c in test_clients]
 
