@@ -16,6 +16,7 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 import time
+import numpy as np
 from flcore.clients.clientavg import clientAVG
 from flcore.servers.serverbase import Server
 from threading import Thread
@@ -40,17 +41,16 @@ class MultiFedAvg(Server):
         for t in range(1, self.global_rounds+1):
             s_t = time.time()
             self.selected_clients = self.select_clients(t)
-            self.send_models()
+            # self.send_models()
+            print(self.selected_clients)
             for m in range(len(self.selected_clients)):
                 if t%self.eval_gap == 0:
                     print(f"\n-------------Round number: {t}-------------")
                     print("\nEvaluate global model")
                     self.evaluate(m, t=t)
 
-
-                    clients_m = self.selected_clients[m]
-                    for client in clients_m:
-                        client.train(m)
+                for i in range(len(self.selected_clients[m])):
+                    self.clients[self.selected_clients[m][i]].train(m, self.global_model[m])
 
             # threads = [Thread(target=client.train)
             #            for client in self.selected_clients]

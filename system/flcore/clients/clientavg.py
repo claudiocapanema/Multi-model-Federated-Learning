@@ -27,9 +27,10 @@ class clientAVG(Client):
     def __init__(self, args, id, train_samples, test_samples, **kwargs):
         super().__init__(args, id, train_samples, test_samples, **kwargs)
 
-    def train(self, m):
+    def train(self, m, global_model):
         trainloader = self.load_train_data(m)
-        # self.model.to(self.device)
+        self.set_parameters(m, global_model)
+        self.model[m].to(self.device)
         self.model[m].train()
 
         # differential privacy

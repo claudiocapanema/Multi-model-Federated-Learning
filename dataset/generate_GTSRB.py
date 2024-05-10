@@ -11,11 +11,12 @@ from utils.dataset_utils import check, separate_data, split_data, save_file
 random.seed(1)
 np.random.seed(1)
 num_clients = 20
-dir_path = "GTSRB/"
+alpha = 0.1
+dir_path = "GTSRB/" + "clients_" + str(num_clients) + "/alpha_" + str(alpha) + "/"
 
 
 # Allocate data to users
-def generate_dataset(dir_path, num_clients, niid, balance, partition):
+def generate_dataset(dir_path, num_clients, niid, balance, partition, alpha):
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
         
@@ -57,7 +58,7 @@ def generate_dataset(dir_path, num_clients, niid, balance, partition):
     print(f'Number of classes: {num_classes}')
 
     X, y, statistic = separate_data((dataset_image, dataset_label), num_clients, num_classes, 
-                                    niid, balance, partition, class_per_client=4)
+                                    niid, balance, partition, class_per_client=4, alpha=alpha)
     train_data, test_data = split_data(X, y)
     save_file(config_path, train_path, test_path, train_data, test_data, num_clients, num_classes, 
         statistic, niid, balance, partition)
@@ -68,4 +69,4 @@ if __name__ == "__main__":
     balance = True if sys.argv[2] == "balance" else False
     partition = sys.argv[3] if sys.argv[3] != "-" else None
 
-    generate_dataset(dir_path, num_clients, niid, balance, partition)
+    generate_dataset(dir_path, num_clients, niid, balance, partition, alpha)

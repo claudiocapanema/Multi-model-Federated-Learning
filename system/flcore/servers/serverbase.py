@@ -30,11 +30,44 @@ from typing import List, Tuple
 
 import numpy as np
 
+from torch.nn.parameter import Parameter
+
 import numpy.typing as npt
+
+from io import BytesIO
+from dataclasses import dataclass
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 NDArray = npt.NDArray[Any]
 NDArrays = List[NDArray]
+
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
+import numpy.typing as npt
+
+NDArray = npt.NDArray[Any]
+NDArrays = List[NDArray]
+
+@dataclass
+class Parameters:
+    """Model parameters."""
+
+    tensors: List[bytes]
+    tensor_type: str
+
+def ndarray_to_bytes(ndarray: NDArray) -> bytes:
+    """Serialize NumPy ndarray to bytes."""
+    bytes_io = BytesIO()
+    # WARNING: NEVER set allow_pickle to true.
+    # Reason: loading pickled data can execute arbitrary code
+    # Source: https://numpy.org/doc/stable/reference/generated/numpy.save.html
+    np.save(bytes_io, ndarray, allow_pickle=False)  # type: ignore
+    return bytes_io.getvalue()
+
+def ndarrays_to_parameters(ndarrays: NDArrays) -> Parameters:
+    """Convert NumPy ndarrays to parameters object."""
+    tensors = [ndarray_to_bytes(ndarray) for ndarray in ndarrays]
+    return Parameters(tensors=tensors, tensor_type="numpy.ndarray")
 
 
 class Server(object):
@@ -43,7 +76,7 @@ class Server(object):
         self.args = args
         self.device = args.device
         self.dataset = args.dataset
-        self.num_classes = args.num_classes
+        # self.num_classes = args.num_classes
         self.global_rounds = args.global_rounds
         self.local_epochs = args.local_epochs
         self.batch_size = args.batch_size
@@ -51,6 +84,7 @@ class Server(object):
         self.M = len(self.dataset)
         self.global_model = copy.deepcopy(args.model)
         self.num_clients = args.num_clients
+        self.alpha = args.alpha
         self.join_ratio = args.join_ratio
         self.random_join_ratio = args.random_join_ratio
         self.num_join_clients = int(self.num_clients * self.join_ratio)
@@ -99,8 +133,8 @@ class Server(object):
             train_data = []
             test_data = []
             for m in range(self.M):
-                train_data.append(len(read_client_data(self.dataset[m], i, is_train=True)))
-                test_data.append(len(read_client_data(self.dataset[m], i, is_train=False)))
+                train_data.append(len(read_client_data(self.dataset[m], i, args=self.args, is_train=True)))
+                test_data.append(len(read_client_data(self.dataset[m], i, args=self.args, is_train=False)))
             client = clientObj(self.args,
                             id=i,
                             train_samples=train_data,
@@ -132,22 +166,24 @@ class Server(object):
             self.current_num_join_clients = self.num_join_clients
         np.random.seed(t)
         selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
+        selected_clients = [i.id for i in selected_clients]
 
         n = len(selected_clients) // self.M
-        selected_clients = [selected_clients[i:i+n] for i in range(0, len(selected_clients), n)]
+        selected_clients = np.array_split(selected_clients, self.M)
+        # selected_clients = [selected_clients[i:i+n] for i in range(0, len(selected_clients), n)]
 
         return selected_clients
 
     def send_models(self):
         assert (len(self.clients) > 0)
 
-        for client in self.clients:
+        for i in range(len(self.selected_clients)):
             start_time = time.time()
             
-            client.set_parameters_all_models(self.global_model)
+            self.clients[i].set_parameters_all_models(self.global_model)
 
-            client.send_time_cost['num_rounds'] += 1
-            client.send_time_cost['total_cost'] += 2 * (time.time() - start_time)
+            self.clients[i].send_time_cost['num_rounds'] += 1
+            self.clients[i].send_time_cost['total_cost'] += 2 * (time.time() - start_time)
 
     def receive_models(self):
         assert (len(self.selected_clients) > 0)
@@ -166,7 +202,8 @@ class Server(object):
             m_uploaded_ids = []
             m_uploaded_weights = []
             m_uploaded_models = []
-            for client in active_clients_m:
+            for client_id in active_clients_m:
+                client = self.clients[client_id]
                 try:
                     client_time_cost = client.train_time_cost['total_cost'] / client.train_time_cost['num_rounds'] + \
                             client.send_time_cost['total_cost'] / client.send_time_cost['num_rounds']
@@ -180,9 +217,13 @@ class Server(object):
             for i, w in enumerate(m_uploaded_weights):
                 m_uploaded_weights[i] = w / tot_samples
 
+            print("modelo: ", m, " tam: ", len(m_uploaded_models))
+
             self.uploaded_ids.append(copy.deepcopy(m_uploaded_ids))
             self.uploaded_weights.append(copy.deepcopy(m_uploaded_weights))
             self.uploaded_models.append(copy.deepcopy(m_uploaded_models))
+
+        # exit()
 
     def aggregate(self, results: List[Tuple[NDArrays, float]]) -> NDArrays:
         """Compute weighted average."""
@@ -191,7 +232,7 @@ class Server(object):
 
         # Create a list of weights, each multiplied by the related number of examples
         weighted_weights = [
-            [layer.parameters() * num_examples for layer in weights] for weights, num_examples in results
+            [layer.detach().cpu().numpy() * num_examples for layer in weights.parameters()] for weights, num_examples in results
         ]
 
         # Compute average weights of each layer
@@ -199,21 +240,32 @@ class Server(object):
             reduce(np.add, layer_updates) / num_examples_total
             for layer_updates in zip(*weighted_weights)
         ]
+
+        weights_prime = [Parameter(torch.Tensor(i.tolist())) for i in weights_prime]
+
         return weights_prime
 
     def aggregate_parameters(self):
+        print("agr: ", (len(self.uploaded_models) > 0))
         assert (len(self.uploaded_models) > 0)
 
         for m in range(len(self.uploaded_models)):
-            self.global_model[m] = copy.deepcopy(self.uploaded_models[m][0])
-            for param in self.global_model[m].parameters():
-                param.data.zero_()
+            # self.global_model[m] = copy.deepcopy(self.uploaded_models[m][0])
+            # for param in self.global_model[m].parameters():
+            #     param.data.zero_()
             parameters_tuple = []
             for w, client_model in zip(self.uploaded_weights[m], self.uploaded_models[m]):
-                self.add_parameters(w, client_model, m)
-                # parameters_tuple.append((client_model, w))
+                # self.add_parameters(w, client_model, m)
+                parameters_tuple.append((client_model, w))
 
-            # self.global_model[m] = self.aggregate(parameters_tuple)
+            agg_parameters = self.aggregate(parameters_tuple)
+
+            for server_param, client_param in zip(self.global_model[m].parameters(), agg_parameters):
+                # print(": ", server_param.data.shape, client_param.data.clone().shape)
+                server_param.data = client_param.data.clone()
+
+        # print("agr f")
+        # exit()
 
 
     def add_parameters(self, w, client_model, m):
@@ -245,7 +297,7 @@ class Server(object):
         
     def save_results(self, m):
         algo = self.dataset[m] + "_" + self.algorithm
-        result_path = "../results/"
+        result_path = """../results/clients_{}/alpha_{}/""".format(self.num_clients, self.alpha)
         if not os.path.exists(result_path):
             os.makedirs(result_path)
 
@@ -300,7 +352,7 @@ class Server(object):
         weighted_fscore = []
         macro_fscore = []
         for c in test_clients:
-            test_acc, test_loss, test_num, test_auc, test_balanced_acc, test_micro_fscore, test_macro_fscore, test_weighted_fscore = c.test_metrics(m)
+            test_acc, test_loss, test_num, test_auc, test_balanced_acc, test_micro_fscore, test_macro_fscore, test_weighted_fscore = c.test_metrics(m, copy.deepcopy(self.global_model[m].to(self.device)))
             acc.append(test_acc*test_num)
             auc.append(test_auc*test_num)
             num_samples.append(test_num)

@@ -20,10 +20,10 @@ import numpy as np
 import os
 
 
-def average_data(algorithm="", dataset="", goal="", times=10):
+def average_data(algorithm="", dataset="", goal="", times=10, args={}):
 
     for m in range(len(dataset)):
-        test_acc = get_all_results_for_one_algo(algorithm, dataset[m], goal, times)
+        test_acc = get_all_results_for_one_algo(algorithm, dataset[m], goal, times, args)
 
         max_accurancy = []
         for i in range(times):
@@ -33,11 +33,11 @@ def average_data(algorithm="", dataset="", goal="", times=10):
         print("mean for best accurancy:", np.mean(max_accurancy))
 
 
-def get_all_results_for_one_algo(algorithm="", dataset="", goal="", times=10):
+def get_all_results_for_one_algo(algorithm="", dataset="", goal="", times=10, args={}):
     test_acc = []
     algorithms_list = [algorithm] * times
     for i in range(times):
-        file_name = dataset + "_" + algorithms_list[i] + "_" + goal + "_" + str(i)
+        file_name = """../results/clients_{}/alpha_{}/""".format(args.num_clients, args.alpha) + dataset + "_" + algorithms_list[i] + "_" + goal + "_" + str(i)
         test_acc.append(np.array(read_data_then_delete(file_name, delete=False)))
 
     return test_acc

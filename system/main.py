@@ -90,6 +90,12 @@ def run(args):
     time_list = []
     reporter = MemReporter()
     models_str = args.model
+    dts = args.dataset
+    num_classes = []
+    for dt in dts:
+        num_classes.append({'EMNIST': 47, 'MNIST': 10, 'Cifar10': 10, 'GTSRB': 12}[dt])
+
+    args.num_classes = num_classes
 
     for i in range(args.prev, args.times):
         print(f"\n============= Running time: {i}th =============")
@@ -101,102 +107,103 @@ def run(args):
             # Generate args.model
             model_str = models_str[m]
             dt = args.dataset[m]
+            num_classes_m = num_classes[m]
             print(model_str, models_str)
             if "mlr" in model_str: # convex
                 if "MNIST" == dt:
-                    model = Mclr_Logistic(1*28*28, num_classes=args.num_classes).to(args.device)
+                    model = Mclr_Logistic(1*28*28, num_classes=num_classes_m).to(args.device)
                 elif "Cifar10" == dt:
-                    model = Mclr_Logistic(3*32*32, num_classes=args.num_classes).to(args.device)
+                    model = Mclr_Logistic(3*32*32, num_classes=num_classes_m).to(args.device)
                 else:
-                    model = Mclr_Logistic(60, num_classes=args.num_classes).to(args.device)
+                    model = Mclr_Logistic(60, num_classes=num_classes_m).to(args.device)
 
             elif "cnn" in model_str: # non-convex
                 if "MNIST" == dt:
-                    model = FedAvgCNN(in_features=1, num_classes=args.num_classes, dim=1024).to(args.device)
+                    model = FedAvgCNN(in_features=1, num_classes=num_classes_m, dim=1024).to(args.device)
                 elif "Cifar10" == dt:
-                    model = FedAvgCNN(in_features=3, num_classes=args.num_classes, dim=1600).to(args.device)
+                    model = FedAvgCNN(in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
                 elif "Omniglot" == dt:
-                    model = FedAvgCNN(in_features=1, num_classes=args.num_classes, dim=33856).to(args.device)
-                    # model = CifarNet(num_classes=args.num_classes).to(args.device)
+                    model = FedAvgCNN(in_features=1, num_classes=num_classes_m, dim=33856).to(args.device)
+                    # model = CifarNet(num_classes=num_classes_m).to(args.device)
                 elif "Digit5" == dt:
                     model = Digit5CNN().to(args.device)
                 else:
-                    model = FedAvgCNN(in_features=3, num_classes=args.num_classes, dim=10816).to(args.device)
+                    model = FedAvgCNN(in_features=3, num_classes=num_classes_m, dim=10816).to(args.device)
 
             elif "dnn" in model_str: # non-convex
-                if "MNIST" == dt:
-                    model = DNN(1*28*28, 100, num_classes=args.num_classes).to(args.device)
+                if dt in ["MNIST", "EMNIST"]:
+                    model = DNN(1*28*28, 100, num_classes=num_classes_m).to(args.device)
                 elif "Cifar10" == dt:
-                    model = DNN(3*32*32, 100, num_classes=args.num_classes).to(args.device)
+                    model = DNN(3*32*32, 100, num_classes=num_classes_m).to(args.device)
                 else:
-                    model = DNN(60, 20, num_classes=args.num_classes).to(args.device)
+                    model = DNN(60, 20, num_classes=num_classes_m).to(args.device)
 
             elif "resnet" in model_str:
-                model = torchvision.models.resnet18(pretrained=False, num_classes=args.num_classes).to(args.device)
+                model = torchvision.models.resnet18(pretrained=False, num_classes=num_classes_m).to(args.device)
 
                 # model = torchvision.models.resnet18(pretrained=True).to(args.device)
                 # feature_dim = list(model.fc.parameters())[0].shape[1]
-                # model.fc = nn.Linear(feature_dim, args.num_classes).to(args.device)
+                # model.fc = nn.Linear(feature_dim, num_classes_m).to(args.device)
 
-                # model = resnet18(num_classes=args.num_classes, has_bn=True, bn_block_num=4).to(args.device)
+                # model = resnet18(num_classes=num_classes_m, has_bn=True, bn_block_num=4).to(args.device)
 
             elif "resnet10" in model_str:
-                model = resnet10(num_classes=args.num_classes).to(args.device)
+                model = resnet10(num_classes=num_classes_m).to(args.device)
 
             elif "resnet34" in model_str:
-                model = torchvision.models.resnet34(pretrained=False, num_classes=args.num_classes).to(args.device)
+                model = torchvision.models.resnet34(pretrained=False, num_classes=num_classes_m).to(args.device)
 
             elif "alexnet" in model_str:
-                model = alexnet(pretrained=False, num_classes=args.num_classes).to(args.device)
+                model = alexnet(pretrained=False, num_classes=num_classes_m).to(args.device)
 
                 # model = alexnet(pretrained=True).to(args.device)
                 # feature_dim = list(model.fc.parameters())[0].shape[1]
-                # model.fc = nn.Linear(feature_dim, args.num_classes).to(args.device)
+                # model.fc = nn.Linear(feature_dim, num_classes_m).to(args.device)
 
             elif "googlenet" in model_str:
                 model = torchvision.models.googlenet(pretrained=False, aux_logits=False,
-                                                          num_classes=args.num_classes).to(args.device)
+                                                          num_classes=num_classes_m).to(args.device)
 
                 # model = torchvision.models.googlenet(pretrained=True, aux_logits=False).to(args.device)
                 # feature_dim = list(model.fc.parameters())[0].shape[1]
-                # model.fc = nn.Linear(feature_dim, args.num_classes).to(args.device)
+                # model.fc = nn.Linear(feature_dim, num_classes_m).to(args.device)
 
             elif "mobilenet_v2" in model_str:
-                model = mobilenet_v2(pretrained=False, num_classes=args.num_classes).to(args.device)
+                model = mobilenet_v2(pretrained=False, num_classes=num_classes_m).to(args.device)
 
                 # model = mobilenet_v2(pretrained=True).to(args.device)
                 # feature_dim = list(model.fc.parameters())[0].shape[1]
-                # model.fc = nn.Linear(feature_dim, args.num_classes).to(args.device)
+                # model.fc = nn.Linear(feature_dim, num_classes_m).to(args.device)
 
             elif "lstm" in model_str:
-                model = LSTMNet(hidden_dim=emb_dim, vocab_size=vocab_size, num_classes=args.num_classes).to(args.device)
+                model = LSTMNet(hidden_dim=emb_dim, vocab_size=vocab_size, num_classes=num_classes_m).to(args.device)
 
             elif "bilstm" in model_str:
                 model = BiLSTM_TextClassification(input_size=vocab_size, hidden_size=emb_dim,
-                                                       output_size=args.num_classes, num_layers=1,
+                                                       output_size=num_classes_m, num_layers=1,
                                                        embedding_dropout=0, lstm_dropout=0, attention_dropout=0,
                                                        embedding_length=emb_dim).to(args.device)
 
             elif "fastText" in model_str:
-                model = fastText(hidden_dim=emb_dim, vocab_size=vocab_size, num_classes=args.num_classes).to(args.device)
+                model = fastText(hidden_dim=emb_dim, vocab_size=vocab_size, num_classes=num_classes_m).to(args.device)
 
             elif "TextCNN" in model_str:
                 model = TextCNN(hidden_dim=emb_dim, max_len=max_len, vocab_size=vocab_size,
-                                     num_classes=args.num_classes).to(args.device)
+                                     num_classes=num_classes_m).to(args.device)
 
             elif "Transformer" in model_str:
                 model = TransformerModel(ntoken=vocab_size, d_model=emb_dim, nhead=8, nlayers=2,
-                                              num_classes=args.num_classes, max_len=max_len).to(args.device)
+                                              num_classes=num_classes_m, max_len=max_len).to(args.device)
 
             elif "AmazonMLP" in model_str:
                 model = AmazonMLP().to(args.device)
 
             elif "harcnn" in model_str:
                 if args.dataset == 'HAR':
-                    model = HARCNN(9, dim_hidden=1664, num_classes=args.num_classes, conv_kernel_size=(1, 9),
+                    model = HARCNN(9, dim_hidden=1664, num_classes=num_classes_m, conv_kernel_size=(1, 9),
                                         pool_kernel_size=(1, 2)).to(args.device)
                 elif args.dataset == 'PAMAP2':
-                    model = HARCNN(9, dim_hidden=3712, num_classes=args.num_classes, conv_kernel_size=(1, 9),
+                    model = HARCNN(9, dim_hidden=3712, num_classes=num_classes_m, conv_kernel_size=(1, 9),
                                         pool_kernel_size=(1, 2)).to(args.device)
 
             else:
@@ -385,7 +392,7 @@ def run(args):
     
 
     # Global average
-    average_data(dataset=args.dataset, algorithm=args.algorithm, goal=args.goal, times=args.times)
+    # average_data(dataset=args.dataset, algorithm=args.algorithm, goal=args.goal, times=args.times, args=args)
 
     print("All done!")
 
@@ -405,7 +412,7 @@ if __name__ == "__main__":
                         choices=["cpu", "cuda"])
     parser.add_argument('-did', "--device_id", type=str, default="0")
     parser.add_argument('-data', "--dataset", action="append")
-    parser.add_argument('-nb', "--num_classes", type=int, default=10)
+    parser.add_argument('-nb', "--num_classes", default=[10, 10])
     parser.add_argument('-m', "--model",  action="append")
     parser.add_argument('-lbs', "--batch_size", type=int, default=10)
     parser.add_argument('-lr', "--local_learning_rate", type=float, default=0.005,
@@ -527,7 +534,7 @@ if __name__ == "__main__":
         print("Time threthold: {}".format(args.time_threthold))
     print("Running times: {}".format(args.times))
     print("Dataset: {}".format(args.dataset))
-    print("Number of classes: {}".format(args.num_classes))
+    # print("Number of classes: {}".format(args.num_classes))
     print("Backbone: {}".format(args.model))
     print("Using device: {}".format(args.device))
     print("Using DP: {}".format(args.privacy))

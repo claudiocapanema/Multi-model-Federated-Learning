@@ -33,6 +33,7 @@ class Client(object):
 
     def __init__(self, args, id, train_samples, test_samples, **kwargs):
         torch.manual_seed(0)
+        self.args = args
         self.M = len(args.dataset)
         self.model = copy.deepcopy(args.model)
         self.algorithm = args.algorithm
@@ -81,17 +82,17 @@ class Client(object):
         if batch_size == None:
             batch_size = self.batch_size
         print("indices: ", m, self.dataset[m])
-        train_data = read_client_data(self.dataset[m], self.id, is_train=True)
+        train_data = read_client_data(self.dataset[m], self.id, args=self.args, is_train=True)
         return DataLoader(train_data, batch_size, drop_last=True, shuffle=True)
 
     def load_test_data(self, m, batch_size=None):
         if batch_size == None:
             batch_size = self.batch_size
-        test_data = read_client_data(self.dataset[m], self.id, is_train=False)
+        test_data = read_client_data(self.dataset[m], self.id, args=self.args, is_train=False)
         return DataLoader(test_data, batch_size, drop_last=False, shuffle=True)
         
-    def set_parameters(self, model):
-        for new_param, old_param in zip(model.parameters(), self.model.parameters()):
+    def set_parameters(self, m, model):
+        for new_param, old_param in zip(model.parameters(), self.model[m].parameters()):
             old_param.data = new_param.data.clone()
 
     def set_parameters_all_models(self, models):
@@ -110,10 +111,12 @@ class Client(object):
         for param, new_param in zip(model.parameters(), new_params):
             param.data = new_param.data.clone()
 
-    def test_metrics(self, m):
+    def test_metrics(self, m, model):
         testloaderfull = self.load_test_data(m)
         # self.model = self.load_model('model')
         # self.model.to(self.device)
+        self.set_parameters(m, model)
+        self.model[m].to(self.device)
         self.model[m].eval()
 
         test_acc = 0
@@ -137,11 +140,11 @@ class Client(object):
                 test_num += y.shape[0]
 
                 y_prob.append(output.detach().cpu().numpy())
-                nc = self.num_classes
-                if self.num_classes == 2:
+                nc = self.num_classes[m]
+                if self.num_classes[m] == 2:
                     nc += 1
                 lb = label_binarize(y.detach().cpu().numpy(), classes=np.arange(nc))
-                if self.num_classes == 2:
+                if self.num_classes[m] == 2:
                     lb = lb[:, :2]
                 y_true.append(lb)
 

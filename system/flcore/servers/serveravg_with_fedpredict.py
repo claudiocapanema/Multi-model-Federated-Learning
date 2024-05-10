@@ -39,6 +39,7 @@ class MultiFedAvgWithFedPredict(Server):
     def train(self):
         for t in range(1, self.global_rounds + 1):
             s_t = time.time()
+            self.current_round = t
             self.selected_clients = self.select_clients(t)
             self.send_models()
             for m in range(len(self.selected_clients)):
@@ -47,9 +48,8 @@ class MultiFedAvgWithFedPredict(Server):
                     print("\nEvaluate global model")
                     self.evaluate(m, t=t)
 
-                    clients_m = self.selected_clients[m]
-                    for client in clients_m:
-                        client.train(m, t)
+                for t in range(len(self.selected_clients[m])):
+                    self.clients[self.selected_clients[m][t]].train(m, t, self.global_model[m])
 
             # threads = [Thread(target=client.train)
             #            for client in self.selected_clients]
