@@ -133,8 +133,8 @@ class Server(object):
             train_data = []
             test_data = []
             for m in range(self.M):
-                train_data.append(len(read_client_data(self.dataset[m], i, args=self.args, is_train=True)))
-                test_data.append(len(read_client_data(self.dataset[m], i, args=self.args, is_train=False)))
+                train_data.append(len(read_client_data(m, i, args=self.args, is_train=True)))
+                test_data.append(len(read_client_data(m, i, args=self.args, is_train=False)))
             client = clientObj(self.args,
                             id=i,
                             train_samples=train_data,
@@ -160,6 +160,7 @@ class Server(object):
             self.send_slow_rate)
 
     def select_clients(self, t):
+        np.random.seed(t)
         if self.random_join_ratio:
             self.current_num_join_clients = np.random.choice(range(self.num_join_clients, self.num_clients+1), 1, replace=False)[0]
         else:
@@ -297,7 +298,7 @@ class Server(object):
         
     def save_results(self, m):
         algo = self.dataset[m] + "_" + self.algorithm
-        result_path = """../results/clients_{}/alpha_{}/""".format(self.num_clients, self.alpha)
+        result_path = """../results/clients_{}/alpha_{}/fc_{}/rounds_{}/epochs_{}/""".format(self.num_clients, self.alpha, self.args.join_ratio, self.args.global_rounds, self.local_epochs)
         if not os.path.exists(result_path):
             os.makedirs(result_path)
 

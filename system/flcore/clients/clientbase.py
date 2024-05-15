@@ -77,18 +77,19 @@ class Client(object):
             ))
         self.learning_rate_decay = args.learning_rate_decay
 
+        self.test_metrics_list_dict = [{} for m in range(self.M)]
+
 
     def load_train_data(self, m, batch_size=None):
         if batch_size == None:
             batch_size = self.batch_size
-        print("indices: ", m, self.dataset[m])
-        train_data = read_client_data(self.dataset[m], self.id, args=self.args, is_train=True)
+        train_data = read_client_data(m, self.id, args=self.args, is_train=True)
         return DataLoader(train_data, batch_size, drop_last=True, shuffle=True)
 
     def load_test_data(self, m, batch_size=None):
         if batch_size == None:
             batch_size = self.batch_size
-        test_data = read_client_data(self.dataset[m], self.id, args=self.args, is_train=False)
+        test_data = read_client_data(m, self.id, args=self.args, is_train=False)
         return DataLoader(test_data, batch_size, drop_last=False, shuffle=True)
         
     def set_parameters(self, m, model):
@@ -115,7 +116,7 @@ class Client(object):
         testloaderfull = self.load_test_data(m)
         # self.model = self.load_model('model')
         # self.model.to(self.device)
-        self.set_parameters(m, model)
+        #self.set_parameters(m, model)
         self.model[m].to(self.device)
         self.model[m].eval()
 
@@ -166,7 +167,9 @@ class Client(object):
         test_macro_fscore = metrics.f1_score(y_true, y_prob, average='macro')
         test_weighted_fscore = metrics.f1_score(y_true, y_prob, average='weighted')
 
-        # print(self.dataset[m], " micro: ", test_micro_fscore, test_acc)
+        self.test_metrics_list_dict[m] = {'ids': self.id, 'Accuracy': test_acc, 'AUC': test_auc,
+                "Loss": test_loss, "Samples": test_num, "Balanced accuracy": test_balanced_acc, "Micro f1-score": test_micro_fscore,
+                "Weighted f1-score": test_weighted_fscore, "Macro f1-score": test_macro_fscore}
         
         return (test_acc,
                 test_loss,

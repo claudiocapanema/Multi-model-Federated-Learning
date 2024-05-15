@@ -41,7 +41,7 @@ class MultiFedAvgWithFedPredict(Server):
             s_t = time.time()
             self.current_round = t
             self.selected_clients = self.select_clients(t)
-            self.send_models()
+            # self.send_models()
             for m in range(len(self.selected_clients)):
                 if t % self.eval_gap == 0:
                     print(f"\n-------------Round number: {t}-------------")

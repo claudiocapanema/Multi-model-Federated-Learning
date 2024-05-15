@@ -46,7 +46,7 @@ class MultiFedAvg(Server):
             for m in range(len(self.selected_clients)):
                 if t%self.eval_gap == 0:
                     print(f"\n-------------Round number: {t}-------------")
-                    print("\nEvaluate global model")
+                    print("\nEvaluate global model for ", self.dataset[m])
                     self.evaluate(m, t=t)
 
                 for i in range(len(self.selected_clients[m])):

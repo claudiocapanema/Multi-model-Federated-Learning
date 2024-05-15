@@ -37,7 +37,7 @@ def get_all_results_for_one_algo(algorithm="", dataset="", goal="", times=10, ar
     test_acc = []
     algorithms_list = [algorithm] * times
     for i in range(times):
-        file_name = """../results/clients_{}/alpha_{}/""".format(args.num_clients, args.alpha) + dataset + "_" + algorithms_list[i] + "_" + goal + "_" + str(i)
+        file_name = """../results/clients_{}/alpha_{}/fc_{}/rounds_{}/epochs_{}/""".format(args.num_clients, args.alpha, args.join_ratio, args.global_rounds, args.local_epochs) + dataset + "_" + algorithms_list[i] + "_" + goal + "_" + str(i)
         test_acc.append(np.array(read_data_then_delete(file_name, delete=False)))
 
     return test_acc

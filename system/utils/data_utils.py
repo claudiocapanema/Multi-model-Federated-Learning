@@ -20,9 +20,9 @@ import os
 import torch
 
 
-def read_data(dataset, idx, args, is_train=True):
+def read_data(dataset, idx, args, alpha, is_train=True):
     if is_train:
-        path = """../dataset/{}/clients_{}/alpha_{}/train/""".format(dataset, args.num_clients, args.alpha)
+        path = """../dataset/{}/clients_{}/alpha_{}/train/""".format(dataset, args.num_clients,alpha)
         train_data_dir = path
 
         train_file = train_data_dir + str(idx) + '.npz'
@@ -32,7 +32,7 @@ def read_data(dataset, idx, args, is_train=True):
         return train_data
 
     else:
-        path = """../dataset/{}/clients_{}/alpha_{}/test/""".format(dataset, args.num_clients, args.alpha)
+        path = """../dataset/{}/clients_{}/alpha_{}/test/""".format(dataset, args.num_clients, alpha)
         test_data_dir = path
 
         test_file = test_data_dir + str(idx) + '.npz'
@@ -42,21 +42,23 @@ def read_data(dataset, idx, args, is_train=True):
         return test_data
 
 
-def read_client_data(dataset, idx, args={}, is_train=True):
+def read_client_data(m, idx, args={}, is_train=True):
+    dataset = args.dataset[m]
+    alpha = args.alpha[m]
     if "News" in dataset:
         return read_client_data_text(dataset, idx, is_train)
     elif "Shakespeare" in dataset:
         return read_client_data_Shakespeare(dataset, idx)
 
     if is_train:
-        train_data = read_data(dataset, idx, args, is_train)
+        train_data = read_data(dataset, idx, args, alpha, is_train)
         X_train = torch.Tensor(train_data['x']).type(torch.float32)
         y_train = torch.Tensor(train_data['y']).type(torch.int64)
 
         train_data = [(x, y) for x, y in zip(X_train, y_train)]
         return train_data
     else:
-        test_data = read_data(dataset, idx, args, is_train)
+        test_data = read_data(dataset, idx, args, alpha, is_train)
         X_test = torch.Tensor(test_data['x']).type(torch.float32)
         y_test = torch.Tensor(test_data['y']).type(torch.int64)
         test_data = [(x, y) for x, y in zip(X_test, y_test)]

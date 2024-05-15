@@ -62,6 +62,7 @@ from flcore.servers.serverntd import FedNTD
 from flcore.servers.servergh import FedGH
 from flcore.servers.serveravgDBE import FedAvgDBE
 from flcore.servers.serveravg_with_fedpredict import MultiFedAvgWithFedPredict
+from flcore.servers.server_fedfairmmfl import FedFairMMFL
 
 from flcore.trainmodel.models import *
 
@@ -376,6 +377,12 @@ def run(args):
                 model = BaseHeadSplit(model, head)
                 server = MultiFedAvgWithFedPredict
 
+            elif args.algorithm == "FedFairMMFL":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = FedFairMMFL
+
             else:
                 print(args.algorithm)
                 raise NotImplementedError
@@ -419,6 +426,7 @@ if __name__ == "__main__":
                         help="Local learning rate")
     parser.add_argument('-ld', "--learning_rate_decay", type=bool, default=False)
     parser.add_argument('-ldg', "--learning_rate_decay_gamma", type=float, default=0.99)
+    parser.add_argument('-frw', "--fairness_weight", type=float, default=2)
     parser.add_argument('-gr', "--global_rounds", type=int, default=2000)
     parser.add_argument('-ls', "--local_epochs", type=int, default=1, 
                         help="Multiple update steps in one local epoch.")
@@ -476,7 +484,7 @@ if __name__ == "__main__":
                         help="lambda/sqrt(GLOABL-ITRATION) according to the paper")
     parser.add_argument('-sg', "--sigma", type=float, default=1.0)
     # APFL
-    parser.add_argument('-al', "--alpha", type=float, default=1.0)
+    parser.add_argument('-al', "--alpha", action="append")
     # Ditto / FedRep
     parser.add_argument('-pls', "--plocal_epochs", type=int, default=1)
     # MOON
