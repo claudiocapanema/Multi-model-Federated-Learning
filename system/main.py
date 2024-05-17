@@ -63,6 +63,7 @@ from flcore.servers.servergh import FedGH
 from flcore.servers.serveravgDBE import FedAvgDBE
 from flcore.servers.serveravg_with_fedpredict import MultiFedAvgWithFedPredict
 from flcore.servers.server_fedfairmmfl import FedFairMMFL
+from flcore.servers.server_fednome import FedNome
 
 from flcore.trainmodel.models import *
 
@@ -382,6 +383,11 @@ def run(args):
                 model.fc = nn.Identity()
                 model = BaseHeadSplit(model, head)
                 server = FedFairMMFL
+            elif args.algorithm == "FedNome":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = FedNome
 
             else:
                 print(args.algorithm)

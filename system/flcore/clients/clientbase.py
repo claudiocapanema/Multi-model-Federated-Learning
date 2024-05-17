@@ -79,12 +79,14 @@ class Client(object):
 
         self.test_metrics_list_dict = [{} for m in range(self.M)]
 
+        self.train_class_count = [np.array([0 for j in range(self.num_classes[i])]) for i in range(self.M)]
+
 
     def load_train_data(self, m, batch_size=None):
         if batch_size == None:
             batch_size = self.batch_size
-        train_data = read_client_data(m, self.id, args=self.args, is_train=True)
-        return DataLoader(train_data, batch_size, drop_last=True, shuffle=True)
+        train_data, unique_count = read_client_data(m, self.id, args=self.args, is_train=True)
+        return DataLoader(train_data, batch_size, drop_last=True, shuffle=True), unique_count
 
     def load_test_data(self, m, batch_size=None):
         if batch_size == None:
@@ -181,7 +183,7 @@ class Client(object):
                 test_weighted_fscore)
 
     def train_metrics(self, m):
-        trainloader = self.load_train_data(m)
+        trainloader, self.train_class_count[m] = self.load_train_data(m)
         # self.model = self.load_model('model')
         # self.model.to(self.device)
         self.model[m].eval()

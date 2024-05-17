@@ -45,6 +45,8 @@ def read_data(dataset, idx, args, alpha, is_train=True):
 def read_client_data(m, idx, args={}, is_train=True):
     dataset = args.dataset[m]
     alpha = args.alpha[m]
+    num_classes = args.num_classes[m]
+    unique_count = {i: 0 for i in range(num_classes)}
     if "News" in dataset:
         return read_client_data_text(dataset, idx, is_train)
     elif "Shakespeare" in dataset:
@@ -54,9 +56,13 @@ def read_client_data(m, idx, args={}, is_train=True):
         train_data = read_data(dataset, idx, args, alpha, is_train)
         X_train = torch.Tensor(train_data['x']).type(torch.float32)
         y_train = torch.Tensor(train_data['y']).type(torch.int64)
-
+        y = train_data['y']
         train_data = [(x, y) for x, y in zip(X_train, y_train)]
-        return train_data
+        unique, count = np.unique(y, return_counts=True)
+        data_unique_count_dict = dict(zip(unique, count))
+        for class_ in data_unique_count_dict:
+            unique_count[class_] = data_unique_count_dict[class_]
+        return train_data, np.array(list(unique_count.values()))
     else:
         test_data = read_data(dataset, idx, args, alpha, is_train)
         X_test = torch.Tensor(test_data['x']).type(torch.float32)

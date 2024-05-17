@@ -84,6 +84,7 @@ class Server(object):
         self.M = len(self.dataset)
         self.global_model = copy.deepcopy(args.model)
         self.num_clients = args.num_clients
+        self.num_classes = args.num_classes
         self.alpha = args.alpha
         self.join_ratio = args.join_ratio
         self.random_join_ratio = args.random_join_ratio
