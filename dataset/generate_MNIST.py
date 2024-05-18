@@ -28,7 +28,7 @@ from utils.dataset_utils import check, separate_data, split_data, save_file
 random.seed(1)
 np.random.seed(1)
 num_clients = 20
-alpha = 0.1
+alpha = 1.0
 dir_path = "MNIST/" + "clients_" + str(num_clients) + "/alpha_" + str(alpha) + "/"
 
 

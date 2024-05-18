@@ -93,7 +93,7 @@ class FedNome(MultiFedAvg):
             # [t.start() for t in threads]
             # [t.join() for t in threads]
 
-                self.current_training_class_count[m] = self.current_training_class_count[m] / np.sum(self.current_training_class_count[m])
+                self.current_training_class_count[m] = np.round(self.current_training_class_count[m] / np.sum(self.current_training_class_count[m]), 2)
                 print("current training class count ", self.current_training_class_count[m])
 
             print("contar: ", self.client_class_count)
