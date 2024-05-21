@@ -36,9 +36,10 @@ class FedNome(MultiFedAvg):
         # self.load_model()
         self.Budget = []
         self.fairness_weight = args.fairness_weight
-        self.client_class_count = {i: None for i in range(self.num_clients)}
+        self.client_class_count = {m: {i: [] for i in range(self.num_clients)} for m in range(self.M)}
         self.clients_training_count = [[0 for i in range(self.num_clients)] for j in range(self.M)]
         self.current_training_class_count = [[0 for i in range(self.num_classes[j])] for j in range(self.M)]
+        self.non_iid_degree = {t: {m: {'unique local classes': 0, 'samples': 0} for m in range(self.M)} for t in range(self.global_rounds + 1)}
 
     def select_clients(self, t):
         np.random.seed(t)
@@ -52,6 +53,23 @@ class FedNome(MultiFedAvg):
             np.random.seed(t)
             selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
             selected_clients_m = [[] for i in range(self.M)]
+            non_iid_weight_m = []
+            untrained_clients_m = []
+            for m in range(self.M):
+                non_iid_weight_m.append(1 - self.non_iid_degree[t-1][m] / 100)
+                clients_training_count = np.array(self.clients_training_count[m])
+                clients_homogeneity_training_degree = []
+                # untrained_clients_m.append()
+            non_iid_weight_m = np.array(non_iid_weight_m)
+            non_iid_weight_m = non_iid_weight_m / np.sum(non_iid_weight_m)
+            for m in range(self.M):
+                p_class = np.array(self.clients_training_count[m])
+                non_iid_weight = non_iid_weight_m[m]
+                p_class = (1 - (p_class / np.sum(p_class)) * non_iid_weight)
+                p = p / np.sum(p)
+                s_c_m = list(np.random.choice(self.clients, self.current_num_join_clients, p=p, replace=False))
+
+
 
             for client in selected_clients:
                 client_losses = []
@@ -84,7 +102,7 @@ class FedNome(MultiFedAvg):
 
                 for i in range(len(self.selected_clients[m])):
                     self.clients[self.selected_clients[m][i]].train(m, self.global_model[m])
-                    self.client_class_count[self.clients[self.selected_clients[m][i]].id] = self.clients[self.selected_clients[m][i]].train_class_count
+                    self.client_class_count[m][self.clients[self.selected_clients[m][i]].id] = self.clients[self.selected_clients[m][i]].train_class_count[m]
                     self.clients_training_count[m][self.clients[self.selected_clients[m][i]].id] += 1
                     self.current_training_class_count[m] += self.clients[self.selected_clients[m][i]].train_class_count[m]
 
@@ -95,6 +113,8 @@ class FedNome(MultiFedAvg):
 
                 self.current_training_class_count[m] = np.round(self.current_training_class_count[m] / np.sum(self.current_training_class_count[m]), 2)
                 print("current training class count ", self.current_training_class_count[m])
+
+            self.detect_non_iid_degree(t)
 
             print("contar: ", self.client_class_count)
 
@@ -126,3 +146,46 @@ class FedNome(MultiFedAvg):
                 print(f"\n-------------Fine tuning round-------------")
                 print("\nEvaluate new clients")
                 self.evaluate(m, t=t)
+
+        print("Non iid degree")
+        for t in range(0, self.global_rounds+1):
+            print("#########")
+            print("""Rodada {}""".format(t))
+            print("""M1: {}\nM2: {}""".format(self.non_iid_degree[t][0], self.non_iid_degree[t][1]))
+
+    def detect_non_iid_degree(self, t):
+
+
+        for m in range(self.M):
+            read_alpha = []
+            read_dataset = []
+            read_id = []
+            read_num_classes = []
+            read_num_samples = []
+
+            read_std_alpha = []
+            read_std_dataset = []
+            read_num_samples_std = []
+            samples = []
+            for client_ in self.client_class_count[m]:
+                client_class_count = self.client_class_count[m][client_]
+                # client_training_count = self.clients_training_count[m][client]
+                unique_classes = np.array(client_class_count)
+                unique_classes_count = len(unique_classes[unique_classes > 0])
+                read_num_classes.append((100 * unique_classes_count) / self.num_classes[m])
+                unique_count = {i: 0 for i in range(self.num_classes[m])}
+                # unique, count = np.unique(y_train, return_counts=True)
+                balanced_samples = np.sum(client_class_count) / self.num_classes[m]
+                # data_unique_count_dict = dict(zip(unique, count))
+                for class_ in range(len(client_class_count)):
+                    unique_count[class_] = (100 * (
+                    (balanced_samples - client_class_count[class_]))) / balanced_samples
+            d = np.array(list(unique_count.values()))
+            s = np.mean(d[d > 0])
+            samples.append(s)
+            read_num_samples += list(samples)
+            read_num_samples_std.append(np.std(samples))
+
+            self.non_iid_degree[t][m]['unique local classes'] = np.round(np.mean(read_num_classes), 2)
+
+

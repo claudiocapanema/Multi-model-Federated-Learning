@@ -171,10 +171,13 @@ class Server(object):
         selected_clients = [i.id for i in selected_clients]
 
         n = len(selected_clients) // self.M
-        selected_clients = np.array_split(selected_clients, self.M)
-        # selected_clients = [selected_clients[i:i+n] for i in range(0, len(selected_clients), n)]
+        sc = np.array_split(selected_clients, self.M)
+        # sc = [np.array(selected_clients[0:4])]
+        # sc.append(np.array(selected_clients[4:]))
 
-        return selected_clients
+        print("Selecionados: ", sc)
+
+        return sc
 
     def send_models(self):
         assert (len(self.clients) > 0)
