@@ -29,8 +29,12 @@ def bar_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, hue_o
         ax.yaxis.set_major_formatter(formatter)
         # ax.set_ylim([0, 130000])
     if y_lim:
-        # y_max = float(max_value)
-        plt.ylim([y_min, y_max])
+        print("limite", y_max, y_column)
+
+        if ax is not None:
+            ax.set_ylim(y_min, y_max)
+        else:
+            plt.ylim([y_min, y_max])
 
 
     # errorbar=('ci', 0.95),
@@ -40,9 +44,9 @@ def bar_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, hue_o
             figure.bar_label(bars, fmt='%.f', padding=12, fontsize=9)
         figure.set_ylim(top=115)
     # if tipo == "e":
-    #     for bars in figure.containers:
-    #         figure.bar_label(bars, fmt='%.f', padding=12, fontsize=9)
-    #     figure.set_ylim(top=115)
+    # for bars in figure.containers:
+    #     figure.bar_label(bars, fmt='%.f', padding=22, fontsize=9)
+    figure.set_ylim(top=115)
     if tipo == "nt":
         for bars in figure.containers:
             figure.bar_label(bars, fmt='%.f', padding=9, fontsize=9)
@@ -159,7 +163,7 @@ def violin_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, lo
         figure.savefig(base_dir + "svg/" + file_name + log + ".svg", bbox_inches='tight', dpi=400)
 
 
-def line_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, log_scale=False, ax=None, tipo=None, hue_order=None, style=None, y_lim=False, y_min=0, y_max=1, n=None, markers=None, size=None, sizes=None, style_order=None):
+def line_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, log_scale=False, ax=None, tipo=None, hue_order=None, style=None, y_lim=False, y_min=0, y_max=1, n=None, markers=None, size=None, sizes=None, style_order=None, ci=95):
     Path(base_dir).mkdir(parents=True, exist_ok=True)
     file_name = """{}_lineplot""".format(file_name)
     params = {'mathtext.default': 'regular'}
@@ -183,9 +187,9 @@ def line_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, log_
     print("titulo: ", title)
     if tipo is not None:
         palette = sns.color_palette()
-        figure = sns.lineplot(x=x_column, y=y_column, data=df, hue=hue, ax=ax, palette=palette, hue_order=hue_order, style=style, style_order=style_order, markers=markers, size=size, sizes=sizes, linewidth=0.8).set_title(title)
+        figure = sns.lineplot(x=x_column, y=y_column, data=df, hue=hue, ax=ax, palette=palette, hue_order=hue_order, style=style, style_order=style_order, markers=markers, size=size, sizes=sizes, linewidth=0.8, ci=ci).set_title(title)
     else:
-        figure = sns.lineplot(x=x_column, y=y_column, data=df, hue=hue, ax=ax, hue_order=hue_order, style=style, style_order=style_order, markers=markers, size=size, sizes=sizes, linewidth=0.8).set_title(title)
+        figure = sns.lineplot(x=x_column, y=y_column, data=df, hue=hue, ax=ax, hue_order=hue_order, style=style, style_order=style_order, markers=markers, size=size, sizes=sizes, linewidth=0.8, ci=ci).set_title(title)
     print("nof")
 
     # plt.xticks(np.arange(min(x), max(x) + 1, max(x)//10))
@@ -197,6 +201,12 @@ def line_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, log_
         # lines_labels = [["100"], ["10"], ["5"], ["2"], ["1"]]
         # lines, labels = [sum(lol, []) for lol in zip(*lines_labels)]
         # plt.legend([3, 2, 1], label='Line 1', loc='upper left', ncol=3, bbox_to_anchor=(0.2, 1))
+
+    if y_lim:
+        print("limite")
+        plt.ylim([y_min, y_max])
+        if ax is not None:
+            ax.set_ylim(y_min, y_max)
 
     if tipo == 3:
         figure.legend([l1, l2, l3, l4],  # The line objects

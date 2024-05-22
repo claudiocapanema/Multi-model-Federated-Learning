@@ -81,6 +81,11 @@ class Client(object):
 
         self.train_class_count = [np.array([0 for j in range(self.num_classes[i])]) for i in range(self.M)]
 
+        for m in range(self.M):
+            trainloader, self.train_class_count[m] = self.load_train_data(m)
+
+            print("Cliente: ", self.id, " modelo: ", m, " train class count: ", self.train_class_count[m])
+
 
     def load_train_data(self, m, batch_size=None):
         if batch_size == None:

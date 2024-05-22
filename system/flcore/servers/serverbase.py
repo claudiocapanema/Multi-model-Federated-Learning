@@ -171,9 +171,9 @@ class Server(object):
         selected_clients = [i.id for i in selected_clients]
 
         n = len(selected_clients) // self.M
-        sc = np.array_split(selected_clients, self.M)
-        # sc = [np.array(selected_clients[0:4])]
-        # sc.append(np.array(selected_clients[4:]))
+        # sc = np.array_split(selected_clients, self.M)
+        sc = [np.array(selected_clients[0:6])]
+        sc.append(np.array(selected_clients[6:]))
 
         print("Selecionados: ", sc)
 

@@ -95,7 +95,7 @@ def run(args):
     dts = args.dataset
     num_classes = []
     for dt in dts:
-        num_classes.append({'EMNIST': 47, 'MNIST': 10, 'Cifar10': 10, 'GTSRB': 12}[dt])
+        num_classes.append({'EMNIST': 47, 'MNIST': 10, 'Cifar10': 10, 'GTSRB': 43}[dt])
 
     args.num_classes = num_classes
 
