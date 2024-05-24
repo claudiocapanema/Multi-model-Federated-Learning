@@ -26,15 +26,6 @@ class FedFairMMFL(MultiFedAvg):
     def __init__(self, args, times):
         super().__init__(args, times)
 
-        # select slow clients
-        self.set_slow_clients()
-        self.set_clients(clientAVG)
-
-        print(f"\nJoin ratio / total clients: {self.join_ratio} / {self.num_clients}")
-        print("Finished creating server and clients.")
-
-        # self.load_model()
-        self.Budget = []
         self.fairness_weight = args.fairness_weight
 
     def select_clients(self, t):

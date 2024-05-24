@@ -64,6 +64,7 @@ from flcore.servers.serveravgDBE import FedAvgDBE
 from flcore.servers.serveravg_with_fedpredict import MultiFedAvgWithFedPredict
 from flcore.servers.server_fedfairmmfl import FedFairMMFL
 from flcore.servers.server_fednome import FedNome
+from flcore.servers.serveravg_rr import MultiFedAvgRR
 
 from flcore.trainmodel.models import *
 
@@ -123,6 +124,8 @@ def run(args):
                 if "MNIST" == dt:
                     model = FedAvgCNN(in_features=1, num_classes=num_classes_m, dim=1024).to(args.device)
                 elif "Cifar10" == dt:
+                    model = FedAvgCNN(in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
+                elif "GTSRB" == dt:
                     model = FedAvgCNN(in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
                 elif "Omniglot" == dt:
                     model = FedAvgCNN(in_features=1, num_classes=num_classes_m, dim=33856).to(args.device)

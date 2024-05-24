@@ -187,9 +187,9 @@ def line_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, log_
     print("titulo: ", title)
     if tipo is not None:
         palette = sns.color_palette()
-        figure = sns.lineplot(x=x_column, y=y_column, data=df, hue=hue, ax=ax, palette=palette, hue_order=hue_order, style=style, style_order=style_order, markers=markers, size=size, sizes=sizes, linewidth=0.8, ci=ci).set_title(title)
+        figure = sns.lineplot(x=x_column, y=y_column, data=df, hue=hue, ax=ax, palette=palette, hue_order=hue_order, style=style, style_order=style_order, markers=markers, size=size, sizes=sizes, linewidth=0.8, errorbar=ci).set_title(title)
     else:
-        figure = sns.lineplot(x=x_column, y=y_column, data=df, hue=hue, ax=ax, hue_order=hue_order, style=style, style_order=style_order, markers=markers, size=size, sizes=sizes, linewidth=0.8, ci=ci).set_title(title)
+        figure = sns.lineplot(x=x_column, y=y_column, data=df, hue=hue, ax=ax, hue_order=hue_order, style=style, style_order=style_order, markers=markers, size=size, sizes=sizes, linewidth=0.8, errorbar=ci).set_title(title)
     print("nof")
 
     # plt.xticks(np.arange(min(x), max(x) + 1, max(x)//10))
