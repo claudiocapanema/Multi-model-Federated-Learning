@@ -16,6 +16,7 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 import time
+import math
 import numpy as np
 from flcore.clients.clientavg import clientAVG
 from flcore.servers.serveravg import MultiFedAvg
@@ -40,38 +41,70 @@ class FedNome(MultiFedAvg):
         self.clients_training_count = {m: [0 for i in range(self.num_clients)] for m in range(self.M)}
         self.current_training_class_count = [[0 for i in range(self.num_classes[j])] for j in range(self.M)]
         self.non_iid_degree = {m: {'unique local classes': 0, 'samples': 0} for m in range(self.M)}
+        self.client_selection_model_weight = np.array([0] * self.M)
+        self.cold_start_max_non_iid_level = 0.8
+        self.cold_start_training_level = np.array([0] * self.M)
+        self.minimum_training_level = 2 / self.num_clients
         self.unique_count_samples = {m: np.array([0 for i in range(self.num_classes[m])]) for m in range(self.M)}
         self.similarity_matrix = np.zeros((self.M, self.num_clients))
 
     def cold_start_selection(self):
 
-        prob = [[0 for i in range(self.num_clients)] for j in range(self.M)]
+        prob = [np.array([0 for i in range(self.num_clients)]) for j in range(self.M)]
+        use_cold_start = [False] * self.M
 
         for m in range(self.M):
             for i in range(self.num_clients):
 
-                if self.clients_training_count[m][i] == 0:
+                if self.clients_training_count[m][i] == 0 and self.non_iid_degree[m]['unique local classes'] <= 100 * self.cold_start_max_non_iid_level[m]:
                     prob[m][i] = 1
+                    use_cold_start[m] = True
 
-        return prob
+        return prob, use_cold_start
 
-    def uniform_selection(self):
+    def uniform_selection(self, t):
+
+        if t == 1:
+            return [np.array([1 / self.num_clients for i in range(self.num_clients)]) for j in range(self.M)]
 
         prob = [[0 for i in range(self.num_clients)] for j in range(self.M)]
 
         for m in range(self.M):
             clients = np.argsort(self.clients_training_count[m])
-            prob[m] = clients
+            p = np.array(self.clients_training_count[m]) / np.sum(self.clients_training_count[m])
+            p = 1 - p
+            p = (-3 + np.power(2, 2 * p))
+            p[p<0] = 0
+            prob[m] = p
+            # clients = clients[0:c]
+            # prob[m] = np.array([1 if i in clients else 0 for i in range(self.num_clients)])
+
+        print("Uniform")
+        print(prob)
 
         return prob
 
     def data_quality_selection(self):
 
         prob = [[0 for i in range(self.num_clients)] for j in range(self.M)]
+        cosine_similarities = [[i for i in range(self.num_clients)] for j in range(self.M)]
 
         for m in range(self.M):
-            1
+            for i in range(self.num_clients):
 
+                cosine_similarities[m][i] = np.dot(self.unique_count_samples[m],self.client_class_count[m][i])/(np.linalg.norm(self.unique_count_samples[m])*np.linalg.norm(self.client_class_count[m][i]))
+
+        print("si: ")
+        print(cosine_similarities)
+
+        clients_m_p = [[i for i in range(self.num_clients)] for j in range(self.M)]
+
+        for m in range(self.M):
+            clients_m_p[m] = np.array(cosine_similarities[m]) / np.sum(cosine_similarities[m])
+
+        print("Quality")
+        print(clients_m_p)
+        return clients_m_p
 
     # def select_clients(self, t):
     #     np.random.seed(t)
@@ -125,17 +158,68 @@ class FedNome(MultiFedAvg):
         else:
             self.current_num_join_clients = self.num_join_clients
         np.random.seed(t)
-        selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
-        selected_clients = [i.id for i in selected_clients]
 
-        n = len(selected_clients) // self.M
-        # sc = np.array_split(selected_clients, self.M)
-        sc = [np.array(selected_clients[0:12])]
-        sc.append(np.array(selected_clients[12:]))
+        # selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
+        # selected_clients = [i.id for i in selected_clients]
+        #
+        # n = len(selected_clients) // self.M
+        # # sc = np.array_split(selected_clients, self.M)
+        # sc = [np.array(selected_clients[0:12])]
+        # sc.append(np.array(selected_clients[12:]))
+        selected_clients_m = [[] for i in range(self.M)]
+        selected_clients = []
+        n_clients_m = [0] * self.M
+        n_clients_selected = 0
+        uniform_selection_m = self.uniform_selection(t)
+        data_quality_selection_m = self.data_quality_selection()
+        prob_cold_start_m, use_cold_start_m = self.cold_start_selection()
+        cold_start_clients_m = [np.array([]) for i in range(self.M)]
+        print(self.client_selection_model_weight)
+        print(self.cold_start_training_level)
+        print(use_cold_start_m)
+        for m in range(self.M):
+            if use_cold_start_m[m]:
+                n_selected_clients_m = math.ceil(self.num_clients*self.join_ratio*self.cold_start_training_level[m])
+                print("n; ", n_selected_clients_m)
+                p = prob_cold_start_m[m]
+                p = np.argwhere(p == 1).flatten()[:n_selected_clients_m]
+                # cold_start_clients_m[m] = np.argwhere(prob_cold_start_m[m][prob_cold_start_m[m] == 1]).flatten()[:n_selected_clients_m]
+                remaining_clients = n_selected_clients_m - len(p)
+                if remaining_clients > 0:
+                    prob_m = uniform_selection_m[m] * (1 - self.client_selection_model_weight[m]) + data_quality_selection_m[m] * self.client_selection_model_weight[m]
+                    prob_m[p] = 0
+                    prob_m = np.argsort(prob_m)
+                    prob_m = np.array([i if i not in prob_m else -1 for i in prob_m])
+                    prob_m = prob_m[prob_m >= 0]
+                else:
+                    prob_m = np.array([])
+                print(p, cold_start_clients_m[m], prob_m)
+                if len(p) > 0 and len(prob_m) == 0:
+                    selected_clients_m[m] = p
+                else:
+                    selected_clients_m[m] = np.array(list(p) + list(prob_m))
 
-        print("Selecionados: ", sc)
+            else:
+                print("f", self.num_clients * self.join_ratio - n_clients_selected)
+                if True not in use_cold_start_m:
+                    n_clients = math.ceil(self.num_clients * self.join_ratio * self.client_selection_model_weight[m])
+                else:
+                    n_clients = math.floor(self.num_clients * self.join_ratio - n_clients_selected)
+                prob_m = uniform_selection_m[m] * (1 - self.client_selection_model_weight[m]) + \
+                         data_quality_selection_m[m] * self.client_selection_model_weight[m]
+                prob_m = np.argsort(prob_m)
+                prob_m = np.array([i if i not in selected_clients else -1 for i in prob_m])
+                prob_m = prob_m[prob_m >= 0][-n_clients:]
+                selected_clients_m[m] = prob_m
 
-        return sc
+            selected_clients += list(selected_clients_m[m])
+            n_clients_selected += len(selected_clients_m[m])
+
+
+        print("Selecionados: ", t, selected_clients_m)
+        # exit()
+
+        return selected_clients_m
 
     def train(self):
 
@@ -168,10 +252,10 @@ class FedNome(MultiFedAvg):
                     self.current_training_class_count[m] += self.clients[self.selected_clients[m][i]].train_class_count[m]
 
                 self.current_training_class_count[m] = np.round(self.current_training_class_count[m] / np.sum(self.current_training_class_count[m]), 2)
-                print("current training class count ", self.current_training_class_count[m])
+                # print("current training class count ", self.current_training_class_count[m])
 
-                print("######")
-                print("Training count: ", self.clients_training_count)
+                # print("######")
+                # print("Training count: ", self.clients_training_count)
 
             self.receive_models()
             if self.dlg_eval and t%self.dlg_gap == 0:
@@ -240,12 +324,27 @@ class FedNome(MultiFedAvg):
 
 
 
-            self.non_iid_degree[m]['unique local classes'] = np.round(np.mean(read_num_classes), 2)
+            self.non_iid_degree[m]['unique local classes'] = float(sum(read_num_classes) / (len(read_num_classes)))
+            self.client_selection_model_weight[m] = float(sum(read_num_classes) / (len(read_num_classes)))
+        # print(float(sum(read_num_classes) / (len(read_num_classes))))
+        # exit()
 
         self.unique_count_samples = unique_count_samples
         for m in range(self.M):
             unique_count_samples[m] = unique_count_samples[m] / np.sum(unique_count_samples[m])
         print("samplles")
         print(self.unique_count_samples)
+        print(self.client_selection_model_weight)
+        self.client_selection_model_weight = self.client_selection_model_weight / np.sum(self.client_selection_model_weight)
+        print(self.client_selection_model_weight)
+        self.cold_start_training_level = 1 - self.client_selection_model_weight
+        for i in range(len(self.cold_start_training_level)):
+            if self.client_selection_model_weight[i] < self.minimum_training_level:
+                self.client_selection_model_weight[i] = self.minimum_training_level
+
+        self.cold_start_max_non_iid_level = self.cold_start_training_level / np.sum(self.cold_start_training_level)
+
+
+
 
 

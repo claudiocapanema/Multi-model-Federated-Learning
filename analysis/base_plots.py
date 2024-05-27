@@ -44,8 +44,8 @@ def bar_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, hue_o
             figure.bar_label(bars, fmt='%.f', padding=12, fontsize=9)
         figure.set_ylim(top=115)
     # if tipo == "e":
-    # for bars in figure.containers:
-    #     figure.bar_label(bars, fmt='%.f', padding=22, fontsize=9)
+    for bars in figure.containers:
+        figure.bar_label(bars, fmt='%.1f', padding=22, fontsize=9)
     figure.set_ylim(top=115)
     if tipo == "nt":
         for bars in figure.containers:

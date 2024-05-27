@@ -68,7 +68,7 @@ def line(df, base_dir, x_column, first, second, hue, ci=None, style=None):
 
         # axs[i].get_legend().remove()
         # axs[1].set_ylabel(y_column, labelpad=16)
-        axs[1].legend(fontsize=5, loc="upper right")
+        axs[1].legend(fontsize=7)
 
     # fig.suptitle("", fontsize=16)
         plt.tight_layout()
