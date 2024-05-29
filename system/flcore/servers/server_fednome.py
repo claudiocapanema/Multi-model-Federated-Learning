@@ -72,9 +72,9 @@ class FedNome(MultiFedAvg):
         for m in range(self.M):
             clients = np.argsort(self.clients_training_count[m])
             p = np.array(self.clients_training_count[m]) / np.sum(self.clients_training_count[m])
-            p = 1 - p
-            p = (-3 + np.power(2, 2 * p))
-            p[p<0] = 0
+            p = 1 - p # high probability for less training clients
+            p = (-3 + np.power(2, 2 * p)) # Keeps high probability when it is very close to 1
+            p[p<0] = 0 # Avoid negative probability
             prob[m] = p
             # clients = clients[0:c]
             # prob[m] = np.array([1 if i in clients else 0 for i in range(self.num_clients)])
@@ -170,6 +170,7 @@ class FedNome(MultiFedAvg):
         selected_clients = []
         n_clients_m = [0] * self.M
         n_clients_selected = 0
+        remaining_clients = int(self.num_clients * self.join_ratio)
         uniform_selection_m = self.uniform_selection(t)
         data_quality_selection_m = self.data_quality_selection()
         prob_cold_start_m, use_cold_start_m = self.cold_start_selection()
@@ -205,6 +206,10 @@ class FedNome(MultiFedAvg):
                     n_clients = math.ceil(self.num_clients * self.join_ratio * self.client_selection_model_weight[m])
                 else:
                     n_clients = math.floor(self.num_clients * self.join_ratio - n_clients_selected)
+                if n_clients > remaining_clients or (n_clients < remaining_clients and m == self.M - 1):
+                    print("ent", remaining_clients)
+                    n_clients = remaining_clients
+                # prob_m = uniform_selection_m[m] * (1 - self.client_selection_model_weight[m])
                 prob_m = uniform_selection_m[m] * (1 - self.client_selection_model_weight[m]) + \
                          data_quality_selection_m[m] * self.client_selection_model_weight[m]
                 prob_m = np.argsort(prob_m)
@@ -214,9 +219,12 @@ class FedNome(MultiFedAvg):
 
             selected_clients += list(selected_clients_m[m])
             n_clients_selected += len(selected_clients_m[m])
+            remaining_clients = int(self.num_clients * self.join_ratio) - n_clients_selected
+            print("m: ", m, " remaining: ", remaining_clients)
 
 
         print("Selecionados: ", t, selected_clients_m)
+        print("Quantidade: ", n_clients_selected)
         # exit()
 
         return selected_clients_m
@@ -335,6 +343,11 @@ class FedNome(MultiFedAvg):
         print("samplles")
         print(self.unique_count_samples)
         print(self.client_selection_model_weight)
+        # ruim
+        # self.client_selection_model_weight[0] = 0.4
+        # self.client_selection_model_weight[1] = 0.6
+        # self.client_selection_model_weight[0] = 0.2
+        # self.client_selection_model_weight[1] = 0.8
         self.client_selection_model_weight = self.client_selection_model_weight / np.sum(self.client_selection_model_weight)
         print(self.client_selection_model_weight)
         self.cold_start_training_level = 1 - self.client_selection_model_weight
