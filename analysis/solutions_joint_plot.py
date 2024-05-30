@@ -79,10 +79,10 @@ if __name__ == "__main__":
     # alphas = ['5.0', '0.1']
     configuration = {"dataset": ["Cifar10", "GTSRB"], "alpha": [5.0, 0.1]}
     datasets = configuration["dataset"]
-    solutions = ["FedNome", "FedNomev0", "FedAvg", "FedFairMMFL"]
+    solutions = ["FedNome", "FedAvg", "FedFairMMFL"]
     num_classes = {"EMNIST": 47, "Cifar10": 10, "GTSRB": 43}
     num_clients = 40
-    fc = 0.4
+    fc = 0.3
     rounds = 40
     epochs = 1
 
