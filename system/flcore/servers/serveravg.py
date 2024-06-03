@@ -44,13 +44,15 @@ class MultiFedAvg(Server):
             # self.send_models()
             print(self.selected_clients)
             for m in range(len(self.selected_clients)):
+
+
+                for i in range(len(self.selected_clients[m])):
+                    self.clients[self.selected_clients[m][i]].train(m, self.global_model[m])
+
                 if t%self.eval_gap == 0:
                     print(f"\n-------------Round number: {t}-------------")
                     print("\nEvaluate global model for ", self.dataset[m])
                     self.evaluate(m, t=t)
-
-                for i in range(len(self.selected_clients[m])):
-                    self.clients[self.selected_clients[m][i]].train(m, self.global_model[m])
 
             # threads = [Thread(target=client.train)
             #            for client in self.selected_clients]

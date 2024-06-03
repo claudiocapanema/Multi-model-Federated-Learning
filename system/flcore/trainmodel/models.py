@@ -15,9 +15,12 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
+import sys
 import torch
 import torch.nn.functional as F
 from torch import nn
+import numpy as np
+import random
 
 batch_size = 10
 
@@ -408,6 +411,74 @@ class LeNet(nn.Module):
 #         x = self.fc3(x)
 #         x = F.log_softmax(x, dim=1)
 #         return x
+
+class CNN_2(torch.nn.Module):
+    def __init__(self, input_shape, mid_dim=64, num_classes=10):
+        super().__init__()
+        self.model = torch.nn.Sequential(
+            # Input = 3 x 32 x 32, Output = 32 x 32 x 32
+            torch.nn.Conv2d(in_channels=input_shape, out_channels=32, kernel_size=3, padding=1),
+            torch.nn.ReLU(),
+            # Input = 32 x 32 x 32, Output = 32 x 16 x 16
+            torch.nn.MaxPool2d(kernel_size=2),
+
+            # Input = 32 x 16 x 16, Output = 64 x 16 x 16
+            torch.nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1),
+            torch.nn.ReLU(),
+            # Input = 64 x 16 x 16, Output = 64 x 8 x 8
+            torch.nn.MaxPool2d(kernel_size=2),
+
+            # Input = 64 x 8 x 8, Output = 64 x 8 x 8
+            torch.nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, padding=1),
+            torch.nn.ReLU(),
+            # Input = 64 x 8 x 8, Output = 64 x 4 x 4
+            torch.nn.MaxPool2d(kernel_size=2),
+
+            torch.nn.Flatten(),
+            torch.nn.Linear(mid_dim * 4 * 4, 512),
+            torch.nn.ReLU()
+        )
+
+        self.fc = torch.nn.Linear(512, num_classes)
+
+    def forward(self, x):
+        a = self.model(x)
+
+
+        return self.fc(a)
+
+# ====================================================================================================================
+
+class GRU(torch.nn.Module):
+    def __init__(self, input_shape, num_layers=1, hidden_size=4, sequence_length=28, num_classes=10):
+        super().__init__()
+        try:
+            random.seed(0)
+            np.random.seed(0)
+            torch.manual_seed(0)
+            self.input_size = input_shape
+            self.hidden_size = hidden_size
+            self.num_layers = num_layers
+            self.output_size = num_classes
+            self.time_length = sequence_length
+
+            self.gru = nn.GRU(self.input_size, self.hidden_size, self.num_layers, batch_first=True)
+            self.fc = nn.Linear(self.time_length * self.hidden_size, self.output_size, bias=True)
+        except Exception as e:
+            print("GRU init")
+            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
+
+    def forward(self, x):
+        try:
+            random.seed(0)
+            np.random.seed(0)
+            torch.manual_seed(0)
+            x, h = self.gru(x)
+            out = self.fc(nn.Flatten()(x))
+            return out
+        except Exception as e:
+            print("GRU forward")
+            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
 
 # ====================================================================================================================
 

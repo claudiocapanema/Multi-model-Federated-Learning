@@ -18,30 +18,54 @@
 import time
 import math
 import numpy as np
-from flcore.clients.clientavg import clientAVG
-from flcore.servers.serveravg import MultiFedAvg
+from flcore.clients.clientfednome import clientFedNome
+from flcore.servers.serverbase import Server
 from threading import Thread
 
+from functools import reduce
+from typing import List, Tuple
 
-class FedNome(MultiFedAvg):
+import numpy as np
+import numpy.typing as npt
+
+import torch
+from torch.nn.parameter import Parameter
+
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+NDArray = npt.NDArray[Any]
+NDArrays = List[NDArray]
+
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from sklearn.metrics.pairwise import cosine_similarity
+from scipy.spatial import distance
+
+import numpy.typing as npt
+
+NDArray = npt.NDArray[Any]
+NDArrays = List[NDArray]
+
+
+class FedNome(Server):
     def __init__(self, args, times):
         super().__init__(args, times)
 
-        # # select slow clients
-        # self.set_slow_clients()
-        # self.set_clients(clientAVG)
-        #
-        # print(f"\nJoin ratio / total clients: {self.join_ratio} / {self.num_clients}")
-        # print("Finished creating server and clients.")
-        #
-        # # self.load_model()
-        # self.Budget = []
+        # select slow clients
+        self.set_slow_clients()
+        self.set_clients(clientFedNome)
+
+        print(f"\nJoin ratio / total clients: {self.join_ratio} / {self.num_clients}")
+        print("Finished creating server and clients.")
+
+        # self.load_model()
+        self.Budget = []
         self.fairness_weight = args.fairness_weight
         self.client_class_count = {m: {i: [] for i in range(self.num_clients)} for m in range(self.M)}
         self.clients_training_count = {m: [0 for i in range(self.num_clients)] for m in range(self.M)}
         self.current_training_class_count = [[0 for i in range(self.num_classes[j])] for j in range(self.M)]
         self.non_iid_degree = {m: {'unique local classes': 0, 'samples': 0} for m in range(self.M)}
         self.client_selection_model_weight = np.array([0] * self.M)
+        self.clients_cosine_similarities = {m: np.array([0 for i in range(self.num_classes[m])]) for m in range(self.M)}
+        self.clients_cosine_similarities_with_current_model = {m: [0 for i in range(self.num_clients)] for m in range(self.M)}
         self.minimum_training_clients_per_model = 2
         self.cold_start_max_non_iid_level = 1
         self.cold_start_training_level = np.array([0] * self.M)
@@ -92,10 +116,12 @@ class FedNome(MultiFedAvg):
         for m in range(self.M):
             for i in range(self.num_clients):
 
-                cosine_similarities[m][i] = np.dot(self.unique_count_samples[m],self.client_class_count[m][i])/(np.linalg.norm(self.unique_count_samples[m])*np.linalg.norm(self.client_class_count[m][i]))
+                # cosine_similarities[m][i] = np.dot(self.unique_count_samples[m],self.client_class_count[m][i])/(np.linalg.norm(self.unique_count_samples[m])*np.linalg.norm(self.client_class_count[m][i]))
+                cosine_similarities[m][i] = cosine_similarity(np.array([self.unique_count_samples[m]]), np.array([self.client_class_count[m][i]]))[0][0]
 
         print("si: ")
         print(cosine_similarities)
+        # exit()
 
         clients_m_p = [[i for i in range(self.num_clients)] for j in range(self.M)]
 
@@ -105,6 +131,7 @@ class FedNome(MultiFedAvg):
 
         print("Quality")
         print(clients_m_p)
+        self.clients_cosine_similarities = clients_m_p
         return clients_m_p
 
     # def select_clients(self, t):
@@ -153,125 +180,136 @@ class FedNome(MultiFedAvg):
     #     return selected_clients_m
 
     def select_clients(self, t):
-        np.random.seed(t)
-        if self.random_join_ratio:
-            self.current_num_join_clients = np.random.choice(range(self.num_join_clients, self.num_clients+1), 1, replace=False)[0]
-        else:
-            self.current_num_join_clients = self.num_join_clients
-        np.random.seed(t)
-
-        # selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
-        # selected_clients = [i.id for i in selected_clients]
+        # np.random.seed(t)
+        # if self.random_join_ratio:
+        #     self.current_num_join_clients = np.random.choice(range(self.num_join_clients, self.num_clients+1), 1, replace=False)[0]
+        # else:
+        #     self.current_num_join_clients = self.num_join_clients
+        # np.random.seed(t)
+        # selected_clients_m = [[] for i in range(self.M)]
+        # selected_clients = []
+        # n_clients_m = [0] * self.M
+        # n_clients_selected = 0
+        # remaining_clients = int(self.num_clients * self.join_ratio)
+        # uniform_selection_m = self.uniform_selection(t)
+        # # data_quality_selection_m = self.data_quality_selection()
+        # data_quality_selection_m = self.clients_cosine_similarities
+        # prob_cold_start_m, use_cold_start_m = self.cold_start_selection()
+        # cold_start_clients_m = [np.array([]) for i in range(self.M)]
+        # print(self.client_selection_model_weight)
+        # print(self.cold_start_training_level)
+        # print(use_cold_start_m)
+        # clients_cumulative_prob_m = np.zeros((self.M, self.num_clients))
+        # total = 0
+        # for client in range(self.num_clients):
+        #     for m in range(self.M):
+        #         clients_cumulative_prob_m[m][client] = uniform_selection_m[m][client] + data_quality_selection_m[m][client]
+        #         total += clients_cumulative_prob_m[m][client]
         #
-        # n = len(selected_clients) // self.M
-        # # sc = np.array_split(selected_clients, self.M)
-        # sc = [np.array(selected_clients[0:12])]
-        # sc.append(np.array(selected_clients[12:]))
-        selected_clients_m = [[] for i in range(self.M)]
-        selected_clients = []
-        n_clients_m = [0] * self.M
-        n_clients_selected = 0
-        remaining_clients = int(self.num_clients * self.join_ratio)
-        uniform_selection_m = self.uniform_selection(t)
-        data_quality_selection_m = self.data_quality_selection()
-        prob_cold_start_m, use_cold_start_m = self.cold_start_selection()
-        cold_start_clients_m = [np.array([]) for i in range(self.M)]
-        print(self.client_selection_model_weight)
-        print(self.cold_start_training_level)
-        print(use_cold_start_m)
-        clients_cumulative_prob_m = np.zeros((self.M, self.num_clients))
-        total = 0
-        for client in range(self.num_clients):
-            for m in range(self.M):
-                clients_cumulative_prob_m[m][client] = uniform_selection_m[m][client] + data_quality_selection_m[m][client]
-                total += clients_cumulative_prob_m[m][client]
-            # for m in range(self.M):
-            #     clients_cumulative_prob_m[client][m] = clients_cumulative_prob_m[client][m] / total
+        # m_order = np.argwhere(use_cold_start_m == True)
+        # m_order = m_order.flatten()
+        # print("prim: ", m_order)
+        # for i in range(self.M):
+        #     if i not in m_order:
+        #         m_order = np.append(m_order, [i])
+        # print("m order: ", m_order)
+        # for i in range(len(m_order)):
+        #     m = m_order[i]
+        #     if use_cold_start_m[m]:
+        #         n_selected_clients_m = math.ceil(self.num_clients*self.join_ratio*self.cold_start_training_level[m])
+        #         if n_selected_clients_m > remaining_clients:
+        #             n_selected_clients_m = remaining_clients
+        #         print("co: ", self.num_clients, self.join_ratio, self.cold_start_training_level[m])
+        #         p = prob_cold_start_m[m]
+        #         p = np.array([p[i] if i not in selected_clients else 0 for i in range(len(p))])
+        #         p = np.argwhere(p == 1).flatten()[:n_selected_clients_m]
+        #         # cold_start_clients_m[m] = np.argwhere(prob_cold_start_m[m][prob_cold_start_m[m] == 1]).flatten()[:n_selected_clients_m]
+        #         remaining_clients = n_selected_clients_m - len(p)
+        #         print("faltantes: ", n_selected_clients_m - len(p))
+        #         if n_selected_clients_m - len(p) > 0:
+        #             # prob_m = uniform_selection_m[m] * (1 - self.client_selection_model_weight[m]) + data_quality_selection_m[m] * self.client_selection_model_weight[m]
+        #             prob_m = clients_cumulative_prob_m[m]
+        #             prob_m[p] = 0
+        #             prob_m = np.array([prob_m[i] if i not in selected_clients else 0 for i in range(len(prob_m))])
+        #             prob_m = np.argsort(prob_m)[-(n_selected_clients_m - len(p)):]
+        #             print("f adicionados: ", len(prob_m))
+        #             # prob_m = np.array([i if i not in prob_m else 0 for i in prob_m])
+        #             # prob_m = np.argwhere(prob_m > 0).flatten()[]
+        #         else:
+        #             prob_m = np.array([])
+        #         if len(p) > 0 and len(prob_m) == 0:
+        #             selected_clients_m[m] = p
+        #         else:
+        #             selected_clients_m[m] = np.array(list(p) + list(prob_m))
+        #
+        #     else:
+        #         # print("f", self.num_clients * self.join_ratio - n_clients_selected)
+        #         if True not in use_cold_start_m:
+        #             n_clients = math.ceil(self.num_clients * self.join_ratio * self.client_selection_model_weight[m])
+        #         else:
+        #             n_clients = min(math.ceil(self.num_clients * self.join_ratio - n_clients_selected), math.ceil(self.num_clients * self.join_ratio * self.client_selection_model_weight[m]))
+        #         if n_clients > remaining_clients or (n_clients < remaining_clients and i == self.M - 1):
+        #             print("ent", remaining_clients)
+        #             n_clients = remaining_clients
+        #         prob_m = clients_cumulative_prob_m[m]
+        #
+        #         print(prob_m)
+        #         prob_m = np.array([prob_m[i] if i not in selected_clients else 0 for i in range(len(prob_m))])
+        #         prob_m = prob_m / np.sum(prob_m)
+        #         print("ee: ", prob_m)
+        #         prob_m = list(np.random.choice([i for i in range(len(self.clients))], n_clients, replace=False, p=prob_m))
+        #         selected_clients_m[m] = prob_m
+        #
+        #         # np.random.seed(t)
+        #         # if self.random_join_ratio:
+        #         #     self.current_num_join_clients = \
+        #         #     np.random.choice(range(self.num_join_clients, self.num_clients + 1), 1, replace=False)[0]
+        #         # else:
+        #         #     self.current_num_join_clients = self.num_join_clients
+        #         # np.random.seed(t)
+        #         # selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
+        #         # selected_clients = [i.id for i in selected_clients]
+        #         #
+        #         # n = len(selected_clients) // self.M
+        #         # sc = np.array_split(selected_clients, self.M)
+        #         # # sc = [np.array(selected_clients[0:12])]
+        #         # # sc.append(np.array(selected_clients[12:]))
+        #         # selected_clients_m[m] = sc[m]
+        #
+        #     selected_clients += list(selected_clients_m[m])
+        #     n_clients_selected += len(selected_clients_m[m])
+        #     remaining_clients = int(self.num_clients * self.join_ratio) - n_clients_selected
+        #     print("m: ", m, " remaining: ", remaining_clients)
 
-        m_order = np.argwhere(use_cold_start_m == True)
-        m_order = m_order.flatten()
-        print("prim: ", m_order)
-        for i in range(self.M):
-            if i not in m_order:
-                m_order = np.append(m_order, [i])
-        print("m order: ", m_order)
-        for i in range(len(m_order)):
-            m = m_order[i]
-            if use_cold_start_m[m]:
-                n_selected_clients_m = math.ceil(self.num_clients*self.join_ratio*self.cold_start_training_level[m])
-                if n_selected_clients_m > remaining_clients:
-                    n_selected_clients_m = remaining_clients
-                print("co: ", self.num_clients, self.join_ratio, self.cold_start_training_level[m])
-                p = prob_cold_start_m[m]
-                p = np.array([p[i] if i not in selected_clients else 0 for i in range(len(p))])
-                p = np.argwhere(p == 1).flatten()[:n_selected_clients_m]
-                # cold_start_clients_m[m] = np.argwhere(prob_cold_start_m[m][prob_cold_start_m[m] == 1]).flatten()[:n_selected_clients_m]
-                remaining_clients = n_selected_clients_m - len(p)
-                print("faltantes: ", n_selected_clients_m - len(p))
-                if n_selected_clients_m - len(p) > 0:
-                    # prob_m = uniform_selection_m[m] * (1 - self.client_selection_model_weight[m]) + data_quality_selection_m[m] * self.client_selection_model_weight[m]
-                    prob_m = clients_cumulative_prob_m[m]
-                    prob_m[p] = 0
-                    prob_m = np.array([prob_m[i] if i not in selected_clients else 0 for i in range(len(prob_m))])
-                    prob_m = np.argsort(prob_m)[-(n_selected_clients_m - len(p)):]
-                    print("f adicionados: ", len(prob_m))
-                    # prob_m = np.array([i if i not in prob_m else 0 for i in prob_m])
-                    # prob_m = np.argwhere(prob_m > 0).flatten()[]
-                else:
-                    prob_m = np.array([])
-                if len(p) > 0 and len(prob_m) == 0:
-                    selected_clients_m[m] = p
-                else:
-                    selected_clients_m[m] = np.array(list(p) + list(prob_m))
-
+        np.random.seed(t)
+        if t == 1:
+            return super().select_clients(t)
+        else:
+            if self.random_join_ratio:
+                self.current_num_join_clients = \
+                np.random.choice(range(self.num_join_clients, self.num_clients + 1), 1, replace=False)[0]
             else:
-                # print("f", self.num_clients * self.join_ratio - n_clients_selected)
-                if True not in use_cold_start_m:
-                    n_clients = math.ceil(self.num_clients * self.join_ratio * self.client_selection_model_weight[m])
-                else:
-                    n_clients = min(math.ceil(self.num_clients * self.join_ratio - n_clients_selected), math.ceil(self.num_clients * self.join_ratio * self.client_selection_model_weight[m]))
-                if n_clients > remaining_clients or (n_clients < remaining_clients and i == self.M - 1):
-                    print("ent", remaining_clients)
-                    n_clients = remaining_clients
-                # prob_m = uniform_selection_m[m] * (1 - self.client_selection_model_weight[m]) + \
-                #          data_quality_selection_m[m] * self.client_selection_model_weight[m]
-                # prob_m = np.argsort(prob_m)
-                # prob_m = np.array([i if i not in selected_clients else -1 for i in prob_m])
-                # prob_m = prob_m[prob_m >= 0][-n_clients:]
-                prob_m = clients_cumulative_prob_m[m]
+                self.current_num_join_clients = self.num_join_clients
+            np.random.seed(t)
+            selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
+            selected_clients_m = [[] for i in range(self.M)]
 
-                print(prob_m)
-                # prob_m = prob_m[prob_m >= 0]
-                prob_m = np.array([prob_m[i] if i not in selected_clients else 0 for i in range(len(prob_m))])
-                prob_m = prob_m / np.sum(prob_m)
-                print("ee: ", prob_m)
-                prob_m = list(np.random.choice([i for i in range(len(self.clients))], n_clients, replace=False, p=prob_m))
-                selected_clients_m[m] = prob_m
+            for client in selected_clients:
+                client_losses = []
+                for metrics_m in client.test_metrics_list_dict:
+                    client_losses.append(metrics_m['Loss'] * metrics_m['Samples'])
+                client_losses = np.array(client_losses)
+                client_losses = (np.power(client_losses, self.fairness_weight - 1)) / np.sum(client_losses)
+                client_losses = client_losses / np.sum(client_losses)
+                print("probal: ", client_losses)
+                m = np.random.choice([i for i in range(self.M)], p=client_losses)
+                selected_clients_m[m].append(client.id)
 
-                # np.random.seed(t)
-                # if self.random_join_ratio:
-                #     self.current_num_join_clients = \
-                #     np.random.choice(range(self.num_join_clients, self.num_clients + 1), 1, replace=False)[0]
-                # else:
-                #     self.current_num_join_clients = self.num_join_clients
-                # np.random.seed(t)
-                # selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
-                # selected_clients = [i.id for i in selected_clients]
-                #
-                # n = len(selected_clients) // self.M
-                # sc = np.array_split(selected_clients, self.M)
-                # # sc = [np.array(selected_clients[0:12])]
-                # # sc.append(np.array(selected_clients[12:]))
-                # selected_clients_m[m] = sc[m]
-
-            selected_clients += list(selected_clients_m[m])
-            n_clients_selected += len(selected_clients_m[m])
-            remaining_clients = int(self.num_clients * self.join_ratio) - n_clients_selected
-            print("m: ", m, " remaining: ", remaining_clients)
+        print("Modelos clientes: ", selected_clients_m)
 
 
         print("Selecionados: ", t, selected_clients_m)
-        print("Quantidade: ", n_clients_selected)
+        # print("Quantidade: ", n_clients_selected)
         # exit()
 
         return selected_clients_m
@@ -296,15 +334,18 @@ class FedNome(MultiFedAvg):
             # self.send_models()
             print(self.selected_clients)
             for m in range(len(self.selected_clients)):
+
+
+                for i in range(len(self.selected_clients[m])):
+                    client_id = self.selected_clients[m][i]
+                    self.clients[client_id].train(m, self.global_model[m], self.clients_cosine_similarities_with_current_model[m][client_id])
+                    self.clients_training_count[m][client_id] += 1
+                    self.current_training_class_count[m] += self.clients[client_id].train_class_count[m]
+
                 if t%self.eval_gap == 0:
                     print(f"\n-------------Round number: {t}-------------")
                     print("\nEvaluate global model for ", self.dataset[m])
                     self.evaluate(m, t=t)
-
-                for i in range(len(self.selected_clients[m])):
-                    self.clients[self.selected_clients[m][i]].train(m, self.global_model[m])
-                    self.clients_training_count[m][self.clients[self.selected_clients[m][i]].id] += 1
-                    self.current_training_class_count[m] += self.clients[self.selected_clients[m][i]].train_class_count[m]
 
                 self.current_training_class_count[m] = np.round(self.current_training_class_count[m] / np.sum(self.current_training_class_count[m]), 2)
                 # print("current training class count ", self.current_training_class_count[m])
@@ -336,7 +377,7 @@ class FedNome(MultiFedAvg):
 
             if self.num_new_clients > 0:
                 self.eval_new_clients = True
-                self.set_new_clients(clientAVG)
+                self.set_new_clients(clientFedNome)
                 print(f"\n-------------Fine tuning round-------------")
                 print("\nEvaluate new clients")
                 self.evaluate(m, t=t)
@@ -389,7 +430,10 @@ class FedNome(MultiFedAvg):
             unique_count_samples[m] = unique_count_samples[m] / np.sum(unique_count_samples[m])
         print("samplles")
         print(self.unique_count_samples)
+        print(unique_count_samples)
         print(self.client_selection_model_weight)
+        self.data_quality_selection()
+        print(self.clients_cosine_similarities)
         # ruim
         self.client_selection_model_weight[0] = 0.4
         self.client_selection_model_weight[1] = 0.6
@@ -404,6 +448,66 @@ class FedNome(MultiFedAvg):
                 self.client_selection_model_weight[i] = self.minimum_training_level
 
         # self.cold_start_max_non_iid_level = self.cold_start_training_level / np.sum(self.cold_start_training_level)
+
+    def aggregate(self, results: List[Tuple[NDArrays, float]], m: int) -> NDArrays:
+        """Compute weighted average."""
+        # Calculate the total number of examples used during training
+        num_examples_total = sum([num_examples for _, num_examples, cid in results])
+        num_similarities_total = sum([self.clients_cosine_similarities[m][cid] for _, _, cid in results])
+        total = num_examples_total + num_similarities_total
+        # print("exemplo: ", self.clients_cosine_similarities[m][3] / num_similarities_total)
+        # print("exemplo: ", self.clients_cosine_similarities[m][4] / num_similarities_total)
+        # print("exemplo: ", self.clients_cosine_similarities[m][5] / num_similarities_total)
+        # print("exemplo: ", self.clients_cosine_similarities[m][6] / num_similarities_total)
+        #
+        # exit()
+
+
+        # Create a list of weights, each multiplied by the related number of examples
+        weighted_weights = [
+            [layer.detach().cpu().numpy() * (self.clients_cosine_similarities[m][cid]) for layer in weights.parameters()] for weights, num_examples, cid in results
+        ]
+
+        # weighted_weights = [
+        #     [layer.detach().cpu().numpy() * (num_examples / num_examples_total) for
+        #      layer in weights.parameters()] for weights, num_examples, cid in results
+        # ]
+
+        # Compute average weights of each layer
+        # weights_prime: NDArrays = [
+        #     reduce(np.add, layer_updates) / num_examples_total
+        #     for layer_updates in zip(*weighted_weights)
+        # ]
+        weights_prime: NDArrays = [
+            reduce(np.add, layer_updates) / num_similarities_total
+            for layer_updates in zip(*weighted_weights)
+        ]
+
+        weights_prime = [Parameter(torch.Tensor(i.tolist())) for i in weights_prime]
+
+        self.current_model_unique_count_samples = [np.array([0.0 for i in range(self.num_classes[m])]) for m in range(self.M)]
+
+        for _, _, cid in results:
+            self.current_model_unique_count_samples[m] += (np.array(self.client_class_count[m][cid]))
+
+        self.current_model_unique_count_samples[m] = np.array([self.current_model_unique_count_samples[m]])
+        # print(self.current_model_unique_count_samples[m])
+        # exit()
+
+
+        # print(self.client_class_count[m][0])
+        for i in range(self.num_clients):
+            # self.client_class_count[m][i] = self.clients[i].train_class_count[m]
+            total  = np.sum(self.client_class_count[m][i])
+            normalized = np.array([self.client_class_count[m][i]])
+            # print("unique: ", self.current_model_unique_count_samples[m], self.current_model_unique_count_samples[m].ndim)
+            # print("normalized: ", list(normalized), cosine_similarity(self.current_model_unique_count_samples[m], normalized))
+            self.clients_cosine_similarities_with_current_model[m][i] = cosine_similarity(self.current_model_unique_count_samples[m], normalized)[0][0]
+
+
+        # exit()
+        print("Similaridade atual: ", m, i, self.clients_cosine_similarities_with_current_model[m])
+        return weights_prime
 
 
 

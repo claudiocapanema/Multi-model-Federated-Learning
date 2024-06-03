@@ -86,12 +86,13 @@ if __name__ == "__main__":
 
     alphas = ['0.1', '5.0']
     # alphas = ['5.0', '0.1']
-    configuration = {"dataset": ["Cifar10", "GTSRB"], "alpha": [5.0, 0.1]}
+    models_names = ["cnn_a", "cnn_a"]
+    configuration = {"dataset": ["Cifar10", "EMNIST"], "alpha": [5.0, 0.1]}
     datasets = configuration["dataset"]
-    solutions = ["FedNomev1", "FedAvg", "FedFairMMFL"]
+    solutions = ["FedFairMMFL", "MultiFedAvg"]
     num_classes = {"EMNIST": 47, "Cifar10": 10, "GTSRB": 43}
     num_clients = 40
-    fc = 0.4
+    fc = 0.3
     rounds = 40
     epochs = 1
 
@@ -105,7 +106,7 @@ if __name__ == "__main__":
     read_std_dataset = []
     read_num_samples_std = []
 
-    d = """results/clients_{}/alpha_{}/fc_{}/rounds_{}/epochs_{}/""".format(num_clients, alphas, fc, rounds, epochs)
+    d = """results/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(num_clients, alphas, datasets, models_names, fc, rounds, epochs)
     read_solutions = []
     read_accs = []
     read_loss = []

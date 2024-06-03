@@ -18,30 +18,31 @@
 import time
 import numpy as np
 from flcore.clients.clientavg import clientAVG
-from flcore.servers.serveravg import Server
+from flcore.servers.serveravg import MultiFedAvg
 from threading import Thread
 
 
-class MultiFedAvgRR(Server):
+class MultiFedAvgRR(MultiFedAvg):
     def __init__(self, args, times):
         super().__init__(args, times)
 
     def select_clients(self, t):
-        if self.random_join_ratio:
-            self.current_num_join_clients = np.random.choice(range(self.num_join_clients, self.num_clients+1), 1, replace=False)[0]
-        else:
-            self.current_num_join_clients = self.num_join_clients
-
         seed = t // self.M
         np.random.seed(seed)
+        if self.random_join_ratio:
+            self.current_num_join_clients = \
+            np.random.choice(range(self.num_join_clients, self.num_clients + 1), 1, replace=False)[0]
+        else:
+            self.current_num_join_clients = self.num_join_clients
         selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
+        selected_clients = [i.id for i in selected_clients]
 
         n = len(selected_clients) // self.M
-        selected_clients = [selected_clients[i:i+n] for i in range(0, len(selected_clients), n)]
+        sc = np.array_split(selected_clients, self.M)
+        # sc = [np.array(selected_clients[0:6])]
+        # sc.append(np.array(selected_clients[6:]))
 
-        # print(np.array(selected_clients).shape)
-        # print(np.array(selected_clients)[0])
-        # print(n)
-        # exit()
+        print("Selecionados: ", t, "\n", sc)
+        print("----------")
 
-        return selected_clients
+        return sc
