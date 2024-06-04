@@ -130,6 +130,8 @@ class Server(object):
         self.eval_new_clients = False
         self.fine_tuning_epoch_new = args.fine_tuning_epoch_new
 
+        self.clients_test_metrics = {i: {metric: {m: [] for m in range(self.M)} for metric in ["Accuracy", "Loss"]} for i in range(self.num_clients)}
+
     def set_clients(self, clientObj):
         for i, train_slow, send_slow in zip(range(self.num_clients), self.train_slow_clients, self.send_slow_clients):
             train_data = []
@@ -252,7 +254,6 @@ class Server(object):
         return weights_prime
 
     def aggregate_parameters(self):
-        print("agr: ", (len(self.uploaded_models) > 0))
         assert (len(self.uploaded_models) > 0)
 
         for m in range(len(self.uploaded_models)):
@@ -359,8 +360,12 @@ class Server(object):
         micro_fscore = []
         weighted_fscore = []
         macro_fscore = []
-        for c in test_clients:
+        for i in range(len(test_clients)):
+            c = test_clients[i]
             test_acc, test_loss, test_num, test_auc, test_balanced_acc, test_micro_fscore, test_macro_fscore, test_weighted_fscore = c.test_metrics(m, copy.deepcopy(self.global_model[m].to(self.device)))
+            if i in self.selected_clients[m]:
+                self.clients_test_metrics[i]["Accuracy"][m].append(test_acc)
+                self.clients_test_metrics[i]["Loss"][m].append(test_loss)
             # accs.append(test_acc*test_num)
             # auc.append(test_auc*test_num)
             # num_samples.append(test_num)

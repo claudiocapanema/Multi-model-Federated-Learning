@@ -59,7 +59,7 @@ def line(df, base_dir, x_column, first, second, hue, ci=None):
     i = 1
     # axs[i].get_legend().remove()
     axs[i].set_ylabel(second, labelpad=16)
-    axs[i].legend(fontsize=6)
+    axs[i].legend(fontsize=8)
 
     # fig.suptitle("", fontsize=16)
     plt.tight_layout()
@@ -81,7 +81,7 @@ if __name__ == "__main__":
     models_names = ["cnn_a", "cnn_a"]
     datasets = configuration["dataset"]
     # solutions = ["FedNome",  "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg"]
-    solutions = ["FedNome", "FedFairMMFL", "MultiFedAvg"]
+    solutions = ["Proposta", "FedFairMMFL", "MultiFedAvg"]
     num_classes = {"EMNIST": 47, "Cifar10": 10, "GTSRB": 43}
     num_clients = 40
     fc = 0.3

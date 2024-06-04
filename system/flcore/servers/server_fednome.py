@@ -296,11 +296,31 @@ class FedNome(Server):
 
             for client in selected_clients:
                 client_losses = []
-                for metrics_m in client.test_metrics_list_dict:
-                    client_losses.append(metrics_m['Loss'] * metrics_m['Samples'])
+                improvements = []
+                for m in range(len(client.test_metrics_list_dict)):
+                    metrics_m = client.test_metrics_list_dict[m]
+                    losses = self.clients_test_metrics[client.id]["Accuracy"][m]
+
+                    if len(losses) >= 2:
+                        diff = losses[-1] - losses[-2]
+                        if diff > 0:
+                            improvement = diff
+                            improvements.append(improvement)
+                        else:
+                            diff = 0.01
+                    elif len(losses) == 1:
+                        diff = losses[0]
+                    else:
+                        diff = 1
+                    client_losses.append(diff * metrics_m['Samples'])
                 client_losses = np.array(client_losses)
+                # if len(improvements) > 0:
+                    # client_losses = client_losses * np.array(improvements)
                 client_losses = (np.power(client_losses, self.fairness_weight - 1)) / np.sum(client_losses)
                 client_losses = client_losses / np.sum(client_losses)
+                # else:
+                #     pass
+                    # client_losses = np.array([0.5, 0.5])
                 print("probal: ", client_losses)
                 m = np.random.choice([i for i in range(self.M)], p=client_losses)
                 selected_clients_m[m].append(client.id)

@@ -23,16 +23,15 @@ from flcore.clients.clientbase import Client
 from utils.privacy import *
 
 
-class clientAVG(Client):
+class clientFedNome(Client):
     def __init__(self, args, id, train_samples, test_samples, **kwargs):
         super().__init__(args, id, train_samples, test_samples, **kwargs)
 
-    def train(self, m, global_model):
+    def train(self, m, global_model, client_cosine_similarity):
         trainloader = self.trainloader[m]
         self.set_parameters(m, global_model)
         self.model[m].to(self.device)
         self.model[m].train()
-        print("Dataset: ", self.dataset[m], m)
 
         # differential privacy
         if self.privacy:
@@ -55,7 +54,7 @@ class clientAVG(Client):
                 y = y.type(torch.LongTensor).to(self.device)
                 if self.train_slow:
                     time.sleep(0.1 * np.abs(np.random.rand()))
-                output = self.model[m](x).to(self.device)
+                output = self.model[m](x)
                 loss = self.loss(output, y)
                 self.optimizer[m].zero_grad()
                 loss.backward()
@@ -77,3 +76,16 @@ class clientAVG(Client):
                 param.data = param_dp.data.clone()
             self.model[m] = model_origin
             self.optimizer = torch.optim.SGD(self.model[m].parameters(), lr=self.learning_rate)
+
+    # def set_parameters(self, m, model, cosine_similarity):
+    #     self.model[m].to('cpu')
+    #     model.to('cpu')
+    #     size = len([i.detach().cpu() for i in self.model[m].parameters()])
+    #     count = 1
+    #     for new_param, old_param in zip(model.parameters(), self.model[m].parameters()):
+    #         if count >= size -1 and m == 0:
+    #             continue
+    #             old_param.data = (1-cosine_similarity) * old_param.data.clone() + cosine_similarity * new_param.data.clone()
+    #         else:
+    #             old_param.data = new_param.data.clone()
+    #         count += 1
