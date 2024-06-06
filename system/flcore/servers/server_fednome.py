@@ -66,7 +66,8 @@ class FedNome(Server):
         self.client_selection_model_weight = np.array([0] * self.M)
         self.clients_cosine_similarities = {m: np.array([0 for i in range(self.num_classes[m])]) for m in range(self.M)}
         self.clients_cosine_similarities_with_current_model = {m: [0 for i in range(self.num_clients)] for m in range(self.M)}
-        self.minimum_training_clients_per_model = 2
+        self.minimum_training_clients_per_model = 3
+        self.minimum_training_clients_per_model_percentage = self.minimum_training_clients_per_model / self.num_join_clients
         self.cold_start_max_non_iid_level = 1
         self.cold_start_training_level = np.array([0] * self.M)
         self.minimum_training_level = 2 / self.num_clients
@@ -294,26 +295,43 @@ class FedNome(Server):
             selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
             selected_clients_m = [[] for i in range(self.M)]
 
+            t_size = 3
+            m_global_diff_list = []
+            for m in range(self.M):
+                global_acc = self.results_test_metrics[m]["Accuracy"]
+                if len(global_acc) >= 2:
+                    m_global_diff = global_acc[-1] - global_acc[-min(2, t_size):][0]
+                else:
+                    m_global_diff = global_acc[0]
+                m_global_diff_list.append(m_global_diff)
+
+            m_global_diff_list = np.array(m_global_diff_list)
+            m_global_diff_list = m_global_diff_list / np.sum(m_global_diff_list)
+            m_global_diff_list = np.where(m_global_diff_list < self.minimum_training_clients_per_model_percentage, self.minimum_training_clients_per_model_percentage, m_global_diff_list)
+            m_global_diff_list = m_global_diff_list / np.sum(m_global_diff_list)
+
+
             for client in selected_clients:
                 client_losses = []
                 improvements = []
                 for m in range(len(client.test_metrics_list_dict)):
                     metrics_m = client.test_metrics_list_dict[m]
-                    losses = self.clients_test_metrics[client.id]["Accuracy"][m]
+                    local_acc = self.clients_test_metrics[client.id]["Accuracy"][m]
+                    global_acc = self.results_test_metrics[m]["Accuracy"]
 
-                    if len(losses) >= 2:
-                        diff = losses[-1] - losses[-2]
-                        if diff > 0:
-                            improvement = diff
+                    if len(local_acc) >= 2:
+                        local_diff = local_acc[-1] - local_acc[-2]
+                        if local_diff > 0:
+                            improvement = local_diff
                             improvements.append(improvement)
                         else:
-                            diff = 0.01
-                    elif len(losses) == 1:
-                        diff = losses[0]
+                            local_diff = 0.01
+                    elif len(local_acc) == 1:
+                        local_diff = local_acc[0]
                     else:
-                        diff = 1
-                    client_losses.append(diff * metrics_m['Samples'])
-                client_losses = np.array(client_losses)
+                        local_diff = 1
+                    client_losses.append(local_diff * metrics_m['Samples'])
+                client_losses = np.array(client_losses) * m_global_diff_list
                 # if len(improvements) > 0:
                     # client_losses = client_losses * np.array(improvements)
                 client_losses = (np.power(client_losses, self.fairness_weight - 1)) / np.sum(client_losses)

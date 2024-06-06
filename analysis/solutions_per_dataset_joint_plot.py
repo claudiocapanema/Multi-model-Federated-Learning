@@ -46,8 +46,8 @@ def bar(df, base_dir, x_column, first, second, x_order, hue_order):
 def line(df, base_dir, x_column, first, second, hue, ci=None, style=None):
     titles = ["Average accuracy", "Average loss"]
     y_columns = [first, second]
-    y_maxs = [100, 6]
-    y_lims = [True, False]
+    y_maxs = [100, 4]
+    y_lims = [True, True]
     datasets = df['Dataset'].unique().tolist()
 
     for i in range(2):
@@ -59,7 +59,7 @@ def line(df, base_dir, x_column, first, second, hue, ci=None, style=None):
             title = datasets[j]
             line_plot(df=df.query("""Dataset == '{}'""".format(title)), base_dir=base_dir, ax=axs[j],
                       file_name="""solutions_{}""".format(datasets), x_column=x_column, y_column=y_column,
-                      hue=hue, ci=ci, title=title, tipo=None, y_lim=y_lim, y_max=y_max)
+                      hue=hue, ci=ci, title=title, tipo=None, y_lim=y_lim, y_min=0, y_max=y_max)
             if j != 1:
                 axs[j].get_legend().remove()
 
@@ -68,7 +68,7 @@ def line(df, base_dir, x_column, first, second, hue, ci=None, style=None):
 
         # axs[i].get_legend().remove()
         # axs[1].set_ylabel(y_column, labelpad=16)
-        axs[1].legend(fontsize=7)
+        axs[1].legend(fontsize=8)
 
     # fig.suptitle("", fontsize=16)
         plt.tight_layout()
@@ -86,14 +86,15 @@ if __name__ == "__main__":
 
     alphas = ['0.1', '5.0']
     # alphas = ['5.0', '0.1']
+    configuration = {"dataset": ["Cifar10", "EMNIST"], "alpha": [0.1, 5.0]}
     models_names = ["cnn_a", "cnn_a"]
-    configuration = {"dataset": ["Cifar10", "EMNIST"], "alpha": [5.0, 0.1]}
     datasets = configuration["dataset"]
-    solutions = ["FedFairMMFL", "MultiFedAvg"]
+    # solutions = ["FedNome",  "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg"]
+    solutions = ["FedFairMMFL", "MultiFedAvgRR", "MultiFedAvg"]
     num_classes = {"EMNIST": 47, "Cifar10": 10, "GTSRB": 43}
     num_clients = 40
     fc = 0.3
-    rounds = 40
+    rounds = 100
     epochs = 1
 
     read_alpha = []
@@ -136,7 +137,8 @@ if __name__ == "__main__":
     x_order = alphas
 
     hue_order = datasets
-    base_dir = """analysis/solutions/clients_{}/{}/fc_{}/{}/rounds_{}/""".format(num_clients, x_order, fc, hue_order, rounds)
+    base_dir = """analysis/solutions/clients_{}/{}/fc_{}/{}/{}/rounds_{}/""".format(num_clients, x_order, fc, hue_order,
+                                                                                    models_names, rounds)
 
     bar(df, base_dir, "Solution", first, second, x_order, hue_order)
     plt.plot()

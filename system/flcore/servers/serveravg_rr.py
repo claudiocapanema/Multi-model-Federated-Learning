@@ -28,6 +28,7 @@ class MultiFedAvgRR(MultiFedAvg):
 
     def select_clients(self, t):
         seed = t // self.M
+        step = t % self.M
         np.random.seed(seed)
         if self.random_join_ratio:
             self.current_num_join_clients = \
@@ -39,8 +40,18 @@ class MultiFedAvgRR(MultiFedAvg):
 
         n = len(selected_clients) // self.M
         sc = np.array_split(selected_clients, self.M)
+        new_selected_clients = [[] for i in range(len(sc))]
+        if step > 0:
+            for i in range(len(sc)):
+                if i + step >= len(sc):
+                    diff = len(sc) - i - step
+                else:
+                    diff = i + step
+                new_selected_clients[i] = sc[diff]
         # sc = [np.array(selected_clients[0:6])]
         # sc.append(np.array(selected_clients[6:]))
+
+            sc = np.array(new_selected_clients)
 
         print("Selecionados: ", t, "\n", sc)
         print("----------")

@@ -49,7 +49,8 @@ def line(df, base_dir, x_column, first, second, hue, ci=None):
              file_name="""solutions_{}""".format(datasets), x_column=x_column, y_column=first,
              hue=hue, ci=ci, title="""Average accuracy""", tipo=None, y_lim=True, y_max=100)
     i = 0
-    axs[i].get_legend().remove()
+    # axs[i].get_legend().remove()
+    axs[i].legend(fontsize=7)
 
     axs[i].set_xlabel('')
     line_plot(df=df, base_dir=base_dir, ax=axs[1],
@@ -57,9 +58,9 @@ def line(df, base_dir, x_column, first, second, hue, ci=None):
              x_column=x_column, y_column=second, title="""Average loss""", y_lim=True, y_max=5,
              hue=hue, ci=ci, tipo=None)
     i = 1
-    # axs[i].get_legend().remove()
+    axs[i].get_legend().remove()
     axs[i].set_ylabel(second, labelpad=16)
-    axs[i].legend(fontsize=8)
+
 
     # fig.suptitle("", fontsize=16)
     plt.tight_layout()
@@ -75,13 +76,13 @@ def line(df, base_dir, x_column, first, second, hue, ci=None):
 
 if __name__ == "__main__":
 
-    alphas = ['0.1', '5.0']
+    alphas = ['0.1', '1.0']
     # alphas = ['5.0', '0.1']
-    configuration = {"dataset": ["Cifar10", "GTSRB"], "alpha": [0.1, 5.0]}
-    models_names = ["cnn_a", "cnn_a"]
+    configuration = {"dataset": ["WISDM-W", "GTSRB"], "alpha": [float(i) for i in alphas]}
+    models_names = ["gru", "cnn_a"]
     datasets = configuration["dataset"]
     # solutions = ["FedNome",  "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg"]
-    solutions = ["Proposta", "FedFairMMFL", "MultiFedAvg"]
+    solutions = ["Proposta", "FedFairMMFL",  "MultiFedAvgRR", "MultiFedAvg"]
     num_classes = {"EMNIST": 47, "Cifar10": 10, "GTSRB": 43}
     num_clients = 40
     fc = 0.3

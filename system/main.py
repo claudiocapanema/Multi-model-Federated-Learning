@@ -96,7 +96,7 @@ def run(args):
     dts = args.dataset
     num_classes = []
     for dt in dts:
-        num_classes.append({'EMNIST': 47, 'MNIST': 10, 'Cifar10': 10, 'GTSRB': 43}[dt])
+        num_classes.append({'EMNIST': 47, 'MNIST': 10, 'Cifar10': 10, 'GTSRB': 43, 'WISDM-W': 20}[dt])
 
     args.num_classes = num_classes
 
@@ -120,8 +120,8 @@ def run(args):
                 else:
                     model = Mclr_Logistic(60, num_classes=num_classes_m).to(args.device)
 
-            elif "cnn" in model_str: # non-convex
-                if "MNIST" == dt:
+            elif "cnn_a" in model_str: # non-convex
+                if "EMNIST" == dt or "MNIST" == dt:
                     model = FedAvgCNN(in_features=1, num_classes=num_classes_m, dim=1024).to(args.device)
                 elif "Cifar10" == dt:
                     model = FedAvgCNN(in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
@@ -134,6 +134,14 @@ def run(args):
                     model = Digit5CNN().to(args.device)
                 else:
                     model = FedAvgCNN(in_features=3, num_classes=num_classes_m, dim=10816).to(args.device)
+
+            elif model_str == "gru":
+                if "WISDM-W" == dt:
+                    model = GRU(6, num_layers=1, hidden_size=4, sequence_length=200, num_classes=num_classes_m).to(args.device)
+
+            elif "cnn_b" in model_str:
+                if "GTSRB" == dt:
+                    model = CNN_2(3, mid_dim=64, num_classes=num_classes_m).to(args.device)
 
             elif "dnn" in model_str: # non-convex
                 if dt in ["MNIST", "EMNIST"]:
@@ -218,7 +226,7 @@ def run(args):
             print(model)
 
             # select algorithm
-            if args.algorithm == "FedAvg":
+            if args.algorithm == "MultiFedAvg":
                 head = copy.deepcopy(model.fc)
                 model.fc = nn.Identity()
                 model = BaseHeadSplit(model, head)
@@ -386,7 +394,12 @@ def run(args):
                 model.fc = nn.Identity()
                 model = BaseHeadSplit(model, head)
                 server = FedFairMMFL
-            elif args.algorithm == "FedNome":
+            elif args.algorithm == "MultiFedAvgRR":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = MultiFedAvgRR
+            elif args.algorithm == "Proposta":
                 head = copy.deepcopy(model.fc)
                 model.fc = nn.Identity()
                 model = BaseHeadSplit(model, head)
@@ -399,6 +412,7 @@ def run(args):
             models.append(model)
 
         args.model = models
+        args.models_names = models_str
         server = server(args, i)
         server.train()
 
