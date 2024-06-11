@@ -76,13 +76,13 @@ def line(df, base_dir, x_column, first, second, hue, ci=None):
 
 if __name__ == "__main__":
 
-    alphas = ['0.1', '1.0']
+    alphas = ['0.1', '5.0']
     # alphas = ['5.0', '0.1']
-    configuration = {"dataset": ["WISDM-W", "GTSRB"], "alpha": [float(i) for i in alphas]}
+    configuration = {"dataset": ["WISDM-W", "GTSRB"], "alpha": [0.1, 5.0]}
     models_names = ["gru", "cnn_a"]
     datasets = configuration["dataset"]
     # solutions = ["FedNome",  "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg"]
-    solutions = ["Proposta", "FedFairMMFL",  "MultiFedAvgRR", "MultiFedAvg"]
+    solutions = ["Proposta", "FedFairMMFL", "MultiFedAvgRR", "MultiFedAvg"]
     num_classes = {"EMNIST": 47, "Cifar10": 10, "GTSRB": 43}
     num_clients = 40
     fc = 0.3

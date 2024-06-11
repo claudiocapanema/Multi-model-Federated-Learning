@@ -86,15 +86,15 @@ if __name__ == "__main__":
 
     alphas = ['0.1', '5.0']
     # alphas = ['5.0', '0.1']
-    configuration = {"dataset": ["Cifar10", "EMNIST"], "alpha": [0.1, 5.0]}
-    models_names = ["cnn_a", "cnn_a"]
+    configuration = {"dataset": ["WISDM-W", "GTSRB"], "alpha": [0.1, 5.0]}
+    models_names = ["gru", "cnn_a"]
     datasets = configuration["dataset"]
     # solutions = ["FedNome",  "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg"]
-    solutions = ["FedFairMMFL", "MultiFedAvgRR", "MultiFedAvg"]
+    solutions = ["Proposta", "FedFairMMFL", "MultiFedAvgRR", "MultiFedAvg"]
     num_classes = {"EMNIST": 47, "Cifar10": 10, "GTSRB": 43}
     num_clients = 40
     fc = 0.3
-    rounds = 100
+    rounds = 40
     epochs = 1
 
     read_alpha = []

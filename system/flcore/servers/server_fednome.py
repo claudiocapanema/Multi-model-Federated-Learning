@@ -71,6 +71,7 @@ class FedNome(Server):
         self.cold_start_max_non_iid_level = 1
         self.cold_start_training_level = np.array([0] * self.M)
         self.minimum_training_level = 2 / self.num_clients
+        self.training_clients_per_model = np.array([0] * self.M)
         self.unique_count_samples = {m: np.array([0 for i in range(self.num_classes[m])]) for m in range(self.M)}
         self.similarity_matrix = np.zeros((self.M, self.num_clients))
 
@@ -310,12 +311,14 @@ class FedNome(Server):
             m_global_diff_list = np.where(m_global_diff_list < self.minimum_training_clients_per_model_percentage, self.minimum_training_clients_per_model_percentage, m_global_diff_list)
             m_global_diff_list = m_global_diff_list / np.sum(m_global_diff_list)
 
-
-            for client in selected_clients:
+            clients_losses = []
+            for client in self.clients:
                 client_losses = []
                 improvements = []
+                samples_m = []
                 for m in range(len(client.test_metrics_list_dict)):
                     metrics_m = client.test_metrics_list_dict[m]
+                    samples_m.append(metrics_m['Samples'])
                     local_acc = self.clients_test_metrics[client.id]["Accuracy"][m]
                     global_acc = self.results_test_metrics[m]["Accuracy"]
 
@@ -325,23 +328,66 @@ class FedNome(Server):
                             improvement = local_diff
                             improvements.append(improvement)
                         else:
-                            local_diff = 0.01
+                            local_diff = 0.15 # 0.1 ou 0.01
+                        if local_acc[-1] == 0:
+                            relative_diff = 0.001
+                        else:
+                            relative_diff = local_diff / local_acc[-1]
+                        local_diff = relative_diff * relative_diff + local_diff
                     elif len(local_acc) == 1:
                         local_diff = local_acc[0]
                     else:
                         local_diff = 1
+
                     client_losses.append(local_diff * metrics_m['Samples'])
                 client_losses = np.array(client_losses) * m_global_diff_list
-                # if len(improvements) > 0:
-                    # client_losses = client_losses * np.array(improvements)
+                clients_losses.append((client_losses / np.sum(samples_m)))
                 client_losses = (np.power(client_losses, self.fairness_weight - 1)) / np.sum(client_losses)
+
                 client_losses = client_losses / np.sum(client_losses)
-                # else:
-                #     pass
-                    # client_losses = np.array([0.5, 0.5])
                 print("probal: ", client_losses)
-                m = np.random.choice([i for i in range(self.M)], p=client_losses)
-                selected_clients_m[m].append(client.id)
+                # m = np.random.choice([i for i in range(self.M)], p=client_losses)
+                # selected_clients_m[m].append(client.id)
+
+            clients_losses = np.array(clients_losses)
+            print("fo: ", clients_losses.shape)
+
+            total_clients = 0
+            remaining_clients = np.array([i for i in range(len(self.clients))])
+            remaining_clients_per_model = self.training_clients_per_model
+            print("join clients: ", self.num_join_clients)
+            while total_clients < self.num_join_clients:
+
+                for m in range(self.M):
+                    print("m: ", m)
+                    if total_clients < self.num_join_clients and remaining_clients_per_model[m] > 0:
+                        print("tudo: ", remaining_clients, remaining_clients.shape, clients_losses.shape)
+                        m_clients_losses = np.array([i[m] for i in clients_losses])
+                        print("dim: ", m_clients_losses)
+                        cid = np.random.choice(remaining_clients, p=(m_clients_losses / np.sum(m_clients_losses)))
+                        print("Selecionado: ", cid)
+                        idx = np.argwhere(remaining_clients == cid)
+                        new_clients_losses = []
+                        new_remaining_clients = []
+                        for i in range(len(clients_losses)):
+                            if i != idx:
+                                new_clients_losses.append(clients_losses[i])
+                                new_remaining_clients.append(remaining_clients[i])
+                        clients_losses = np.array(new_clients_losses)
+                        remaining_clients = np.array(new_remaining_clients)
+                        print("deletou: ", clients_losses.shape, remaining_clients.shape)
+
+                        selected_clients_m[m].append(cid)
+                        remaining_clients_per_model[m] -= 1
+                        total_clients += 1
+                    else:
+
+
+                        print("restantes: ", remaining_clients.shape, selected_clients_m)
+                        print(clients_losses)
+                        print(remaining_clients_per_model)
+                        print(total_clients, self.num_join_clients)
+                        exit()
 
         print("Modelos clientes: ", selected_clients_m)
 
@@ -423,6 +469,7 @@ class FedNome(Server):
     def detect_non_iid_degree(self):
 
         unique_count_samples = {m: np.array([0 for i in range(self.num_classes[m])]) for m in range(self.M)}
+        training_clients = self.num_join_clients
         for m in range(self.M):
             read_alpha = []
             read_dataset = []
@@ -460,6 +507,8 @@ class FedNome(Server):
 
             self.non_iid_degree[m]['unique local classes'] = float(sum(read_num_classes) / (len(read_num_classes)))
             self.client_selection_model_weight[m] = float(sum(read_num_classes) / (len(read_num_classes)))
+            model_training_clients = int(training_clients * float(sum(read_num_samples)) / len(read_num_samples))
+            self.training_clients_per_model[m] = max([model_training_clients, self.minimum_training_clients_per_model])
         # print(float(sum(read_num_classes) / (len(read_num_classes))))
         # exit()
 
@@ -473,9 +522,9 @@ class FedNome(Server):
         self.data_quality_selection()
         print(self.clients_cosine_similarities)
         # ruim
-        self.client_selection_model_weight[0] = 0.4
-        self.client_selection_model_weight[1] = 0.6
-        self.client_selection_model_weight = np.array([0.7, 0.3])
+        # self.client_selection_model_weight[0] = 0.4
+        # self.client_selection_model_weight[1] = 0.6
+        # self.client_selection_model_weight = np.array([0.7, 0.3])
         # self.client_selection_model_weight[0] = 0.2
         # self.client_selection_model_weight[1] = 0.8
         # self.client_selection_model_weight = self.client_selection_model_weight / np.sum(self.client_selection_model_weight)
