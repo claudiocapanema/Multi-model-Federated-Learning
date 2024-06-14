@@ -319,8 +319,8 @@ class FedNome(Server):
                 for m in range(len(client.test_metrics_list_dict)):
                     metrics_m = client.test_metrics_list_dict[m]
                     samples_m.append(metrics_m['Samples'])
-                    local_acc = self.clients_test_metrics[client.id]["Accuracy"][m]
-                    global_acc = self.results_test_metrics[m]["Accuracy"]
+                    local_acc = self.clients_train_metrics[client.id]["Accuracy"][m]
+                    global_acc = self.results_train_metrics[m]["Accuracy"]
 
                     if len(local_acc) >= 2:
                         local_diff = local_acc[-1] - local_acc[-2]
@@ -328,7 +328,7 @@ class FedNome(Server):
                             improvement = local_diff
                             improvements.append(improvement)
                         else:
-                            local_diff = 0.15 # 0.1 ou 0.01
+                            local_diff = 0.1 # 0.1 ou 0.01
                         if local_acc[-1] == 0:
                             relative_diff = 0.001
                         else:
@@ -352,47 +352,109 @@ class FedNome(Server):
             clients_losses = np.array(clients_losses)
             print("fo: ", clients_losses.shape)
 
+            prob_cold_start_m, use_cold_start_m = self.cold_start_selection()
             total_clients = 0
             remaining_clients = np.array([i for i in range(len(self.clients))])
-            remaining_clients_per_model = self.training_clients_per_model
+            m_acc_gain = []
+            for m in range(self.M):
+                global_acc = self.results_train_metrics[m]["Accuracy"]
+                if len(global_acc) >= 2:
+                    acc_gain = max(global_acc[-1] - global_acc[-2], 0)
+                    m_acc_gain.append(acc_gain)
+                elif len(global_acc) == 1:
+                    m_acc_gain.append(global_acc[0])
+                else:
+                    m_acc_gain.append(self.training_clients_per_model[m])
+            # remaining_clients_per_model = self.training_clients_per_model
+            m_acc_gain = np.array(m_acc_gain)
+            remaining_clients_per_model = m_acc_gain / np.sum(m_acc_gain)
+            remaining_clients_per_model[np.where(remaining_clients_per_model < self.minimum_training_clients_per_model_percentage)] = self.minimum_training_clients_per_model_percentage
+            remaining_clients_per_model = np.array(remaining_clients_per_model * self.num_join_clients, dtype=int)
+            if np.sum(remaining_clients_per_model) < self.num_join_clients:
+                diff = self.num_join_clients - np.sum(remaining_clients_per_model)
+                i = 0
+                while np.sum(remaining_clients_per_model) < self.num_join_clients and diff > 0:
+                    if remaining_clients_per_model[i] != 3:
+                        remaining_clients_per_model[i] += 1
+                        diff -= 1
+                    i += 1
+            print("remaining: ", remaining_clients_per_model)
             print("join clients: ", self.num_join_clients)
+            sc = []
+            available_clients = [i for i in range(self.num_clients)]
+            l = 0
             while total_clients < self.num_join_clients:
 
                 for m in range(self.M):
                     print("m: ", m)
                     if total_clients < self.num_join_clients and remaining_clients_per_model[m] > 0:
-                        print("tudo: ", remaining_clients, remaining_clients.shape, clients_losses.shape)
-                        m_clients_losses = np.array([i[m] for i in clients_losses])
-                        print("dim: ", m_clients_losses)
-                        cid = np.random.choice(remaining_clients, p=(m_clients_losses / np.sum(m_clients_losses)))
-                        print("Selecionado: ", cid)
-                        idx = np.argwhere(remaining_clients == cid)
-                        new_clients_losses = []
-                        new_remaining_clients = []
-                        for i in range(len(clients_losses)):
-                            if i != idx:
-                                new_clients_losses.append(clients_losses[i])
-                                new_remaining_clients.append(remaining_clients[i])
-                        clients_losses = np.array(new_clients_losses)
-                        remaining_clients = np.array(new_remaining_clients)
-                        print("deletou: ", clients_losses.shape, remaining_clients.shape)
 
-                        selected_clients_m[m].append(cid)
-                        remaining_clients_per_model[m] -= 1
-                        total_clients += 1
+                        if use_cold_start_m[m]:
+                            n_selected_clients_m = remaining_clients_per_model[m]
+                            print("co: ", self.num_clients, self.join_ratio, self.cold_start_training_level[m])
+                            p = np.argwhere(prob_cold_start_m[m] == 1)
+                            cid = -1
+                            for e in p:
+                                if e in available_clients:
+                                    cid = e[0]
+                                    break
+                            print("cid: ", cid)
+                            if cid == -1:
+                                use_cold_start_m[m] = False
+                                continue
+                            selected_clients_m[m].append(cid)
+                            remaining_clients_per_model[m] -= 1
+                            available_clients = list(available_clients)
+                            available_clients.remove(cid)
+                            total_clients += 1
+
+                            new_clients_losses = []
+                            new_remaining_clients = []
+                            for i in range(len(clients_losses)):
+                                if i != cid and i in available_clients:
+                                    new_clients_losses.append(clients_losses[i])
+                                    new_remaining_clients.append(i)
+                            clients_losses = np.array(new_clients_losses)
+                            available_clients = np.array(new_remaining_clients)
+
+                        else:
+                            # print("tudo: ", remaining_clients, remaining_clients.shape, clients_losses.shape)
+                            m_clients_losses = np.array([i[m] for i in clients_losses])
+                            # m_clients_losses = m_clients_losses[available_clients]
+                            print("dim: ", available_clients, m_clients_losses)
+                            cid = np.random.choice(available_clients, p=(m_clients_losses / np.sum(m_clients_losses)))
+                            # print("Selecionado: ", cid)
+                            idx = np.argwhere(available_clients == cid)
+                            new_clients_losses = []
+                            new_remaining_clients = []
+                            for i in range(len(clients_losses)):
+                                if i != idx and i in available_clients:
+                                    new_clients_losses.append(clients_losses[i])
+                                    new_remaining_clients.append(i)
+                            clients_losses = np.array(new_clients_losses)
+                            available_clients = np.array(new_remaining_clients)
+                            print("deletou: ", clients_losses.shape, remaining_clients.shape)
+
+                            selected_clients_m[m].append(cid)
+                            # available_clients.remove(cid)
+                            sc.append(cid)
+                            remaining_clients_per_model[m] -= 1
+                            total_clients += 1
                     else:
 
 
-                        print("restantes: ", remaining_clients.shape, selected_clients_m)
+                        print("restantes: ", len(available_clients), selected_clients_m)
                         print(clients_losses)
                         print(remaining_clients_per_model)
                         print(total_clients, self.num_join_clients)
-                        exit()
+                        if l > 3:
+                            exit()
+                        l = l + 1
 
         print("Modelos clientes: ", selected_clients_m)
 
 
-        print("Selecionados: ", t, selected_clients_m)
+        print("Selecionados: ", t, sum([len(i) for i in selected_clients_m]), selected_clients_m)
         # print("Quantidade: ", n_clients_selected)
         # exit()
 

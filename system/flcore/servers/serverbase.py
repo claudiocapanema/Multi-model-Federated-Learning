@@ -108,11 +108,12 @@ class Server(object):
         self.uploaded_ids = []
         self.uploaded_models = []
 
-        self.train_metrics_names = ["Accuracy", "Loss", "AUC"]
+        self.train_metrics_names = ["Accuracy", "Loss", "AUC", "Round", "Fraction fit", "# training clients"]
         self.test_metrics_names = ["Accuracy", "Std Accuracy", "Loss", "Std loss", "AUC", "Balanced accuracy", "Micro f1-score", "Weighted f1-score", "Macro f1-score", "Round", "Fraction fit", "# training clients"]
         self.rs_test_acc = []
         self.rs_test_auc = []
         self.rs_train_loss = []
+        self.results_train_metrics = {m: {metric: [] for metric in self.train_metrics_names} for m in range(self.M)}
         self.results_test_metrics = {m: {metric: [] for metric in self.test_metrics_names} for m in range(self.M)}
 
         self.times = times
@@ -131,6 +132,8 @@ class Server(object):
         self.fine_tuning_epoch_new = args.fine_tuning_epoch_new
 
         self.clients_test_metrics = {i: {metric: {m: [] for m in range(self.M)} for metric in ["Accuracy", "Loss"]} for i in range(self.num_clients)}
+        self.clients_train_metrics = {i: {metric: {m: [] for m in range(self.M)} for metric in ["Accuracy", "Loss"]} for
+                                     i in range(self.num_clients)}
 
     def set_clients(self, clientObj):
         for i, train_slow, send_slow in zip(range(self.num_clients), self.train_slow_clients, self.send_slow_clients):
@@ -408,17 +411,25 @@ class Server(object):
     def train_metrics(self, m):
         if self.eval_new_clients and self.num_new_clients > 0:
             return [0], [1], [0]
-        
-        num_samples = []
+
+        accs = []
         losses = []
+        num_samples = []
         for c in self.clients:
-            cl, ns = c.train_metrics(m)
-            num_samples.append(ns)
-            losses.append(cl*1.0)
+            train_acc, train_loss, train_num = c.train_metrics(m)
+            accs.append(train_acc * train_num)
+            num_samples.append(train_num)
+            # if c in self.selected_clients[m]:
+            self.clients_train_metrics[c.id]["Accuracy"][m].append(train_acc)
+            self.clients_train_metrics[c.id]["Loss"][m].append(train_loss)
 
         ids = [c.id for c in self.clients]
 
-        return ids, num_samples, losses
+        decimals = 5
+        acc = round(sum(accs) / sum(num_samples), decimals)
+        loss = round(sum(losses) / sum(num_samples), decimals)
+
+        return {'ids': ids, 'num_samples': num_samples, 'Accuracy': acc, "Loss": loss}
 
     # evaluate selected clients
     def evaluate(self, m, t, acc=None, loss=None):
@@ -428,11 +439,12 @@ class Server(object):
         test_std_loss = test_metrics["Std loss"]
         test_loss = test_metrics['Loss']
         test_auc = test_metrics['AUC']
-        stats_train = self.train_metrics(m)
+        train_metrics = self.train_metrics(m)
 
         # test_acc = sum(stats[2])*1.0 / sum(stats[1])
         # test_auc = sum(stats[3])*1.0 / sum(stats[1])
-        train_loss = sum(stats_train[2])*1.0 / sum(stats_train[1])
+        # train_loss = sum(train_metrics[2])*1.0 / sum(train_metrics[1])
+        train_loss = train_metrics["Loss"]
         # accs = [a / n for a, n in zip(stats[2], stats[1])]
         # aucs = [a / n for a, n in zip(stats[3], stats[1])]
 
@@ -440,6 +452,14 @@ class Server(object):
             if metric in ['ids', 'num_samples']:
                 continue
             self.results_test_metrics[m][metric].append(test_metrics[metric])
+        for metric in train_metrics:
+            if metric in ['ids', 'num_samples']:
+                continue
+            self.results_train_metrics[m][metric].append(train_metrics[metric])
+        self.results_train_metrics[m]['Round'].append(t)
+        self.results_train_metrics[m]['Fraction fit'].append(self.join_ratio)
+        self.results_train_metrics[m]['# training clients'].append(len(self.selected_clients[m]))
+
         self.results_test_metrics[m]['Round'].append(t)
         self.results_test_metrics[m]['Fraction fit'].append(self.join_ratio)
         self.results_test_metrics[m]['# training clients'].append(len(self.selected_clients[m]))

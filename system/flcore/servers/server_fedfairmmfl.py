@@ -43,7 +43,7 @@ class FedFairMMFL(MultiFedAvg):
 
             for client in selected_clients:
                 client_losses = []
-                for metrics_m in client.test_metrics_list_dict:
+                for metrics_m in client.train_metrics_list_dict:
                     client_losses.append(metrics_m['Loss'] * metrics_m['Samples'])
                 client_losses = np.array(client_losses)
                 client_losses = (np.power(client_losses, self.fairness_weight - 1)) / np.sum(client_losses)
