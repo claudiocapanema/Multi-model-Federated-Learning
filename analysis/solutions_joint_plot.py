@@ -78,7 +78,7 @@ if __name__ == "__main__":
 
     alphas = ['0.1', '5.0']
     # alphas = ['5.0', '0.1']
-    configuration = {"dataset": ["WISDM-W", "GTSRB"], "alpha": [0.1, 5.0]}
+    configuration = {"dataset": ["WISDM-W", "GTSRB"], "alpha": [float(i) for i in alphas]}
     models_names = ["gru", "cnn_a"]
     datasets = configuration["dataset"]
     # solutions = ["FedNome",  "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg"]
@@ -104,19 +104,20 @@ if __name__ == "__main__":
     read_accs = []
     read_loss = []
     read_round = []
+    first = 'Micro f1-score'
     for solution in solutions:
         acc = []
         loss = []
         for dataset in datasets:
             df = pd.read_csv("""{}{}_{}_test_0.csv""".format(d, dataset, solution))
-            acc += df["Accuracy"].tolist()
+            acc += df[first].tolist()
             loss += df["Loss"].tolist()
             read_round += df["Round"].tolist()
         read_solutions += [solution] * len(acc)
         read_accs += acc
         read_loss += loss
 
-    first = 'Accuracy'
+
     second = 'Loss'
     df = pd.DataFrame({'Solution': read_solutions, first: np.array(read_accs) * 100, second: read_loss, "Round (t)": read_round})
     # df_2 = pd.DataFrame({'\u03B1': read_std_alpha, 'Dataset': read_std_dataset, 'Samples (%) std': read_num_samples_std})

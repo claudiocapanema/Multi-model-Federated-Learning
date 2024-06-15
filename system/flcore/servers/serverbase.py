@@ -108,7 +108,7 @@ class Server(object):
         self.uploaded_ids = []
         self.uploaded_models = []
 
-        self.train_metrics_names = ["Accuracy", "Loss", "AUC", "Round", "Fraction fit", "# training clients"]
+        self.train_metrics_names = ["Accuracy", "Loss", "AUC", "Balanced accuracy", "Micro f1-score", "Weighted f1-score", "Macro f1-score", "Round", "Fraction fit", "# training clients"]
         self.test_metrics_names = ["Accuracy", "Std Accuracy", "Loss", "Std loss", "AUC", "Balanced accuracy", "Micro f1-score", "Weighted f1-score", "Macro f1-score", "Round", "Fraction fit", "# training clients"]
         self.rs_test_acc = []
         self.rs_test_auc = []
@@ -131,8 +131,8 @@ class Server(object):
         self.eval_new_clients = False
         self.fine_tuning_epoch_new = args.fine_tuning_epoch_new
 
-        self.clients_test_metrics = {i: {metric: {m: [] for m in range(self.M)} for metric in ["Accuracy", "Loss"]} for i in range(self.num_clients)}
-        self.clients_train_metrics = {i: {metric: {m: [] for m in range(self.M)} for metric in ["Accuracy", "Loss"]} for
+        self.clients_test_metrics = {i: {metric: {m: [] for m in range(self.M)} for metric in ["Accuracy", "Loss", "Balanced accuracy", "Micro f1-score", "Macro f1-score", "Weighted f1-score"]} for i in range(self.num_clients)}
+        self.clients_train_metrics = {i: {metric: {m: [] for m in range(self.M)} for metric in ["Accuracy", "Loss", "Balanced accuracy", "Micro f1-score", "Macro f1-score", "Weighted f1-score"]} for
                                      i in range(self.num_clients)}
 
     def set_clients(self, clientObj):
@@ -369,6 +369,10 @@ class Server(object):
             if i in self.selected_clients[m]:
                 self.clients_test_metrics[i]["Accuracy"][m].append(test_acc)
                 self.clients_test_metrics[i]["Loss"][m].append(test_loss)
+                self.clients_test_metrics[i]["Balanced accuracy"][m].append(test_balanced_acc)
+                self.clients_test_metrics[i]["Micro f1-score"][m].append(test_micro_fscore)
+                self.clients_test_metrics[i]["Weighted f1-score"][m].append(test_weighted_fscore)
+                self.clients_test_metrics[i]["Macro f1-score"][m].append(test_macro_fscore)
             # accs.append(test_acc*test_num)
             # auc.append(test_auc*test_num)
             # num_samples.append(test_num)
@@ -415,21 +419,38 @@ class Server(object):
         accs = []
         losses = []
         num_samples = []
+        balanced_accs = []
+        micro_fscores = []
+        macro_fscores = []
+        weighted_fscores = []
         for c in self.clients:
-            train_acc, train_loss, train_num = c.train_metrics(m)
+            train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore = c.train_metrics(m)
             accs.append(train_acc * train_num)
             num_samples.append(train_num)
+            balanced_accs.append(train_balanced_acc * train_num)
+            micro_fscores.append(train_micro_fscore * train_num)
+            macro_fscores.append(train_macro_fscore * train_num)
+            weighted_fscores.append(train_weighted_fscore * train_num)
             # if c in self.selected_clients[m]:
             self.clients_train_metrics[c.id]["Accuracy"][m].append(train_acc)
             self.clients_train_metrics[c.id]["Loss"][m].append(train_loss)
+            self.clients_train_metrics[c.id]["Balanced accuracy"][m].append(train_balanced_acc)
+            self.clients_train_metrics[c.id]["Micro f1-score"][m].append(train_micro_fscore)
+            self.clients_train_metrics[c.id]["Macro f1-score"][m].append(train_macro_fscore)
+            self.clients_train_metrics[c.id]["Weighted f1-score"][m].append(train_weighted_fscore)
 
         ids = [c.id for c in self.clients]
 
         decimals = 5
         acc = round(sum(accs) / sum(num_samples), decimals)
         loss = round(sum(losses) / sum(num_samples), decimals)
+        balanced_acc = round(sum(balanced_accs) / sum(num_samples), decimals)
+        micro_fscore = round(sum(micro_fscores) / sum(num_samples), decimals)
+        macro_fscore = round(sum(macro_fscores) / sum(num_samples), decimals)
+        weighted_fscore = round(sum(weighted_fscores) / sum(num_samples), decimals)
 
-        return {'ids': ids, 'num_samples': num_samples, 'Accuracy': acc, "Loss": loss}
+        return {'ids': ids, 'num_samples': num_samples, 'Accuracy': acc, "Loss": loss, 'Balanced accuracy': balanced_acc,
+                'Micro f1-score': micro_fscore, 'Macro f1-score': macro_fscore, 'Weighted f1-score': weighted_fscore}
 
     # evaluate selected clients
     def evaluate(self, m, t, acc=None, loss=None):
