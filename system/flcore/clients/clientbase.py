@@ -82,7 +82,9 @@ class Client(object):
         self.learning_rate_scheduler = []
         for m in range(self.M):
             if self.dataset[m] in ['ExtraSensory', 'WISDM-WATCH', 'WISDM-P']:
-                self.optimizer.append(torch.optim.RMSprop(self.model.parameters(), lr=0.001))
+                self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.001))
+            elif self.dataset[m] == "Tiny-ImageNet":
+                self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=0.001))
             else:
                 self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=self.learning_rate))
                 self.learning_rate_scheduler.append(torch.optim.lr_scheduler.ExponentialLR(
@@ -92,6 +94,7 @@ class Client(object):
         self.learning_rate_decay = args.learning_rate_decay
 
         self.test_metrics_list_dict = [{} for m in range(self.M)]
+        self.train_metrics_list_dict = [{} for m in range(self.M)]
 
         for m in range(self.M):
             trainloader, self.train_class_count[m] = self.load_train_data(m)
@@ -298,8 +301,11 @@ class Client(object):
         # self.model.to(self.device)
         self.model[m].eval()
 
+        train_acc = 0
         train_num = 0
-        losses = 0
+        train_loss = 0
+        y_prob = []
+        y_true = []
         with torch.no_grad():
             for x, y in trainloader:
                 if type(x) == type([]):
@@ -310,12 +316,44 @@ class Client(object):
                 output = self.model[m](x)
                 loss = self.loss(output, y)
                 train_num += y.shape[0]
-                losses += loss.item() * y.shape[0]
+                train_loss += loss.item() * y.shape[0]
+
+                train_acc += (torch.sum(torch.argmax(output, dim=1) == y)).item()
+                train_num += y.shape[0]
+
+                y_prob.append(output.detach().cpu().numpy())
+                nc = self.num_classes[m]
+                if self.num_classes[m] == 2:
+                    nc += 1
+                lb = label_binarize(y.detach().cpu().numpy(), classes=np.arange(nc))
+                if self.num_classes[m] == 2:
+                    lb = lb[:, :2]
+                y_true.append(lb)
+
+        train_loss = train_loss / train_num
+
+        y_prob = np.concatenate(y_prob, axis=0)
+        y_true = np.concatenate(y_true, axis=0)
+        test_auc = metrics.roc_auc_score(y_true, y_prob, average='micro')
+
+        y_prob = y_prob.argmax(axis=1)
+        y_true = y_true.argmax(axis=1)
+
+        train_acc = train_acc / train_num
+
+        train_balanced_acc = metrics.balanced_accuracy_score(y_true, y_prob)
+        train_micro_fscore = metrics.f1_score(y_true, y_prob, average='micro')
+        train_macro_fscore = metrics.f1_score(y_true, y_prob, average='macro')
+        train_weighted_fscore = metrics.f1_score(y_true, y_prob, average='weighted')
 
         # self.model.cpu()
         # self.save_model(self.model, 'model')
 
-        return losses, train_num
+        self.train_metrics_list_dict[m] = {'ids': self.id, 'Accuracy': train_acc, "Loss": train_loss, "Samples": train_num,
+                                           'Balanced accuracy': train_balanced_acc, 'Micro f1-score': train_micro_fscore,
+                                           'Macro f1-score': train_macro_fscore, 'Weighted f1-score': train_weighted_fscore}
+
+        return train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore
 
     # def get_next_train_batch(self):
     #     try:

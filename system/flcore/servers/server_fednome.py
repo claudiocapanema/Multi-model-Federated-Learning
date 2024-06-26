@@ -67,7 +67,8 @@ class FedNome(Server):
         self.client_selection_model_weight = np.array([0] * self.M)
         self.clients_cosine_similarities = {m: np.array([0 for i in range(self.num_classes[m])]) for m in range(self.M)}
         self.clients_cosine_similarities_with_current_model = {m: [0 for i in range(self.num_clients)] for m in range(self.M)}
-        self.minimum_training_clients_per_model = 3
+        self.clients_training_round_per_model = {cid: {m: [] for m in range(self.M)} for cid in range(self.num_clients)}
+        self.minimum_training_clients_per_model = {0.1: 1, 0.2: 2, 0.3: 3}[self.join_ratio]
         self.minimum_training_clients_per_model_percentage = self.minimum_training_clients_per_model / self.num_join_clients
         self.cold_start_max_non_iid_level = 1
         self.cold_start_training_level = np.array([0] * self.M)
@@ -302,10 +303,11 @@ class FedNome(Server):
                 m_global_diff_list = []
                 for m in range(self.M):
                     global_acc = self.results_test_metrics[m]["Accuracy"]
+                    # Train more the models that have returned higher accuracy gain / # training clients
                     if len(global_acc) >= 2:
-                        m_global_diff = global_acc[-1] - global_acc[-min(2, t_size):][0]
+                        m_global_diff = (global_acc[-1] - global_acc[-min(2, t_size):][0]) / self.results_train_metrics[m]['# training clients'][-1]
                     else:
-                        m_global_diff = global_acc[0]
+                        m_global_diff = global_acc[0] / self.results_train_metrics[m]['# training clients'][-1]
                     m_global_diff_list.append(m_global_diff)
 
                 m_global_diff_list = np.array(m_global_diff_list)
@@ -314,8 +316,9 @@ class FedNome(Server):
                 m_global_diff_list = m_global_diff_list / np.sum(m_global_diff_list)
 
                 clients_losses = []
-                metric = "Micro f1-score"
+                metric = "Accuracy"
                 for client in self.clients:
+                    cid = client.id
                     client_losses = []
                     improvements = []
                     samples_m = []
@@ -325,8 +328,13 @@ class FedNome(Server):
                         local_acc = self.clients_train_metrics[client.id][metric][m]
                         global_acc = self.results_train_metrics[m][metric]
 
-                        if len(local_acc) >= 2:
-                            local_diff = local_acc[-1] - local_acc[-2]
+                        if len(local_acc) >= 2 and len(self.clients_training_round_per_model[cid][m]) >= 2:
+                            print("aaa: ", len(global_acc), self.clients_training_round_per_model[cid][m])
+                            tr = self.clients_training_round_per_model[cid][m]
+                            # if q == 0:
+                            local_diff = (local_acc[-1] - local_acc[-2])
+                            # else:
+                            #     local_diff = (local_acc[-1] - local_acc[-2]) / q
                             if local_diff > 0:
                                 improvement = local_diff
                                 improvements.append(improvement)
@@ -338,7 +346,7 @@ class FedNome(Server):
                                 relative_diff = local_diff / local_acc[-1]
                             local_diff = relative_diff * relative_diff + local_diff
                         elif len(local_acc) == 1:
-                            local_diff = local_acc[0]
+                            local_diff = local_acc[-1]
                         else:
                             local_diff = 1
 
@@ -367,12 +375,20 @@ class FedNome(Server):
                     elif len(global_acc) == 1:
                         m_acc_gain.append(global_acc[0])
                     else:
-                        m_acc_gain.append(self.training_clients_per_model[m])
+                        # m_acc_gain.append(self.training_clients_per_model[m])
+                        print("errado")
+                        exit()
                 # remaining_clients_per_model = self.training_clients_per_model
                 m_acc_gain = np.array(m_acc_gain)
-                remaining_clients_per_model = m_acc_gain / np.sum(m_acc_gain)
+                print("ga: ", m_acc_gain)
+                if np.sum(m_acc_gain) > 0:
+                    remaining_clients_per_model = m_acc_gain / np.sum(m_acc_gain)
+                else:
+                    remaining_clients_per_model = np.array([1/self.M for i in range(self.M)])
+                print("interme: ", remaining_clients_per_model)
                 remaining_clients_per_model[np.where(remaining_clients_per_model < self.minimum_training_clients_per_model_percentage)] = self.minimum_training_clients_per_model_percentage
                 remaining_clients_per_model = np.array(remaining_clients_per_model * self.num_join_clients, dtype=int)
+                print("interme 2", remaining_clients_per_model)
                 if np.sum(remaining_clients_per_model) < self.num_join_clients:
                     diff = self.num_join_clients - np.sum(remaining_clients_per_model)
                     i = 0
@@ -477,6 +493,7 @@ class FedNome(Server):
 
                 for i in range(len(self.selected_clients[m])):
                     client_id = self.selected_clients[m][i]
+                    self.clients_training_round_per_model[client_id][m].append(t)
                     self.clients[client_id].train(m, self.global_model[m], self.clients_cosine_similarities_with_current_model[m][client_id])
                     self.clients_training_count[m][client_id] += 1
                     self.current_training_class_count[m] += self.clients[client_id].train_class_count[m]

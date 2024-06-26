@@ -96,7 +96,8 @@ def run(args):
     dts = args.dataset
     num_classes = []
     for dt in dts:
-        num_classes.append({'EMNIST': 47, 'MNIST': 10, 'Cifar10': 10, 'GTSRB': 43, 'WISDM-W': 20}[dt])
+        num_classes.append({'EMNIST': 47, 'MNIST': 10, 'Cifar10': 10, 'GTSRB': 43, 'WISDM-W': 20, 'Tiny-ImageNet': 200,
+                            'ImageNet100': 25}[dt])
 
     args.num_classes = num_classes
 
@@ -132,6 +133,9 @@ def run(args):
                     # model = CifarNet(num_classes=num_classes_m).to(args.device)
                 elif "Digit5" == dt:
                     model = Digit5CNN().to(args.device)
+                elif "ImageNet100" == dt:
+                    model = TinyImageNetCNN().to(args.device)
+                    # model = FedAvgCNN(in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
                 else:
                     model = FedAvgCNN(in_features=3, num_classes=num_classes_m, dim=10816).to(args.device)
 

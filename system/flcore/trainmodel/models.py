@@ -200,6 +200,56 @@ class FedAvgCNN(nn.Module):
         out = self.fc(out)
         return out
 
+class TinyImageNetCNN(nn.Module):
+    # def __init__(self):
+    #     super().__init__()
+    #     self.conv1 = nn.Conv2d(3, 32, kernel_size=5)
+    #     self.pool = nn.MaxPool2d(2)
+    #     self.conv2 = nn.Conv2d(32, 64, kernel_size=5)
+    #     self.conv3 = nn.Conv2d(64, 128, kernel_size=5)
+    #     self.fc1 = nn.Linear(128 * 4 * 4, 256)
+    #     self.fc = nn.Linear(256, 200)
+    #
+    # def forward(self, x):
+    #     x = self.pool(self.conv1(x))
+    #     x = self.pool(self.conv2(x))
+    #     x = self.pool(self.conv3(x))
+    #     x = torch.flatten(x, 1)
+    #     x = self.fc1(x)
+    #     x = nn.ReLU()(x)
+    #     x = self.fc(x)
+    #     return x
+
+    def __init__(self):
+        super().__init__()
+        self.conv1 = nn.Conv2d(3, 6, kernel_size=5)
+        self.pool1 = nn.MaxPool2d(2)
+        self.conv2 = nn.Conv2d(6, 16, kernel_size=5)
+        self.pool2 = nn.MaxPool2d(2)
+        self.fc = nn.Linear(400, 25)
+        # self.fc = nn.Linear(200, 200)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.pool1(x)
+        x = self.conv2(x)
+        x = self.pool2(x)
+        x = torch.flatten(x, 1)
+        # x = self.fc1(x)
+        x = nn.ReLU()(x)
+        x = self.fc(x)
+        return x
+
+#     self.net = torchvision.models.squeezenet1_0(pretrained=True)
+#     self.fc = nn.Linear(1000, 200)
+#
+#
+# def forward(self, x):
+#     x = self.net(x)
+#     x = self.fc(x)
+#     return x
+
+
 # ====================================================================================================================
 
 # https://github.com/katsura-jp/fedavg.pytorch/blob/master/src/models/mlp.py
@@ -450,7 +500,7 @@ class CNN_2(torch.nn.Module):
 # ====================================================================================================================
 
 class GRU(torch.nn.Module):
-    def __init__(self, input_shape, num_layers=1, hidden_size=4, sequence_length=28, num_classes=10):
+    def __init__(self, input_shape, num_layers=1, hidden_size=2, sequence_length=28, num_classes=10):
         super().__init__()
         try:
             random.seed(0)

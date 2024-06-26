@@ -92,33 +92,37 @@ def bar_metric(df, base_dir, x_column, first, second, x_order, hue_order):
         dpi=400)
 
 def line(df, base_dir, x_column, first, second, hue, ci=None):
+    print(df)
+    fontsize = 7
     fig, axs = plt.subplots(2, 1, sharex='all', figsize=(6, 5))
     line_plot(df=df, base_dir=base_dir, ax=axs[0],
              file_name="""solutions_{}""".format(datasets), x_column=x_column, y_column=first,
-             hue=hue, ci=ci, title="""Average accuracy""", tipo=None, y_lim=True, y_max=100)
+             hue=hue, style="Dataset", ci=ci, title="""Average accuracy""", tipo=None, y_lim=True, y_max=100)
     i = 0
-    # axs[i].get_legend().remove()
-    axs[i].legend(fontsize=7)
+    axs[i].legend(fontsize=fontsize)
+    axs[i].get_legend().remove()
 
     axs[i].set_xlabel('')
     line_plot(df=df, base_dir=base_dir, ax=axs[1],
              file_name="""solutions_{}""".format(datasets),
-             x_column=x_column, y_column=second, title="""Average loss""", y_lim=True, y_max=5,
-             hue=hue, ci=ci, tipo=None)
+             x_column=x_column, y_column=second, title="""{} per dataset""".format(second), y_lim=True, y_max=5,
+             hue=hue, style="Dataset", ci=ci, tipo=None)
     i = 1
-    axs[i].get_legend().remove()
-    axs[i].set_ylabel(second, labelpad=16)
+    # axs[i].get_legend().remove()
+    axs[i].set_ylabel(second, labelpad=fontsize)
+    axs[i].legend(fontsize=7)
+    axs[i].set_ylim(0, 50)
 
 
     # fig.suptitle("", fontsize=16)
     plt.tight_layout()
     plt.subplots_adjust(wspace=0.07, hspace=0.14)
     fig.savefig(
-        """{}solutions_{}_clients_line.png""".format(base_dir,
+        """{}solutions_{}_training_clients.png""".format(base_dir,
                                                 num_clients), bbox_inches='tight',
         dpi=400)
     fig.savefig(
-        """{}solutions_{}_clients_line.svg""".format(base_dir,
+        """{}solutions_{}_training_clients.svg""".format(base_dir,
                                                 num_clients), bbox_inches='tight',
         dpi=400)
 
@@ -129,12 +133,12 @@ if __name__ == "__main__":
     configuration = {"dataset": ["WISDM-W", "ImageNet100"], "alpha": [float(i) for i in alphas]}
     models_names = ["gru", "cnn_a"]
     datasets = configuration["dataset"]
-    # solutions = ["FedNome",  "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg", "Propostav1", "Propostav0", ]
-    solutions = ["Proposta", "Propostav4", "MultiFedAvg",  "FedFairMMFL"]
+    # solutions = ["FedNome",  "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg"]
+    solutions = ["Proposta", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
     num_classes = {"EMNIST": 47, "Cifar10": 10, "GTSRB": 43}
     num_clients = 40
     fc = 0.3
-    rounds = 100
+    rounds = 30
     epochs = 1
 
     read_alpha = []
@@ -152,6 +156,7 @@ if __name__ == "__main__":
     read_accs = []
     read_loss = []
     read_round = []
+    read_datasets = []
     first = 'Accuracy'
     for solution in solutions:
         acc = []
@@ -159,15 +164,17 @@ if __name__ == "__main__":
         for dataset in datasets:
             df = pd.read_csv("""{}{}_{}_test_0.csv""".format(d, dataset, solution))
             acc += df[first].tolist()
-            loss += df["Loss"].tolist()
+            loss += df["# training clients"].tolist()
+            read_datasets += [dataset] * len(df)
             read_round += df["Round"].tolist()
         read_solutions += [solution] * len(acc)
         read_accs += acc
         read_loss += loss
 
 
-    second = 'Loss'
-    df = pd.DataFrame({'Solution': read_solutions, first: np.array(read_accs) * 100, second: read_loss, "Round (t)": read_round})
+    second = 'Training clients'
+    df = pd.DataFrame({'Solution': read_solutions, first: np.array(read_accs) * 100, second: read_loss, "Round (t)": read_round,
+                       'Dataset': read_datasets})
     # df_2 = pd.DataFrame({'\u03B1': read_std_alpha, 'Dataset': read_std_dataset, 'Samples (%) std': read_num_samples_std})
 
     print(df)
@@ -177,9 +184,10 @@ if __name__ == "__main__":
     hue_order = datasets
     base_dir = """analysis/solutions/clients_{}/{}/fc_{}/{}/{}/rounds_{}/""".format(num_clients, x_order, fc, hue_order, models_names, rounds)
 
-    bar_metric(df, base_dir, "Solution", first, second, x_order, hue_order)
-    plt.plot()
-    bar_auc(df, base_dir, "Solution", first, second, x_order, hue_order)
-    plt.plot()
+    # bar_metric(df, base_dir, "Solution", first, second, x_order, hue_order)
+    # plt.plot()
+    # bar_auc(df, base_dir, "Solution", first, second, x_order, hue_order)
+    # plt.plot()
     line(df, base_dir, "Round (t)", first, second, "Solution", None)
+    plt.plot()
 

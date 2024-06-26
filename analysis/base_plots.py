@@ -53,6 +53,8 @@ def bar_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, hue_o
         figure.set_ylim(top=119)
     figure.set_title(title)
     figure.legend(loc='upper left')
+    if tipo == "auc":
+        figure.set_ylim(top=y_lim)
     if ax is None:
         fig, ax = plt.subplots()
 
