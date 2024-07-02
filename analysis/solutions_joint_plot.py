@@ -29,9 +29,9 @@ def bar_auc(df, base_dir, x_column, first, second, x_order, hue_order):
     fig, axs = plt.subplots(2, 1, sharex='all', figsize=(6, 5))
     bar_plot(df=df_2, base_dir=base_dir, ax=axs[0],
              file_name="""solutions_{}""".format(datasets), x_column=x_column, y_column=first + " AUC", y_lim=True,
-             title="""Average accuracy""", tipo="auc", y_max=10000)
+             title="""Average accuracy""", tipo="auc", y_max=12000)
     i = 0
-    axs[i].set_ylim(0, 10000)
+    axs[i].set_ylim(0, 12000)
     axs[i].get_legend().remove()
 
 
@@ -39,10 +39,10 @@ def bar_auc(df, base_dir, x_column, first, second, x_order, hue_order):
     # axs[i].set_ylabel(first)
     bar_plot(df=df_2, base_dir=base_dir, ax=axs[1],
              file_name="""solutions_{}""".format(datasets),
-             x_column=x_column, y_column=second + " AUC", title="""Average loss""", y_max=10000, y_lim=True,
+             x_column=x_column, y_column=second + " AUC", title="""Average loss""", y_max=3000, y_lim=True,
              tipo="auc")
     i = 1
-    axs[i].set_ylim(0, 10000)
+    axs[i].set_ylim(0, 3000)
     axs[i].get_legend().remove()
 
     axs[i].set_ylabel(second + " AUC", labelpad=5)
@@ -130,7 +130,7 @@ if __name__ == "__main__":
     models_names = ["gru", "cnn_a"]
     datasets = configuration["dataset"]
     # solutions = ["FedNome",  "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg", "Propostav1", "Propostav0", ]
-    solutions = ["Proposta", "Propostav4", "MultiFedAvg",  "FedFairMMFL"]
+    solutions = ["Proposta", "MultiFedAvg",  "FedFairMMFL"]
     num_classes = {"EMNIST": 47, "Cifar10": 10, "GTSRB": 43}
     num_clients = 40
     fc = 0.3

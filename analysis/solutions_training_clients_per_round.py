@@ -112,7 +112,8 @@ def line(df, base_dir, x_column, first, second, hue, ci=None):
     axs[i].set_ylabel(second, labelpad=fontsize)
     axs[i].legend(fontsize=7)
     axs[i].set_ylim(0, 50)
-
+    print("""{}solutions_{}_training_clients.png""".format(base_dir,
+                                                num_clients))
 
     # fig.suptitle("", fontsize=16)
     plt.tight_layout()
@@ -134,11 +135,11 @@ if __name__ == "__main__":
     models_names = ["gru", "cnn_a"]
     datasets = configuration["dataset"]
     # solutions = ["FedNome",  "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg"]
-    solutions = ["Proposta", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
+    solutions = ["Proposta", "MultiFedAvg", "FedFairMMFL"]
     num_classes = {"EMNIST": 47, "Cifar10": 10, "GTSRB": 43}
     num_clients = 40
     fc = 0.3
-    rounds = 30
+    rounds = 100
     epochs = 1
 
     read_alpha = []

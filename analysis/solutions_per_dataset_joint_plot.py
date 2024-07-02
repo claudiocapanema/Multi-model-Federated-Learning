@@ -28,9 +28,9 @@ def bar_auc(df, base_dir, x_column, first, second, x_order, hue_order):
     fig, axs = plt.subplots(2, 1, sharex='all', figsize=(6, 5))
     bar_plot(df=df_2, base_dir=base_dir, ax=axs[0],
              file_name="""solutions_{}""".format(datasets), x_column=x_column, y_column=first + " AUC", y_lim=True,
-             title="""Average accuracy""", tipo="auc", y_max=10000)
+             title="""Average balanced accuracy""", tipo="auc", y_max=12000)
     i = 0
-    axs[i].set_ylim(0, 10000)
+    axs[i].set_ylim(0, 12000)
     axs[i].get_legend().remove()
 
 
@@ -41,7 +41,7 @@ def bar_auc(df, base_dir, x_column, first, second, x_order, hue_order):
              x_column=x_column, y_column=second + " AUC", title="""Average loss""", y_max=10000, y_lim=True,
              tipo="auc")
     i = 1
-    axs[i].set_ylim(0, 10000)
+    axs[i].set_ylim(0, 2000)
     axs[i].get_legend().remove()
 
     axs[i].set_ylabel(second + " AUC", labelpad=7)
@@ -133,15 +133,15 @@ if __name__ == "__main__":
 
     alphas = ['0.1', '5.0']
     # alphas = ['5.0', '0.1']
-    configuration = {"dataset": ["WISDM-W", "Tiny-ImageNet"], "alpha": [float(i) for i in alphas]}
+    configuration = {"dataset": ["WISDM-W", "ImageNet100"], "alpha": [float(i) for i in alphas]}
     models_names = ["gru", "cnn_a"]
     datasets = configuration["dataset"]
     # solutions = ["FedNome",  "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg"]
-    solutions = ["Proposta",  "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg"]
+    solutions = ["Proposta", "FedFairMMFL", "MultiFedAvg"]
     num_classes = {"EMNIST": 47, "Cifar10": 10, "GTSRB": 43}
     num_clients = 40
     fc = 0.3
-    rounds = 40
+    rounds = 100
     epochs = 1
 
     read_alpha = []
@@ -165,7 +165,7 @@ if __name__ == "__main__":
         loss = []
         for dataset in datasets:
             df = pd.read_csv("""{}{}_{}_test_0.csv""".format(d, dataset, solution))
-            acc += df["Accuracy"].tolist()
+            acc += df["Balanced accuracy"].tolist()
             loss += df["Loss"].tolist()
             read_round += df["Round"].tolist()
             read_datasets += [dataset] * len(df)

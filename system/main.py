@@ -434,6 +434,7 @@ def run(args):
 
 
 if __name__ == "__main__":
+
     total_start = time.time()
 
     parser = argparse.ArgumentParser()
@@ -595,7 +596,24 @@ if __name__ == "__main__":
     #     on_trace_ready=torch.profiler.tensorboard_trace_handler('./log')
     #     ) as prof:
     # with torch.autograd.profiler.profile(profile_memory=True) as prof:
-    run(args)
+
+    result_path = """../results/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/log_{}.txt""".format(args.num_clients,
+                                                                                               args.alpha, args.dataset,
+                                                                                               args.model,
+                                                                                               args.join_ratio,
+                                                                                               args.global_rounds,
+                                                                                               args.local_epochs,
+                                                                                                args.algorithm)
+    import sys
+
+    # Abra um arquivo para gravação
+    os.makedirs(os.path.dirname(result_path), exist_ok=True)
+    with open(result_path, 'w') as f:
+        # Redirecione a saída padrão para o arquivo
+        original = sys.stdout
+        sys.stdout = f
+        run(args)
+        sys.stdout = original
 
     
     # print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=20))

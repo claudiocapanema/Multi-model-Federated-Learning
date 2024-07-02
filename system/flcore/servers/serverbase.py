@@ -108,7 +108,7 @@ class Server(object):
         self.uploaded_ids = []
         self.uploaded_models = []
 
-        self.train_metrics_names = ["Accuracy", "Loss", "AUC", "Balanced accuracy", "Micro f1-score", "Weighted f1-score", "Macro f1-score", "Round", "Fraction fit", "# training clients"]
+        self.train_metrics_names = ["Accuracy", "Loss", "Samples", "AUC", "Balanced accuracy", "Micro f1-score", "Weighted f1-score", "Macro f1-score", "Round", "Fraction fit", "# training clients"]
         self.test_metrics_names = ["Accuracy", "Std Accuracy", "Loss", "Std loss", "AUC", "Balanced accuracy", "Micro f1-score", "Weighted f1-score", "Macro f1-score", "Round", "Fraction fit", "# training clients"]
         self.rs_test_acc = []
         self.rs_test_auc = []
@@ -131,8 +131,8 @@ class Server(object):
         self.eval_new_clients = False
         self.fine_tuning_epoch_new = args.fine_tuning_epoch_new
 
-        self.clients_test_metrics = {i: {metric: {m: [] for m in range(self.M)} for metric in ["Accuracy", "Loss", "Balanced accuracy", "Micro f1-score", "Macro f1-score", "Weighted f1-score"]} for i in range(self.num_clients)}
-        self.clients_train_metrics = {i: {metric: {m: [] for m in range(self.M)} for metric in ["Accuracy", "Loss", "Balanced accuracy", "Micro f1-score", "Macro f1-score", "Weighted f1-score"]} for
+        self.clients_test_metrics = {i: {metric: {m: [] for m in range(self.M)} for metric in ["Accuracy", "Loss", "Samples", "Balanced accuracy", "Micro f1-score", "Macro f1-score", "Weighted f1-score"]} for i in range(self.num_clients)}
+        self.clients_train_metrics = {i: {metric: {m: [] for m in range(self.M)} for metric in ["Accuracy", "Loss", "Samples", "Balanced accuracy", "Micro f1-score", "Macro f1-score", "Weighted f1-score"]} for
                                      i in range(self.num_clients)}
 
     def set_clients(self, clientObj):
@@ -432,6 +432,7 @@ class Server(object):
             macro_fscores.append(train_macro_fscore * train_num)
             weighted_fscores.append(train_weighted_fscore * train_num)
             # if c in self.selected_clients[m]:
+            self.clients_train_metrics[c.id]["Samples"][m].append(num_samples)
             self.clients_train_metrics[c.id]["Accuracy"][m].append(train_acc)
             self.clients_train_metrics[c.id]["Loss"][m].append(train_loss)
             self.clients_train_metrics[c.id]["Balanced accuracy"][m].append(train_balanced_acc)
