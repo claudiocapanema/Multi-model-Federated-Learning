@@ -1,6 +1,6 @@
 # PFLlib: Personalized Federated Learning Algorithm Library
 # Copyright (C) 2021  Jianqing Zhang
-
+import copy
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation; either version 2 of the License, or
@@ -71,7 +71,7 @@ class FedNome(Server):
         self.clients_rounds_since_last_training = {m: np.array([0 for i in range(self.num_clients)]) for m in range(self.M)}
         self.clients_rounds_since_last_training_probability = {m: np.array([0 for i in range(self.num_clients)]) for m in range(self.M)}
         self.rounds_client_trained_model = {cid: {m: [] for m in range(self.M)} for cid in range(self.num_clients)}
-        self.minimum_training_clients_per_model = {0.1: 1, 0.2: 2, 0.3: 3}[self.join_ratio]
+        self.minimum_training_clients_per_model = {0.1: 1, 0.2: 2, 0.3: 2}[self.join_ratio]
         self.minimum_training_clients_per_model_percentage = self.minimum_training_clients_per_model / self.num_join_clients
         self.cold_start_max_non_iid_level = 1
         self.cold_start_training_level = np.array([0] * self.M)
@@ -80,12 +80,15 @@ class FedNome(Server):
         self.max_n_training_clients = 10
         self.convergence_detection_window = 4
         self.models_semi_convergence_min_n_training_clients = {m: self.minimum_training_clients_per_model for m in range(self.M)}
+        self.models_semi_convergence_min_n_training_clients_percentage = {m: self.minimum_training_clients_per_model/self.num_join_clients for m in
+                                                               range(self.M)}
         self.models_semi_convergence_flag = [False] * self.M
         self.models_convergence_flag = [False] * self.M
         self.models_semi_convergence_count = [0] * self.M
         self.models_semi_convergence_training_probability = [0] * self.M
         self.training_clients_per_model = np.array([0] * self.M)
         self.training_clients_per_model_per_round = {m: [] for m in range(self.M)}
+        self.rounds_since_last_semi_convergence = {m: 0 for m in range(self.M)}
         self.unique_count_samples = {m: np.array([0 for i in range(self.num_classes[m])]) for m in range(self.M)}
         self.similarity_matrix = np.zeros((self.M, self.num_clients))
         self.accuracy_gain_models = {m: [] for m in range(self.M)}
@@ -344,6 +347,8 @@ class FedNome(Server):
                     for c_id in self.previous_selected_clients[m]:
                         self.clients_training_round_per_model[c_id][m].append(t)
 
+                    self.rounds_since_last_semi_convergence[m] += 1
+
                 return self.previous_selected_clients
             else:
                 if self.random_join_ratio:
@@ -355,7 +360,7 @@ class FedNome(Server):
                 selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
                 selected_clients_m = [[] for i in range(self.M)]
 
-                t_size = 3
+                """Calculate models efficiency"""
                 m_global_diff_list = []
                 m_global_loss_diff_list = []
                 for m in range(self.M):
@@ -386,7 +391,7 @@ class FedNome(Server):
                         m_global_diff_list.append(0.00001)
                         m_global_loss_diff_list.append(1)
 
-                m_global_diff_list = np.array(m_global_diff_list)
+                m_global_diff_list = np.array(m_global_loss_diff_list)
                 print("ff: ", m_global_diff_list)
                 m_global_diff_list = m_global_diff_list / np.sum(m_global_diff_list)
                 m_global_diff_list = np.where(m_global_diff_list < self.minimum_training_clients_per_model_percentage, self.minimum_training_clients_per_model_percentage, m_global_diff_list)
@@ -465,16 +470,16 @@ class FedNome(Server):
                             local_loss_relative_diff = 0
                         local_loss_relative_diff = min(local_loss_relative_diff, 1)
                         print("ant:1: ", metrics_m['Samples'], samples_m[m], local_acc_diff, (metrics_m['Samples'] / samples_m[m]) * local_loss_relative_diff)
-                        client_losses.append((metrics_m['Samples'] / samples_m[m]) * local_acc_diff)
+                        client_losses.append((metrics_m['Samples'] ) * local_loss_diff)
                     client_losses = np.array(client_losses) * m_global_diff_list
-                    client_losses = (client_losses / np.sum(client_losses))
+                    # client_losses = (client_losses / np.sum(client_losses))
                     if np.isnan(client_losses).any():
                         client_losses = np.ones(len(client_losses))
                     # bom
                     # client_losses.append(local_acc_diff*metrics_m['Samples'] * local_loss[-1]/losses_m[m])
                     #                     client_losses = np.array(client_losses) * m_global_diff_list
                     # clients_losses.append((client_losses / np.sum(samples_m)))
-                    clients_losses.append((client_losses / np.sum(client_losses)))
+                    clients_losses.append(client_losses)
                     # client_losses = (np.power(client_losses, self.fairness_weight - 1)) / np.sum(client_losses)
                     #
                     # client_losses = client_losses / np.sum(client_losses)
@@ -487,6 +492,8 @@ class FedNome(Server):
                 print("Valor das losses: ", clients_losses)
 
                 prob_cold_start_m, use_cold_start_m = self.cold_start_selection()
+                print("cold: ", t)
+                print(prob_cold_start_m)
                 total_clients = 0
                 remaining_clients = np.array([i for i in range(len(self.clients))])
                 m_acc_gain = []
@@ -515,7 +522,7 @@ class FedNome(Server):
                 print("ga: ", m_acc_gain)
                 if np.sum(m_acc_gain) > 0:
                     # remaining_clients_per_model = m_acc_gain / np.sum(m_acc_gain)
-                    remaining_clients_per_model = m_acc_gain / np.sum(m_acc_gain)
+                    remaining_clients_per_model = m_loss_gain / np.sum(m_loss_gain)
                 else:
                     remaining_clients_per_model = np.array([1/self.M for i in range(self.M)])
                 print("Clientes restantes (%): ", remaining_clients_per_model)
@@ -524,8 +531,8 @@ class FedNome(Server):
                 remaining_clients_per_model[np.where(remaining_clients_per_model < self.minimum_training_clients_per_model_percentage)] = self.minimum_training_clients_per_model_percentage
                 print("inter: ", remaining_clients_per_model)
                 # for i in range(len(remaining_clients_per_model)):
-                #     if remaining_clients_per_model[i] > 0 and remaining_clients_per_model[i] < self.minimum_training_clients_per_model_percentage:
-                #         remaining_clients_per_model[i] = self.minimum_training_clients_per_model_percentage
+                #     if remaining_clients_per_model[i] > 0 and remaining_clients_per_model[i] < self.models_semi_convergence_min_n_training_clients[i]:
+                #         remaining_clients_per_model[i] = self.minimum_training_clients_per_model_percentage[i]
                 print("inter 2: ", remaining_clients_per_model)
                 num_join_clients = self.num_join_clients
                 for m in range(self.M):
@@ -538,6 +545,7 @@ class FedNome(Server):
                 loops = 0
                 # include missing clients
                 if np.sum(remaining_clients_per_model) < num_join_clients:
+                    print("me")
                     diff = num_join_clients - np.sum(remaining_clients_per_model)
                     i = 0
                     while np.sum(remaining_clients_per_model) < num_join_clients and diff > 0 and loops < 20:
@@ -548,14 +556,36 @@ class FedNome(Server):
                         if i >= self.M:
                             i = 0
                         loops += 1
+                elif np.sum(remaining_clients_per_model) > num_join_clients:
+                    print("mais clientes")
+                    diff = np.sum(remaining_clients_per_model) - num_join_clients
+                    i = 0
+                    while np.sum(remaining_clients_per_model) > num_join_clients and diff > 0 and loops < 20:
+                        if remaining_clients_per_model[i] > self.models_semi_convergence_min_n_training_clients[i]:
+                            remaining_clients_per_model[i] -= 1
+                            print("redu")
+                            diff -= 1
+                        i += 1
+                        if i >= self.M:
+                            i = 0
+                        loops += 1
 
+                print("r", t)
                 print("Clientes res: ", remaining_clients_per_model)
                 """semi-convergence detection"""
+                min_clients = np.min(list(self.models_semi_convergence_min_n_training_clients.values()))
                 for m in range(self.M):
+                    self.rounds_since_last_semi_convergence[m] += 1
                     global_acc = np.array(self.relative_accuracy_gain_models[m][-self.convergence_detection_window:])
                     print("globl: ", global_acc)
-                    idxs = np.argwhere(global_acc < 0.0)[-4:]
-                    if len(idxs) >= 2:
+                    if t < 40:
+                        window = 7
+                    else:
+                        window = 5
+                    idxs = np.argwhere(global_acc < 0)[-6:]
+                    diff = self.models_semi_convergence_min_n_training_clients[m] - min_clients
+                    if len(idxs) >= 2 and diff < 1:
+                        self.rounds_since_last_semi_convergence[m] = 0
                         idxs_rounds = np.array(idxs, dtype=np.int32).flatten()
                         print("indices: ", idxs_rounds, idxs_rounds[-1])
                         print("ab: ", self.training_clients_per_model_per_round[m])
@@ -564,91 +594,112 @@ class FedNome(Server):
                         # more clients are trained for the semi converged model
                         print("treinados na rodada passada: ", m , self.training_clients_per_model_per_round[m][t-2])
                         self.models_semi_convergence_min_n_training_clients[m] = min(
-                            self.models_semi_convergence_min_n_training_clients[m] + 1, num_join_clients)
+                            self.models_semi_convergence_min_n_training_clients[m] + 1, 4)
                         self.models_semi_convergence_flag[m] = True
                         self.models_semi_convergence_count[m] += 1
                     # updates the probability of training a semi converged model
                     self.models_semi_convergence_training_probability[m] = max((num_join_clients - self.models_semi_convergence_min_n_training_clients[
                                                                                 m]) / num_join_clients, 1/num_join_clients)
+                    self.models_semi_convergence_min_n_training_clients[m] = min(
+                        self.models_semi_convergence_min_n_training_clients[m], num_join_clients)
 
                 print("semi convergen: ", self.models_semi_convergence_flag, self.models_semi_convergence_count, t)
                 print("semi conver prob: ", self.models_semi_convergence_training_probability)
                 print("min training: ", self.models_semi_convergence_min_n_training_clients)
                 print("rem: ", remaining_clients_per_model)
-                flag_m = False
-                if True in self.models_semi_convergence_flag:
-                    m_list = []
-                    for i in range(len(self.models_semi_convergence_flag)):
-                        if self.models_semi_convergence_flag[i] == True:
-                            m_list.append(i)
-                    print("m list: ", m_list)
-                    # m_list = [0]
-                    # Randomly chose one model for boosted training
-                    m = np.random.choice(m_list)
-                    print(("mw: ", m))
-                    m_prob = self.models_semi_convergence_training_probability[m]
-                    print("m_prob: ", m_prob)
-                    # This model will be trained or not based on its semi convergence training probability. This probability is becomes lower each time it receives a boosting training
-                    flag_m = np.random.choice(a=[True, False], size= 1, p=[m_prob, 1 - m_prob])
-                    if flag_m:
-                        # The number of additional clients for training
-                        diff = max(self.models_semi_convergence_min_n_training_clients[m] - remaining_clients_per_model[m], 0)
-                        # The number of exceeding clients
-                        diff = max(num_join_clients - np.sum(remaining_clients_per_model) - diff, 0)
-                        count = 0
-                        # Detect whether there is a model that has decedent clients to be removed
-                        for m_aux in range(self.M):
-                            if m_aux != m and diff > 0:
-                                model_excedent_clients = remaining_clients_per_model[m_aux] - self.models_semi_convergence_min_n_training_clients[m_aux]
-                                model_excedent_clients = min(model_excedent_clients, diff)
-                                if model_excedent_clients > 0:
-                                    # Remvoe excedents
-                                    remaining_clients_per_model[m_aux] -= model_excedent_clients
-                                    diff -= model_excedent_clients
+                # if True in self.models_semi_convergence_flag:
+                #     m_list = []
+                #     for i in range(len(self.models_semi_convergence_flag)):
+                #         if self.models_semi_convergence_flag[i] == True:
+                #             m_list.append(i)
+                #     print("m list: ", m_list)
+                #     # m_list = [0]
+                #     # Randomly chose one model for boosted training
+                #     m = np.random.choice(m_list)
+                #     print(("mw: ", m))
+                #     m_prob = self.models_semi_convergence_training_probability[m]
+                #     print("m_prob: ", m_prob)
+                #     # This model will be trained or not based on its semi convergence training probability. This probability is becomes lower each time it receives a boosting training
+                #     flag_m = np.random.choice(a=[True, False], size= 1, p=[m_prob, 1 - m_prob])
+                #     if flag_m:
+                #         # The number of additional clients for training
+                #         diff = max(self.models_semi_convergence_min_n_training_clients[m] - remaining_clients_per_model[m], 0)
+                #         # The number of exceeding clients
+                #         diff = max(num_join_clients - np.sum(remaining_clients_per_model) - diff, 0)
+                #         count = 0
+                #         # Detect whether there is a model that has decedent clients to be removed
+                #         for m_aux in range(self.M):
+                #             if m_aux != m and diff > 0:
+                #                 model_excedent_clients = remaining_clients_per_model[m_aux] - self.models_semi_convergence_min_n_training_clients[m_aux]
+                #                 model_excedent_clients = min(model_excedent_clients, diff)
+                #                 if model_excedent_clients > 0:
+                #                     # Remvoe excedents
+                #                     remaining_clients_per_model[m_aux] -= model_excedent_clients
+                #                     diff -= model_excedent_clients
+                #
+                #         if diff > 0:
+                #             for m_aux in range(self.M):
+                #                 if m_aux != m and diff > 0:
+                #                     diff -= remaining_clients_per_model[m]
+                #                     diff = max(diff, 0)
+                #                     remaining_clients_per_model[m] = 0
+                #                 else:
+                #                     break
+                #     else:
+                #         remaining_clients_per_model[m] = 0
+                #
+                # m_idx = []
+                # for m in range(self.M):
+                #     if remaining_clients_per_model[m] > 0:
+                #         m_idx.append(m)
+                #
+                # if len(m_idx) == 1:
+                #     remaining_clients_per_model[m_idx[0]] = max([remaining_clients_per_model[m_idx[0]], self.models_semi_convergence_min_n_training_clients[m_idx[0]], int(self.M * self.minimum_training_clients_per_model)])
+                #
+                #     for m in range(self.M):
+                #         if remaining_clients_per_model[m] > 0 and remaining_clients_per_model[m] < max([remaining_clients_per_model[m_idx[0]], self.models_semi_convergence_min_n_training_clients[m_idx[0]], int(self.M * self.minimum_training_clients_per_model)]):
+                #             remaining_clients_per_model[m] = 0
+                #
+                # elif len(m_idx) >= 2:
+                #     # Verify whether there is a model that has insufficient clients
+                #     number_of_available_clients = 0
+                #     count = 0
+                #     while count < 4:
+                #         for m in range(self.M):
+                #             if remaining_clients_per_model[m] < self.models_semi_convergence_min_n_training_clients[m] and remaining_clients_per_model[m] > 0:
+                #                 if number_of_available_clients == 0:
+                #                     number_of_available_clients += remaining_clients_per_model[m]
+                #                     remaining_clients_per_model[m] = 0
+                #                 else:
+                #                     diff = self.models_semi_convergence_min_n_training_clients[m] - number_of_available_clients - remaining_clients_per_model[m]
+                #                     if diff >= 0:
+                #                         remaining_clients_per_model[m] += diff
+                #                         number_of_available_clients = 0
+                #                     else:
+                #                         remaining_clients_per_model[m] = self.models_semi_convergence_min_n_training_clients[m]
+                #                         number_of_available_clients = self.models_semi_convergence_min_n_training_clients[m] - diff
+                #
+                #             count += 1
 
-                        if diff > 0:
-                            for m_aux in range(self.M):
-                                if m_aux != m and diff > 0:
-                                    diff -= remaining_clients_per_model[m]
-                                    diff = max(diff, 0)
-                                    remaining_clients_per_model[m] = 0
-                                else:
-                                    break
-                    else:
-                        remaining_clients_per_model[m] = 0
+                """Number of models to train"""
+                models_semi_convergence_min_n_training_client = copy.deepcopy(
+                    list(self.models_semi_convergence_min_n_training_clients.values()))
+                n_models_to_train = self.M
+                print("mi train", models_semi_convergence_min_n_training_client, num_join_clients, self.models_semi_convergence_flag)
+                if np.sum(models_semi_convergence_min_n_training_client) > num_join_clients and True in self.models_semi_convergence_flag:
+                    excedent = np.sum(models_semi_convergence_min_n_training_client) - num_join_clients
+                    ordered = np.random.choice(a=[i for i in range(self.M)], size=1, p=m_global_diff_list)
+                    print("ord: ", ordered)
+                    n_models_to_train -= 1
+                    models_semi_convergence_min_n_training_client[ordered[0]] = 0
 
-                m_idx = []
                 for m in range(self.M):
-                    if remaining_clients_per_model[m] > 0:
-                        m_idx.append(m)
+                    if models_semi_convergence_min_n_training_client[m] == 0:
+                        remaining_clients_per_model[m] = 0
+                    elif remaining_clients_per_model[m] < models_semi_convergence_min_n_training_client[m]:
+                        remaining_clients_per_model[m] = models_semi_convergence_min_n_training_client[m]
 
-                if len(m_idx) == 1:
-                    remaining_clients_per_model[m_idx[0]] = max([remaining_clients_per_model[m_idx[0]], self.models_semi_convergence_min_n_training_clients[m_idx[0]], int(self.M * self.minimum_training_clients_per_model)])
-
-                    for m in range(self.M):
-                        if remaining_clients_per_model[m] > 0 and remaining_clients_per_model[m] < max([remaining_clients_per_model[m_idx[0]], self.models_semi_convergence_min_n_training_clients[m_idx[0]], int(self.M * self.minimum_training_clients_per_model)]):
-                            remaining_clients_per_model[m] = 0
-
-                elif len(m_idx) >= 2:
-                    # Verify whether there is a model that has insufficient clients
-                    number_of_available_clients = 0
-                    count = 0
-                    while count < 4:
-                        for m in range(self.M):
-                            if remaining_clients_per_model[m] < self.models_semi_convergence_min_n_training_clients[m] and remaining_clients_per_model[m] > 0:
-                                if number_of_available_clients == 0:
-                                    number_of_available_clients += remaining_clients_per_model[m]
-                                    remaining_clients_per_model[m] = 0
-                                else:
-                                    diff = self.models_semi_convergence_min_n_training_clients[m] - number_of_available_clients - remaining_clients_per_model[m]
-                                    if diff >= 0:
-                                        remaining_clients_per_model[m] += diff
-                                        number_of_available_clients = 0
-                                    else:
-                                        remaining_clients_per_model[m] = self.models_semi_convergence_min_n_training_clients[m]
-                                        number_of_available_clients = self.models_semi_convergence_min_n_training_clients[m] - diff
-
-                            count += 1
+                print("treinar d: ", n_models_to_train)
 
 
                 # if t>= 20:

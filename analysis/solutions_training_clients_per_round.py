@@ -135,7 +135,7 @@ if __name__ == "__main__":
     models_names = ["gru", "cnn_a"]
     datasets = configuration["dataset"]
     # solutions = ["FedNome",  "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg"]
-    solutions = ["Proposta", "MultiFedAvg", "FedFairMMFL"]
+    solutions = ["Proposta", "Proposta_V4"]
     num_classes = {"EMNIST": 47, "Cifar10": 10, "GTSRB": 43}
     num_clients = 40
     fc = 0.3

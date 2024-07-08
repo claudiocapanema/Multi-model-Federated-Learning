@@ -29,7 +29,7 @@ def bar_auc(df, base_dir, x_column, first, second, x_order, hue_order):
     fig, axs = plt.subplots(2, 1, sharex='all', figsize=(6, 5))
     bar_plot(df=df_2, base_dir=base_dir, ax=axs[0],
              file_name="""solutions_{}""".format(datasets), x_column=x_column, y_column=first + " AUC", y_lim=True,
-             title="""Average accuracy""", tipo="auc", y_max=12000)
+             x_order=x_order, title="""Balanced accuracy""", tipo="auc", y_max=12000)
     i = 0
     axs[i].set_ylim(0, 12000)
     axs[i].get_legend().remove()
@@ -40,7 +40,7 @@ def bar_auc(df, base_dir, x_column, first, second, x_order, hue_order):
     bar_plot(df=df_2, base_dir=base_dir, ax=axs[1],
              file_name="""solutions_{}""".format(datasets),
              x_column=x_column, y_column=second + " AUC", title="""Average loss""", y_max=3000, y_lim=True,
-             tipo="auc")
+             x_order=x_order, tipo="auc")
     i = 1
     axs[i].set_ylim(0, 3000)
     axs[i].get_legend().remove()
@@ -64,7 +64,7 @@ def bar_metric(df, base_dir, x_column, first, second, x_order, hue_order):
     fig, axs = plt.subplots(2, 1, sharex='all', figsize=(6, 5))
     bar_plot(df=df, base_dir=base_dir, ax=axs[0],
              file_name="""solutions_{}""".format(datasets), x_column=x_column, y_column=first, y_lim=True,
-             title="""Average accuracy""", tipo=None, y_max=100)
+             title="""Average balanced accuracy""", tipo=None, y_max=100)
     i = 0
     axs[i].get_legend().remove()
 
@@ -95,7 +95,7 @@ def line(df, base_dir, x_column, first, second, hue, ci=None):
     fig, axs = plt.subplots(2, 1, sharex='all', figsize=(6, 5))
     line_plot(df=df, base_dir=base_dir, ax=axs[0],
              file_name="""solutions_{}""".format(datasets), x_column=x_column, y_column=first,
-             hue=hue, ci=ci, title="""Average accuracy""", tipo=None, y_lim=True, y_max=100)
+             hue=hue, ci=ci, title="""Average balanced accuracy""", tipo=None, y_lim=True, y_max=100)
     i = 0
     # axs[i].get_legend().remove()
     axs[i].legend(fontsize=7)
@@ -124,7 +124,7 @@ def line(df, base_dir, x_column, first, second, hue, ci=None):
 
 if __name__ == "__main__":
 
-    alphas = ['0.1', '5.0']
+    alphas = ['5.0', '5.0']
     # alphas = ['5.0', '0.1']
     configuration = {"dataset": ["WISDM-W", "ImageNet100"], "alpha": [float(i) for i in alphas]}
     models_names = ["gru", "cnn_a"]
@@ -152,7 +152,7 @@ if __name__ == "__main__":
     read_accs = []
     read_loss = []
     read_round = []
-    first = 'Accuracy'
+    first = 'Balanced accuracy'
     for solution in solutions:
         acc = []
         loss = []
@@ -179,7 +179,7 @@ if __name__ == "__main__":
 
     bar_metric(df, base_dir, "Solution", first, second, x_order, hue_order)
     plt.plot()
-    bar_auc(df, base_dir, "Solution", first, second, x_order, hue_order)
+    bar_auc(df, base_dir, "Solution", first, second, solutions, solutions)
     plt.plot()
     line(df, base_dir, "Round (t)", first, second, "Solution", None)
 
