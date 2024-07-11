@@ -205,7 +205,7 @@ class FedNome(Server):
         relative_acc_gain_models = {m: [] for m in range(self.M)}
         acc_gain_efficiency = {m: [] for m in range(self.M)}
         for m in range(self.M):
-            global_acc = self.results_test_metrics[m]["Accuracy"]
+            global_acc = self.results_test_metrics[m]["Loss"]
             for i in range(len(global_acc)):
                 n_training_clinets = self.results_train_metrics[m]['# training clients'][-1]
                 if i == 0:
@@ -217,9 +217,9 @@ class FedNome(Server):
                         acc_gain_efficiency[m].append(0)
                 else:
                     acc_gain_models[m].append(global_acc[i] - global_acc[i-1])
-                    relative_acc_gain_models[m].append((global_acc[i] - global_acc[i-1]) / global_acc[i-1])
+                    relative_acc_gain_models[m].append(-(global_acc[i] - global_acc[i-1]) / global_acc[i-1])
                     if n_training_clinets > 0:
-                        acc_gain_efficiency[m].append((global_acc[-1] - global_acc[i]) / n_training_clinets)
+                        acc_gain_efficiency[m].append(-(global_acc[-1] - global_acc[i]) / n_training_clinets)
                     else:
                         acc_gain_efficiency[m].append(0)
 
