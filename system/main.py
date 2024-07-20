@@ -96,8 +96,8 @@ def run(args):
     dts = args.dataset
     num_classes = []
     for dt in dts:
-        num_classes.append({'EMNIST': 47, 'MNIST': 10, 'Cifar10': 10, 'GTSRB': 43, 'WISDM-W': 20, 'Tiny-ImageNet': 200,
-                            'ImageNet100': 25}[dt])
+        num_classes.append({'EMNIST': 47, 'MNIST': 10, 'Cifar10': 10, 'GTSRB': 43, 'WISDM-W': 20, 'WISDM-P': 20, 'Tiny-ImageNet': 200,
+                            'ImageNet100': 25, 'ImageNet': 12}[dt])
 
     args.num_classes = num_classes
 
@@ -133,14 +133,14 @@ def run(args):
                     # model = CifarNet(num_classes=num_classes_m).to(args.device)
                 elif "Digit5" == dt:
                     model = Digit5CNN().to(args.device)
-                elif "ImageNet100" == dt:
-                    model = TinyImageNetCNN().to(args.device)
-                    # model = FedAvgCNN(in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
+                elif dt in ["ImageNet100", "ImageNet"]:
+                    # model = TinyImageNetCNN().to(args.device)
+                    model = FedAvgCNN(in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
                 else:
                     model = FedAvgCNN(in_features=3, num_classes=num_classes_m, dim=10816).to(args.device)
 
             elif model_str == "gru":
-                if "WISDM-W" == dt:
+                if dt in ["WISDM-W", "WISDM-P"]:
                     model = GRU(6, num_layers=1, hidden_size=4, sequence_length=200, num_classes=num_classes_m).to(args.device)
 
             elif "cnn_b" in model_str:
@@ -403,7 +403,7 @@ def run(args):
                 model.fc = nn.Identity()
                 model = BaseHeadSplit(model, head)
                 server = MultiFedAvgRR
-            elif args.algorithm == "Proposta":
+            elif "MultiFedSpeed" in args.algorithm:
                 head = copy.deepcopy(model.fc)
                 model.fc = nn.Identity()
                 model = BaseHeadSplit(model, head)
@@ -465,6 +465,8 @@ if __name__ == "__main__":
                         help="Random ratio of clients per round")
     parser.add_argument('-nc', "--num_clients", type=int, default=20,
                         help="Total number of clients")
+    parser.add_argument('-re', "--reduction", type=int, default=3,
+                        help="Number of clients to reduce - Used by MultiFedSpeed")
     parser.add_argument('-pv', "--prev", type=int, default=0,
                         help="Previous Running times")
     parser.add_argument('-t', "--times", type=int, default=1,

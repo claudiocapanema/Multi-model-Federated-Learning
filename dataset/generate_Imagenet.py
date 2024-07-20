@@ -22,7 +22,7 @@ import random
 import torch
 import torchvision
 import torchvision.transforms as transforms
-from utils.dataset_utils import check, separate_data, split_data, save_file
+from utils.dataset_utils import separate_data, split_data, save_file
 from torchvision.datasets import ImageFolder, DatasetFolder
 
 random.seed(1)
@@ -86,8 +86,18 @@ def generate_dataset(dir_path, num_clients, niid, balance, partition, alpha):
     else:
         print('rawdata already exists.\n')
 
-    transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Resize((32, 32)), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    # transform = transforms.Compose(
+    #     [transforms.ToTensor(), transforms.Resize((32, 32)), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Resize((32, 32)),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomVerticalFlip(),
+        transforms.RandomRotation(degrees=45),
+        transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.5),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    ])
 
     trainset = ImageFolder_custom(root=dir_path+'rawdata/ImageNet/train/', transform=transform)
     # testset = ImageFolder_custom(root=dir_path+'rawdata/ImageNet/', transform=transform)
@@ -119,7 +129,6 @@ def generate_dataset(dir_path, num_clients, niid, balance, partition, alpha):
 
     num_classes = len(set(dataset_label))
     print(f'Number of classes: {num_classes}')
-    exit(num_classes)
 
     # dataset = []
     # for i in range(num_classes):

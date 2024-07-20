@@ -51,6 +51,8 @@ class clientFedNome(Client):
                     x[0] = x[0].to(self.device)
                 else:
                     x = x.to(self.device)
+                if type(y) == tuple:
+                    y = torch.from_numpy(np.array(list(y), dtype=np.int32))
                 y = y.type(torch.LongTensor).to(self.device)
                 if self.train_slow:
                     time.sleep(0.1 * np.abs(np.random.rand()))

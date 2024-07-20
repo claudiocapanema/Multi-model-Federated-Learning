@@ -37,8 +37,8 @@ def load_data_imagenet(data_path):
     """Load ImageNet (training and val set)."""
 
     # Load ImageNet and normalize
-    traindir = os.path.join(data_path, "train")
-    valdir = os.path.join(data_path, "val")
+    traindir = data_path
+    valdir = traindir
 
     normalize = transforms.Normalize(
         mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]
@@ -340,36 +340,43 @@ class ManageDatasets():
 
     def load_imagenet(self):
 
-        dir_path = "data/Tiny-ImageNet/raw_data/"
+        num_clients = 40
+        alpha = 5.0
+        dir_path = "ImageNet/" + "clients_" + str(num_clients) + "/alpha_" + str(alpha) + "/"
 
         if not os.path.exists(dir_path):
             os.makedirs(dir_path)
 
-        trainset = ImageFolder_custom(root=dir_path + 'rawdata/ImageNet/train/')
-        # testset = ImageFolder_custom(root=dir_path+'rawdata/ImageNet/', transform=transform)
-        trainloader = torch.utils.data.DataLoader(
-            trainset, batch_size=len(trainset), shuffle=False)
+            # Setup directory for train/test data
+        config_path = dir_path + "config.json"
+        train_path = dir_path + "train/"
+        test_path = dir_path + "test/"
+
+        trainset, valset = load_data_imagenet(dir_path + "rawdata/ImageNet/train/")
+
+        # trainset = ImageFolder_custom(root=dir_path + '', transform=transform)
+        # testset = ImageFolder_custom(root=dir_path + '', transform=transform)
+        # trainloader = torch.utils.data.DataLoader(
+        #     trainset, batch_size=len(trainset), shuffle=False)
         # testloader = torch.utils.data.DataLoader(
         #     testset, batch_size=len(testset), shuffle=False)
-
-        for _, train_data in enumerate(trainloader, 0):
-            trainset.data, trainset.targets = train_data
-        # for _, test_data in enumerate(testloader, 0):
-        #     testset.data, testset.targets = test_data
+        #
+        # print("sam: ", trainset.classes)
+        #
+        # # for _, train_data in enumerate(trainloader, 0):
+        # #     print("oi: ", train_data)
+        # #     exit()
+        # # for _, test_data in enumerate(testloader, 0):
+        # #     testset.data, testset.targets = test_data
+        # exit()
+        np.random.seed(0)
 
         dataset_image = []
         dataset_label = []
-
-        dataset_image.extend(trainset.data.cpu().detach().numpy())
-        dataset_label.extend(trainset.targets.cpu().detach().numpy())
-        unique_label = np.unique(dataset_label)
-        # test_data = testset.data.cpu().detach().numpy()
-        # test_label = testset.targets.cpu().detach().numpy()
-        # idx = np.argwhere(np.isin(test_label, unique_label)).ravel()
-        # test_data = test_data[idx]
-        # test_label = test_label[idx]
-        # dataset_image.extend(test_data)
-        # dataset_label.extend(test_label)
+        dataset_image.extend(trainset.imgs)
+        # dataset_image.extend(valset.imgs)
+        dataset_label.extend(trainset.targets)
+        # dataset_label.extend(valset.targets)
         dataset_image = np.array(dataset_image)
         dataset_label = np.array(dataset_label)
 
@@ -603,20 +610,6 @@ class ManageDatasets():
         dataset_image = np.array(dataset_image)
         dataset_label = np.array(dataset_label)
 
-    def load_wisdm(self):
-
-        dataset = wisdm.load_dataset(reprocess=False, modality='watch')
-        num_classes = 12
-        partition_type = 'dirichlet'
-        dataset_name = 'WISDM-WATCH'
-        client_num_per_round = 6
-        partition, client_num_in_total, client_num_per_round = get_partition(partition_type,
-                                                                             dataset_name,
-                                                                             num_classes,
-                                                                             n_clients,
-                                                                             client_num_per_round,
-                                                                             alpha,
-                                                                             dataset)
 
     def select_dataset(self, dataset_name):
 
@@ -630,7 +623,7 @@ class ManageDatasets():
             return self.load_CIFAR10()
 
         elif dataset_name == 'ImageNet':
-            return self.load_tiny_imagenet()
+            return self.load_imagenet()
 
         elif dataset_name == "State Farm":
             return self.load_statefarm()
@@ -640,9 +633,6 @@ class ManageDatasets():
 
         elif dataset_name == 'EMNIST':
             return self.load_emnist()
-
-        elif dataset_name == 'WISDM-WATCH':
-            return self.load_wisdm()
 
         # elif dataset_name == 'MotionSense':
         #     return self.load_MotionSense()

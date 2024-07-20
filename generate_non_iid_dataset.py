@@ -3,7 +3,7 @@ import os
 import random
 import time
 
-from utils_file import save_dataloaders, save_dataloaders_widsm
+from dataset.utils_file import save_dataloaders
 
 trainloaders = []
 valloaders = []
@@ -17,7 +17,7 @@ def parse_arguments():
     argParser.add_argument("--clients", help="Number of clients", default=40)
     argParser.add_argument("--batch_size", help="Batch size", default=10)
     argParser.add_argument("--data_dir", help="Dataset directory", default="dataset/")
-    argParser.add_argument("--dataset", help="Options: CIFAR10, MNIST", default="WISDM-P")
+    argParser.add_argument("--dataset", help="Options: CIFAR10, MNIST", default="ImageNet")
     argParser.add_argument("--num_classes", help="Number of dataset classes to use", default=10)
     argParser.add_argument("--balance", help="User dataset balanced", default=False)
     argParser.add_argument("--partition", help="Dataset partition: dir or pat", default="dir")
@@ -41,8 +41,7 @@ if __name__ == '__main__':
 
     args = parse_arguments()
 
-    if args.dataset in ["WISDM-W", "WISDM-P"]:
-        save_dataloaders_widsm(args.dataset, int(args.clients),
+    save_dataloaders(args.dataset, int(args.clients),
                      int(args.num_classes),
                      bool(args.niid),
                      bool(args.balance), args.partition,
@@ -51,27 +50,5 @@ if __name__ == '__main__':
                      float(args.train_perc),
                      float(args.alpha),
                      args.data_dir,
-                     int(args.sim_id))
-    elif args.dataset == 'Cologne':
-        save_dataloaders_cologne(args.dataset, int(args.clients),
-                               int(args.num_classes),
-                               bool(args.niid),
-                               bool(args.balance), args.partition,
-                               int(args.class_per_client),
-                               int(args.batch_size),
-                               float(args.train_perc),
-                               float(args.alpha),
-                               args.data_dir,
-                               int(args.sim_id))
-    else:
-        save_dataloaders(args.dataset, int(args.clients),
-                         int(args.num_classes),
-                         bool(args.niid),
-                         bool(args.balance), args.partition,
-                         int(args.class_per_client),
-                         int(args.batch_size),
-                         float(args.train_perc),
-                         float(args.alpha),
-                         args.data_dir,
-                         int(args.sim_id)
-                         )
+                     int(args.sim_id)
+                     )

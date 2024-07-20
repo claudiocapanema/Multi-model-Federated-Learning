@@ -19,9 +19,12 @@ import copy
 import sys
 import random
 import ast
+import pickle
 import pandas as pd
 import torch
 import torch.nn as nn
+import torchvision.transforms as transforms
+import torchvision.datasets as datasets
 import numpy as np
 import os
 from torch.utils.data import DataLoader
@@ -83,7 +86,7 @@ class Client(object):
         for m in range(self.M):
             if self.dataset[m] in ['ExtraSensory', 'WISDM-WATCH', 'WISDM-P']:
                 self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.001))
-            elif self.dataset[m] == "Tiny-ImageNet":
+            elif self.dataset[m] in ["Tiny-ImageNet", "ImageNet"]:
                 self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=0.001))
             else:
                 self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=self.learning_rate))
@@ -101,11 +104,10 @@ class Client(object):
 
             print("Cliente: ", self.id, " modelo: ", m, " train class count: ", self.train_class_count[m])
 
-    def load_wisdm(self, m, mode="train", batch_size=32, dataset_name=None):
+    def load_wisdm(self, m, name, mode="train", batch_size=32, dataset_name=None):
 
         try:
-            dir_path = "../dataset/WISDM-W/" + "clients_" + str(self.args.num_clients) + "/alpha_" + str(self.args.alpha[m]) + "/" + "client_" + str(
-                self.id) + "/"
+            dir_path = "../dataset/" + name + "/" + "clients_" + str(self.args.num_clients) + "/alpha_" + str(self.args.alpha[m]) + "/"
             filename_train = dir_path + """train/idx_train_{}.csv""".format(self.id)
             filename_test = dir_path + "test/idx_test_{}.csv""".format(self.id)
             cid = self.id
@@ -161,8 +163,8 @@ class Client(object):
             unique_count = np.array(list(unique_count.values()))
             # print("Tamanho original dataset: ", len(x_train))
 
-            training_dataset = torch.utils.data.TensorDataset(torch.from_numpy(x_train).to(dtype=torch.float32), torch.from_numpy(y_train))
-            validation_dataset = torch.utils.data.TensorDataset(torch.from_numpy(x_test).to(dtype=torch.float32), torch.from_numpy(y_test))
+            training_dataset = torch.utils.data.TensorDataset(torch.from_numpy(x_train).to(dtype=torch.float32), torch.from_numpy(y_train).to(dtype=torch.int32))
+            validation_dataset = torch.utils.data.TensorDataset(torch.from_numpy(x_test).to(dtype=torch.float32), torch.from_numpy(y_test).to(dtype=torch.int32))
 
             random.seed(cid)
             np.random.seed(cid)
@@ -184,12 +186,133 @@ class Client(object):
                 return testLoader
 
         except Exception as e:
-            print("load WISDM")
+            print("load WISDM client base")
+            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
+
+    def load_imagenet(self, m, mode="train", batch_size=32, dataset_name=None):
+
+        try:
+            dir_path = "../dataset/ImageNet/" + "clients_" + str(self.args.num_clients) + "/alpha_" + str(self.args.alpha[m]) + "/"
+            traindir = """/home/claudio/Documentos/pycharm_projects/Multi-model-Federated-Learning/dataset/ImageNet/clients_40/alpha_5.0/rawdata/ImageNet/train/"""
+            filename_train = dir_path + """train/idx_train_{}.pickle""".format(self.id)
+            filename_test = dir_path + "test/idx_test_{}.pickle""".format(self.id)
+
+            transmforms = {'train': transforms.Compose(
+                    [
+
+                        transforms.Resize((32, 32)),
+                        transforms.RandomRotation(10),  # Rotates the image to a specified angel
+                        transforms.ToTensor(),
+                        transforms.Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
+                        # transforms.Resize((32, 32)),  # resises the image so it can be perfect for our model.
+                        # transforms.RandomHorizontalFlip(),  # FLips the image w.r.t horizontal axis
+                        # transforms.RandomRotation(10),  # Rotates the image to a specified angel
+                        # transforms.RandomAffine(0, shear=10, scale=(0.8, 1.2)),
+                        # # Performs actions like zooms, change shear angles.
+                        # transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),  # Set the color params
+                        # transforms.ToTensor(),  # comvert the image to tensor so that it can work with torch
+                        # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                    ]
+                ), 'test': transforms.Compose(
+                    [
+
+                        transforms.Resize((32, 32)),
+                        transforms.ToTensor(),
+                        transforms.Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
+                        # transforms.Resize((32, 32)),
+                        # transforms.ToTensor(),
+                        # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                    ]
+                )}[mode]
+
+            training_dataset = datasets.ImageFolder(
+                traindir,
+                transmforms
+            )
+
+            validation_dataset = datasets.ImageFolder(
+                traindir,
+                transmforms
+            )
+
+            np.random.seed(self.id)
+
+            dataset_image = []
+            dataset_samples = []
+            dataset_label = []
+            dataset_samples.extend(training_dataset.samples)
+            dataset_image.extend(training_dataset.imgs)
+            dataset_label.extend(training_dataset.targets)
+
+            with open(filename_train, 'rb') as handle:
+                idx_train = pickle.load(handle)
+
+            with open(filename_test, 'rb') as handle:
+                idx_test = pickle.load(handle)
+
+            # print("tipo: ", type(training_dataset.imgs), type(training_dataset.targets), type(training_dataset.samples))
+            imgs = training_dataset.imgs
+            x_train = []
+            x_test = []
+            y_train = []
+            y_test = []
+            for i in range(1):
+                x_train += training_dataset.samples
+                x_test += training_dataset.samples
+                y_train += training_dataset.targets
+                y_test += training_dataset.targets
+
+            x_train = np.array(x_train)
+            y_train = np.array(y_train)
+            x_test = np.array(x_test)
+            y_test = np.array(y_test)
+            x_train = x_train[idx_train]
+            y_train = y_train[idx_train]
+            x_test = x_test[idx_test]
+            y_test = y_test[idx_test]
+
+            training_dataset.samples = list(x_train)
+            training_dataset.targets = list(y_train)
+            validation_dataset.samples = list(x_test)
+            validation_dataset.targets = list(y_test)
+
+            y = np.array(list(y_train) + list(y_test))
+
+
+            # validation_dataset.imgs = list(imgs_test)
+
+            def seed_worker(worker_id):
+                np.random.seed(self.id)
+                random.seed(self.id)
+
+            g = torch.Generator()
+            g.manual_seed(self.id)
+
+            unique_count = {i: 0 for i in range(self.args.num_classes[m])}
+            unique, count = np.unique(y, return_counts=True)
+            data_unique_count_dict = dict(zip(unique, count))
+            for class_ in data_unique_count_dict:
+                unique_count[class_] = data_unique_count_dict[class_]
+            unique_count = np.array(list(unique_count.values()))
+
+            trainLoader = DataLoader(training_dataset, batch_size, shuffle=True, worker_init_fn=seed_worker,
+                                     generator=g)
+            testLoader = DataLoader(dataset=validation_dataset, batch_size=32, shuffle=False)
+
+            if mode == "train":
+                return trainLoader, unique_count
+            else:
+                return testLoader
+
+        except Exception as e:
+            print("load ImageNet")
             print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
 
     def load_train_data(self, m, batch_size=None):
-        if self.dataset[m] == "WISDM-W":
-            return self.load_wisdm(m, mode='train')
+        if self.dataset[m] in ["WISDM-W", "WISDM-P"]:
+            return self.load_wisdm(m,name=self.dataset[m],  mode='train')
+        elif self.dataset[m] == "ImageNet":
+            return self.load_imagenet(m, mode='train')
         else:
             if batch_size == None:
                 batch_size = self.batch_size
@@ -197,8 +320,10 @@ class Client(object):
             return DataLoader(train_data, batch_size, drop_last=True, shuffle=True), unique_count
 
     def load_test_data(self, m, batch_size=None):
-        if self.dataset[m] == "WISDM-W":
-            return self.load_wisdm(m, mode='test')
+        if self.dataset[m] in ["WISDM-W", "WISDM-P"]:
+            return self.load_wisdm(m, name=self.dataset[m], mode='test')
+        elif self.dataset[m] == "ImageNet":
+            return self.load_imagenet(m, mode='test')
         else:
             if batch_size == None:
                 batch_size = self.batch_size
@@ -238,6 +363,7 @@ class Client(object):
         test_num = 0
         y_prob = []
         y_true = []
+        contab = 0
         
         with torch.no_grad():
             for x, y in testloaderfull:
@@ -245,6 +371,9 @@ class Client(object):
                     x[0] = x[0].to(self.device)
                 else:
                     x = x.to(self.device)
+                contab = contab + 1
+                if type(y) == tuple:
+                    y = torch.from_numpy(np.array(list(y), dtype=np.int32))
                 y = y.type(torch.LongTensor).to(self.device)
                 output = self.model[m](x)
                 loss = self.loss(output, y)
@@ -312,6 +441,8 @@ class Client(object):
                     x[0] = x[0].to(self.device)
                 else:
                     x = x.to(self.device)
+                if type(y) == tuple:
+                    y = torch.from_numpy(np.array(list(y), dtype=np.int32))
                 y = y.type(torch.LongTensor).to(self.device)
                 output = self.model[m](x)
                 loss = self.loss(output, y)

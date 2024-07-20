@@ -1,6 +1,6 @@
 # PFLlib: Personalized Federated Learning Algorithm Library
 # Copyright (C) 2021  Jianqing Zhang
-
+import pandas as pd
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation; either version 2 of the License, or
@@ -115,6 +115,7 @@ class Server(object):
         self.rs_train_loss = []
         self.results_train_metrics = {m: {metric: [] for metric in self.train_metrics_names} for m in range(self.M)}
         self.results_test_metrics = {m: {metric: [] for metric in self.test_metrics_names} for m in range(self.M)}
+        self.clients_results_test_metrics = {m: {metric: [] for metric in self.test_metrics_names} for m in range(self.M)}
 
         self.times = times
         self.eval_gap = args.eval_gap
@@ -131,9 +132,11 @@ class Server(object):
         self.eval_new_clients = False
         self.fine_tuning_epoch_new = args.fine_tuning_epoch_new
 
-        self.clients_test_metrics = {i: {metric: {m: [] for m in range(self.M)} for metric in ["Accuracy", "Loss", "Samples", "Balanced accuracy", "Micro f1-score", "Macro f1-score", "Weighted f1-score"]} for i in range(self.num_clients)}
+        self.clients_test_metrics = {i: {metric: {m: [] for m in range(self.M)} for metric in ["Accuracy", "Loss", "Samples", "Balanced accuracy", "Micro f1-score", "Macro f1-score", "Weighted f1-score", "Round"]} for i in range(self.num_clients)}
         self.clients_train_metrics = {i: {metric: {m: [] for m in range(self.M)} for metric in ["Accuracy", "Loss", "Samples", "Balanced accuracy", "Micro f1-score", "Macro f1-score", "Weighted f1-score"]} for
                                      i in range(self.num_clients)}
+
+        self.past_train_metrics_m = {m: [] for m in range(self.M)}
 
     def set_clients(self, clientObj):
         for i, train_slow, send_slow in zip(range(self.num_clients), self.train_slow_clients, self.send_slow_clients):
@@ -335,6 +338,7 @@ class Server(object):
             print("File path: " + file_path)
 
             print("me: ", self.rs_test_acc)
+            self.clients_test_metrics_preprocess(m, file_path)
             self._write_header(file_path, header=header)
             self._write_outputs(file_path, data=data)
 
@@ -346,7 +350,7 @@ class Server(object):
     def load_item(self, item_name):
         return torch.load(os.path.join(self.save_folder_name, "server_" + item_name + ".pt"))
 
-    def test_metrics(self, m):
+    def test_metrics(self, m, t):
         if self.eval_new_clients and self.num_new_clients > 0:
             self.fine_tuning_new_clients()
             test_clients = self.new_clients
@@ -364,15 +368,18 @@ class Server(object):
         weighted_fscore = []
         macro_fscore = []
         for i in range(len(test_clients)):
+            # if i in self.selected_clients[m] or t == 1:
             c = test_clients[i]
             test_acc, test_loss, test_num, test_auc, test_balanced_acc, test_micro_fscore, test_macro_fscore, test_weighted_fscore = c.test_metrics(m, copy.deepcopy(self.global_model[m].to(self.device)))
-            if i in self.selected_clients[m]:
-                self.clients_test_metrics[i]["Accuracy"][m].append(test_acc)
-                self.clients_test_metrics[i]["Loss"][m].append(test_loss)
-                self.clients_test_metrics[i]["Balanced accuracy"][m].append(test_balanced_acc)
-                self.clients_test_metrics[i]["Micro f1-score"][m].append(test_micro_fscore)
-                self.clients_test_metrics[i]["Weighted f1-score"][m].append(test_weighted_fscore)
-                self.clients_test_metrics[i]["Macro f1-score"][m].append(test_macro_fscore)
+            self.clients_test_metrics[i]["Accuracy"][m].append(test_acc)
+            self.clients_test_metrics[i]["Loss"][m].append(test_loss)
+            self.clients_test_metrics[i]["Balanced accuracy"][m].append(test_balanced_acc)
+            self.clients_test_metrics[i]["Micro f1-score"][m].append(test_micro_fscore)
+            self.clients_test_metrics[i]["Samples"][m].append(test_num)
+            print("test_weighted_fscore: ", test_weighted_fscore, len(self.clients_test_metrics[i]["Weighted f1-score"][m]))
+            self.clients_test_metrics[i]["Weighted f1-score"][m].append(test_weighted_fscore)
+            self.clients_test_metrics[i]["Macro f1-score"][m].append(test_macro_fscore)
+            self.clients_test_metrics[i]["Round"][m].append(t)
             # accs.append(test_acc*test_num)
             # auc.append(test_auc*test_num)
             # num_samples.append(test_num)
@@ -412,7 +419,7 @@ class Server(object):
                 "Loss": loss, "Std loss": std_loss, "Balanced accuracy": balanced_acc, "Micro f1-score": micro_fscore,
                 "Weighted f1-score": weighted_fscore, "Macro f1-score": macro_fscore}
 
-    def train_metrics(self, m):
+    def train_metrics(self, m, t):
         if self.eval_new_clients and self.num_new_clients > 0:
             return [0], [1], [0]
 
@@ -423,26 +430,30 @@ class Server(object):
         micro_fscores = []
         macro_fscores = []
         weighted_fscores = []
-        for c in self.clients:
-            train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore = c.train_metrics(m)
-            accs.append(train_acc * train_num)
-            num_samples.append(train_num)
-            balanced_accs.append(train_balanced_acc * train_num)
-            micro_fscores.append(train_micro_fscore * train_num)
-            macro_fscores.append(train_macro_fscore * train_num)
-            weighted_fscores.append(train_weighted_fscore * train_num)
-            # if c in self.selected_clients[m]:
-            self.clients_train_metrics[c.id]["Samples"][m].append(num_samples)
-            self.clients_train_metrics[c.id]["Accuracy"][m].append(train_acc)
-            self.clients_train_metrics[c.id]["Loss"][m].append(train_loss)
-            self.clients_train_metrics[c.id]["Balanced accuracy"][m].append(train_balanced_acc)
-            self.clients_train_metrics[c.id]["Micro f1-score"][m].append(train_micro_fscore)
-            self.clients_train_metrics[c.id]["Macro f1-score"][m].append(train_macro_fscore)
-            self.clients_train_metrics[c.id]["Weighted f1-score"][m].append(train_weighted_fscore)
+        for i in range(len(self.clients)):
+            c = self.clients[i]
+            if i in self.selected_clients[m] or t == 1:
+                train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore = c.train_metrics(m)
+                accs.append(train_acc * train_num)
+                num_samples.append(train_num)
+                balanced_accs.append(train_balanced_acc * train_num)
+                micro_fscores.append(train_micro_fscore * train_num)
+                macro_fscores.append(train_macro_fscore * train_num)
+                weighted_fscores.append(train_weighted_fscore * train_num)
+                self.clients_train_metrics[c.id]["Samples"][m].append(num_samples)
+                self.clients_train_metrics[c.id]["Accuracy"][m].append(train_acc)
+                self.clients_train_metrics[c.id]["Loss"][m].append(train_loss)
+                self.clients_train_metrics[c.id]["Balanced accuracy"][m].append(train_balanced_acc)
+                self.clients_train_metrics[c.id]["Micro f1-score"][m].append(train_micro_fscore)
+                self.clients_train_metrics[c.id]["Macro f1-score"][m].append(train_macro_fscore)
+                self.clients_train_metrics[c.id]["Weighted f1-score"][m].append(train_weighted_fscore)
 
         ids = [c.id for c in self.clients]
 
         decimals = 5
+        print("amostras: ", num_samples, accs, self.selected_clients)
+        if len(num_samples) == 0:
+            return None
         acc = round(sum(accs) / sum(num_samples), decimals)
         loss = round(sum(losses) / sum(num_samples), decimals)
         balanced_acc = round(sum(balanced_accs) / sum(num_samples), decimals)
@@ -455,13 +466,17 @@ class Server(object):
 
     # evaluate selected clients
     def evaluate(self, m, t, acc=None, loss=None):
-        test_metrics = self.test_metrics(m)
+        test_metrics = self.test_metrics(m, t)
         test_acc = test_metrics['Accuracy']
         test_std_acc = test_metrics["Std Accuracy"]
         test_std_loss = test_metrics["Std loss"]
         test_loss = test_metrics['Loss']
         test_auc = test_metrics['AUC']
-        train_metrics = self.train_metrics(m)
+        train_metrics = self.train_metrics(m, t)
+        if train_metrics is not None:
+            self.past_train_metrics_m[m] = train_metrics
+        else:
+            train_metrics = self.past_train_metrics_m[m]
 
         # test_acc = sum(stats[2])*1.0 / sum(stats[1])
         # test_auc = sum(stats[3])*1.0 / sum(stats[1])
@@ -622,6 +637,37 @@ class Server(object):
     #     ids = [c.id for c in self.new_clients]
     #
     #     return ids, num_samples, tot_correct, tot_auc
+
+    def clients_test_metrics_preprocess(self, m, path):
+
+        ids = []
+        rounds = []
+        accs = []
+        losses = []
+        samples = []
+        balanced_accs = []
+        micro_fscore = []
+        macro_fscore = []
+        weighted_fscore = []
+        n_clients = []
+        for i in range(self.num_clients):
+            c_metrics = self.clients_test_metrics[i]
+            ids += [i] * len(c_metrics["Round"][m])
+            n_clients += [len(self.selected_clients[m])] * len(c_metrics["Round"][m])
+            rounds += c_metrics["Round"][m]
+            accs += c_metrics["Accuracy"][m]
+            losses += c_metrics["Loss"][m]
+            samples += c_metrics["Samples"][m]
+            balanced_accs += c_metrics["Balanced accuracy"][m]
+            micro_fscore += c_metrics["Micro f1-score"][m]
+            macro_fscore += c_metrics["Macro f1-score"][m]
+            weighted_fscore += c_metrics["Weighted f1-score"][m]
+
+        print("Accuracy", len(accs), "Loss", len(losses), "Samples", len(samples), "Balanced accuracy", len(balanced_accs), "Micro f1-score", len(micro_fscore), "Macro f1-score", len(macro_fscore), "Weighted f1-score", len(weighted_fscore))
+
+        df = pd.DataFrame({"Cid": ids, "# training clients": n_clients, "Round": rounds, "Accuracy": accs, "Loss": losses, "Samples": samples, "Balanced accuracy": balanced_accs, "Micro f1-score": micro_fscore, "Macro f1-score": macro_fscore, "Weighted f1-score": weighted_fscore}).round(5)
+        df.to_csv(path.replace(".csv", "_clients.csv"), index=False)
+
 
     def _write_header(self, filename, header):
 

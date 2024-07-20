@@ -13,52 +13,77 @@ import scipy.stats as st
 from scipy.integrate import simpson
 from numpy import trapz
 
-def group_by(df, first, second):
+def group_by(df, first, second, third):
 
     area_first = trapz(df[first].to_numpy(), dx=1)
     area_second = trapz(df[second].to_numpy(), dx=1)
+    area_first_efficiency = trapz(df.groupby("Round (t)").apply(lambda e: pd.DataFrame({"eff": [e[first].mean() / e["# training clients"].sum()]}))["eff"].to_numpy(), dx=1)
+    area_third = trapz(df["# training clients"].to_numpy(), dx=1)
 
     solution = df["Solution"].to_numpy()[0]
+    if solution == "FedFairMMFL":
+        print(df[first], first, df["# training clients"])
 
-    return pd.DataFrame({"Solution": [solution], first + " AUC": [area_first], second + " AUC": [area_second]})
+    return pd.DataFrame({"Solution": [solution], "Efficiency AUC": area_first_efficiency, first + " AUC": [area_first], second + " AUC": [area_second], "# training clients AUC": [area_third]})
 
-def bar_auc(df, base_dir, x_column, first, second, x_order, hue_order):
+def aggregate_metrics(df):
 
-    df_2 = df.groupby("Solution").apply(lambda x: group_by(x, first, second))
+    columns = list(df.columns)
+    balanced_acc_variance = df["Balanced accuracy"].std()
+    loss_variance = df["Loss"].std()
+    aggregated_df = df.groupby(columns).mean().reset_index()
+    aggregated_df["Balanced accuracy std"] = balanced_acc_variance
+    aggregated_df["Loss std"] = loss_variance
+
+    return aggregated_df[["Balanced accuracy", "Loss", "Balanced accuracy std", "Loss std"]]
+
+def bar_auc(df, base_dir, x_column, first, second, third, x_order, hue_order):
+
+    df_2 = df.groupby(["Solution", "Dataset", "Round (t)"]).apply(lambda x: x.mean()).reset_index()
+    df_2 = df_2.groupby(["Solution"]).apply(lambda x: group_by(x, first, second, third)).round(
+        5).reset_index(1)[["Efficiency AUC", "Balanced accuracy AUC", "# training clients AUC", "Loss AUC"]].round(2)
+    # print(df.drop(index=["Dataset", "Solution"]))
+    # exit()
+    # df_2 = df.reset_index().groupby("Solution").apply(lambda x: group_by(x, first, second)).round(2).reset_index(1)[
+    #     ["Balanced accuracy AUC", "Loss AUC"]].round(2)
     print(df_2)
-    fig, axs = plt.subplots(2, 1, sharex='all', figsize=(6, 5))
-    bar_plot(df=df_2, base_dir=base_dir, ax=axs[0],
-             file_name="""solutions_{}""".format(datasets), x_column=x_column, y_column=first + " AUC", y_lim=True,
-             x_order=x_order, title="""Balanced accuracy""", tipo="auc", y_max=12000)
-    i = 0
-    axs[i].set_ylim(0, 12000)
-    axs[i].get_legend().remove()
+    # exit()
+    # fig, axs = plt.subplots(2, 1, sharex='all', figsize=(6, 5))
+    #
+    # i = 0
+    # axs[i].set_ylim(0, 12000)
+    # axs[i].get_legend().remove()
+    # bar_plot(df=df_2, base_dir=base_dir, ax=axs[0],
+    #          file_name="""solutions_{}""".format(datasets), x_column=x_column, y_column=first + " AUC", y_lim=True,
+    #          x_order=x_order, title="""Balanced accuracy""", tipo="auc", y_max=12000)
+    #
+    # axs[i].set_xlabel('')
+    # # axs[i].set_ylabel(first)
+    # bar_plot(df=df_2, base_dir=base_dir, ax=axs[1],
+    #          file_name="""solutions_{}""".format(datasets),
+    #          x_column=x_column, y_column=second + " AUC", title="""Average loss""", y_max=3000, y_lim=True,
+    #          x_order=x_order, tipo="auc")
+    # i = 1
+    # axs[i].set_ylim(0, 3000)
+    # axs[i].get_legend().remove()
+    #
+    # axs[i].set_ylabel(second + " AUC", labelpad=5)
+    #
+    # # axs[i].legend(fontsize=10)
+    # # fig.suptitle("", fontsize=16)
+    # plt.tight_layout()
+    # plt.subplots_adjust(wspace=0.07, hspace=0.14)
+    # fig.savefig(
+    #     """{}solutions_{}_clients_bar_auc.png""".format(base_dir,
+    #                                                          num_clients), bbox_inches='tight',
+    #     dpi=400)
+    # fig.savefig(
+    #     """{}solutions_{}_clients_bar_auc.svg""".format(base_dir,
+    #                                                          num_clients), bbox_inches='tight',
+    #     dpi=400)
 
-
-    axs[i].set_xlabel('')
-    # axs[i].set_ylabel(first)
-    bar_plot(df=df_2, base_dir=base_dir, ax=axs[1],
-             file_name="""solutions_{}""".format(datasets),
-             x_column=x_column, y_column=second + " AUC", title="""Average loss""", y_max=3000, y_lim=True,
-             x_order=x_order, tipo="auc")
-    i = 1
-    axs[i].set_ylim(0, 3000)
-    axs[i].get_legend().remove()
-
-    axs[i].set_ylabel(second + " AUC", labelpad=5)
-
-    # axs[i].legend(fontsize=10)
-    # fig.suptitle("", fontsize=16)
-    plt.tight_layout()
-    plt.subplots_adjust(wspace=0.07, hspace=0.14)
-    fig.savefig(
-        """{}solutions_{}_clients_bar_auc.png""".format(base_dir,
-                                                             num_clients), bbox_inches='tight',
-        dpi=400)
-    fig.savefig(
-        """{}solutions_{}_clients_bar_auc.svg""".format(base_dir,
-                                                             num_clients), bbox_inches='tight',
-        dpi=400)
+    df_2.to_latex("""{}auc.latex""".format(base_dir))
+    print("""{}auc.latex""".format(base_dir))
 
 def bar_metric(df, base_dir, x_column, first, second, x_order, hue_order):
     fig, axs = plt.subplots(2, 1, sharex='all', figsize=(6, 5))
@@ -124,13 +149,13 @@ def line(df, base_dir, x_column, first, second, hue, ci=None):
 
 if __name__ == "__main__":
 
-    alphas = ['5.0', '5.0']
+    alphas = ['0.1', '5.0']
     # alphas = ['5.0', '0.1']
-    configuration = {"dataset": ["WISDM-W", "ImageNet100"], "alpha": [float(i) for i in alphas]}
+    configuration = {"dataset": ["WISDM-P", "ImageNet"], "alpha": [float(i) for i in alphas]}
     models_names = ["gru", "cnn_a"]
     datasets = configuration["dataset"]
-    # solutions = ["FedNome",  "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg", "Propostav1", "Propostav0", ]
-    solutions = ["Proposta", "MultiFedAvg",  "FedFairMMFL"]
+    # solutions = ["FedNome",  "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg", "MultiFedSpeedv1", "MultiFedSpeedv0", ]
+    solutions = ["MultiFedSpeed@1", "MultiFedSpeed@2", "MultiFedSpeed@3", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
     num_classes = {"EMNIST": 47, "Cifar10": 10, "GTSRB": 43}
     num_clients = 40
     fc = 0.3
@@ -152,14 +177,21 @@ if __name__ == "__main__":
     read_accs = []
     read_loss = []
     read_round = []
+    dts = []
+    weight = []
     first = 'Balanced accuracy'
+    n_clients = []
     for solution in solutions:
         acc = []
         loss = []
         for dataset in datasets:
-            df = pd.read_csv("""{}{}_{}_test_0.csv""".format(d, dataset, solution))
-            acc += df[first].tolist()
-            loss += df["Loss"].tolist()
+            df = pd.read_csv("""{}{}_{}_test_0_clients.csv""".format(d, dataset, solution))
+            # total_samples = df["Samples"].max()
+            # samples = df["Samples"].to_numpy()
+            acc += list(df[first].to_numpy())
+            loss += list(df["Loss"].to_numpy())
+            n_clients += df["# training clients"].tolist()
+            dts += [dataset] * len(df)
             read_round += df["Round"].tolist()
         read_solutions += [solution] * len(acc)
         read_accs += acc
@@ -167,7 +199,10 @@ if __name__ == "__main__":
 
 
     second = 'Loss'
-    df = pd.DataFrame({'Solution': read_solutions, first: np.array(read_accs) * 100, second: read_loss, "Round (t)": read_round})
+    third = '# training clients'
+    df = pd.DataFrame({'Solution': read_solutions, first: np.array(read_accs) * 100, second: read_loss, "Round (t)": read_round, "Dataset": dts, "# training clients": n_clients})
+
+    # df = df.groupby(["Solution", "Round (t)", "Dataset"]).apply(lambda e: aggregate_metrics(e)).reset_index()
     # df_2 = pd.DataFrame({'\u03B1': read_std_alpha, 'Dataset': read_std_dataset, 'Samples (%) std': read_num_samples_std})
 
     print(df)
@@ -179,7 +214,7 @@ if __name__ == "__main__":
 
     bar_metric(df, base_dir, "Solution", first, second, x_order, hue_order)
     plt.plot()
-    bar_auc(df, base_dir, "Solution", first, second, solutions, solutions)
+    bar_auc(df, base_dir, "Solution", first, second, third, solutions, solutions)
     plt.plot()
     line(df, base_dir, "Round (t)", first, second, "Solution", None)
 
