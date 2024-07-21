@@ -2,7 +2,7 @@ import os
 import pickle
 import warnings
 
-from utils.select_dataset import ManageDatasets
+from select_dataset import ManageDatasets
 from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -12,11 +12,8 @@ import numpy as np
 
 # from dataset_utils.partition.uniform import UniformPartition
 # from dataset_utils.partition.user_index import UserPartition
-from utils.cologne_load import load_dataset_cologne
-
-
-import utils.wisdm
-from utils.partition.dirichlet import DirichletPartition
+from partition.dirichlet import DirichletPartition
+from wisdm import load_dataset
 def bar_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, hue_order=None, y_lim=False, y_min=0, y_max=100, log_scale=False, sci=False, x_order=None, ax=None, tipo=None, palette=None):
     Path(base_dir + "png/").mkdir(parents=True, exist_ok=True)
     Path(base_dir + "svg/").mkdir(parents=True, exist_ok=True)
@@ -219,17 +216,21 @@ def split_data(dataidx_map, target, num_clients, train_size):
 
     return train_data, test_data
 
-def save_dataloaders(dataset_name="CIFAR10", num_clients=10, num_classes=10, niid=True, balance=False, partition="dir",
+def save_dataloaders(dataset_name="CIFAR10", num_clients=40, num_classes=10, niid=True, balance=False, partition="dir",
                  class_per_client=10,
                  batch_size=10, train_size=0.8, alpha=0.1, dataset_dir="./dataset/", sim_id=0):
 
-    num_classes = {'Tiny-ImageNet': 200, 'CIFAR10': 10, 'MNIST': 10, 'EMNIST': 47, "State Farm": 10, 'GTSRB': 43}[dataset_name]
+    num_classes = {'ImageNet': 12, 'CIFAR10': 10, 'MNIST': 10, 'EMNIST': 47, "State Farm": 10, 'GTSRB': 43}[dataset_name]
+
+    num_clients = 40
+    dir_path = dataset_name + "/" + "clients_" + str(num_clients) + "/alpha_" + str(alpha) + "/"
 
     # transform = get_transform(dataset_name)
     x_train, y_train, x_test, y_test = ManageDatasets().select_dataset(dataset_name)
 
     target = np.concatenate((y_train, y_test), axis=0).astype(int)
     df = pd.DataFrame({'label': target}).value_counts().reset_index()
+    print(df)
     # df['count'] = df[0].to_numpy()
     df = df[['label', 'count']]
     x_order = df.sort_values(by='count')['label'].tolist()
@@ -268,11 +269,8 @@ def save_dataloaders(dataset_name="CIFAR10", num_clients=10, num_classes=10, nii
         print("Suporte: ", pd.Series(target[index_train]).astype(str).value_counts(), "max: ", np.array(index_train).max())
         count += len(index_train) + len(index_test)
 
-        # filename_train = """data/{}/{}_clients/classes_per_client_{}/alpha_{}/{}/idx_train_{}.pickle""".format(dataset_name, num_clients, class_per_client, alpha, client_id, client_id)
-        # filename_test = """data/{}/{}_clients/classes_per_client_{}/alpha_{}/{}/idx_test_{}.pickle""".format(dataset_name, num_clients, class_per_client, alpha, client_id, client_id)
-        dir_path = "/WISDM-W/" + "clients_" + str(num_clients) + "/alpha_" + str(alpha) + "/" + "client_" + str(client_id) + "/"
-        filename_train = dir_path + "train/"
-        filename_test = dir_path + "test/"
+        filename_train = """{}train/idx_train_{}.pickle""".format(dir_path, client_id)
+        filename_test = """{}test/idx_test_{}.pickle""".format(dir_path, client_id)
         print("escrever: ", filename_train)
         os.makedirs(os.path.dirname(filename_train), exist_ok=True)
         os.makedirs(os.path.dirname(filename_test), exist_ok=True)
@@ -285,7 +283,7 @@ def save_dataloaders(dataset_name="CIFAR10", num_clients=10, num_classes=10, nii
 
     print("Media de classes: ", pd.Series(np.array(classes_list)/num_classes).describe())
     df = pd.DataFrame({'label': final_target}).value_counts().reset_index()
-    df['count'] = df[0].to_numpy()
+    # df['count'] = df[0].to_numpy()
     df = df[['label', 'count']]
     x_order = df.sort_values(by='count')['label'].tolist()
     # df = pd.DataFrame({'label': df.index.tolist(), 'count': df.tolist()})
@@ -293,6 +291,7 @@ def save_dataloaders(dataset_name="CIFAR10", num_clients=10, num_classes=10, nii
              x_column='label', y_column='count', x_order=x_order)
 
     print("total: ", count)
+
 
 def save_dataloaders_widsm(dataset_name="WISDM-W", num_clients=10, num_classes=10, niid=True, balance=False, partition="dir",
                  class_per_client=2,
@@ -305,7 +304,7 @@ def save_dataloaders_widsm(dataset_name="WISDM-W", num_clients=10, num_classes=1
         modality = "watch"
     elif dataset_name == "WISDM-P":
         modality = "phone"
-    dataset = utils.wisdm.load_dataset(reprocess=True, modality=modality)
+    dataset = load_dataset(reprocess=True, modality=modality)
     num_classes = 12
     partition_type = 'dirichlet'
     # dataset_name = 'WISDM-WATCH'
@@ -343,10 +342,13 @@ def save_dataloaders_widsm(dataset_name="WISDM-W", num_clients=10, num_classes=1
               " classes: ", classes, " teste: ", len(data_test))
         print("Suporte: \n", pd.Series(target_train).astype(str).value_counts())
 
-        dir_path = "./WISDM-W/" + "clients_" + str(num_clients) + "/alpha_" + str(alpha) + "/" + "client_" + str(
-            client_id) + "/"
-        filename_train = dir_path + """train/idx_train_{}.csv""".format(client_id)
-        filename_test = dir_path + "test/idx_test_{}.csv""".format(client_id)
+        dir_path = dataset_name + "/" + "clients_" + str(num_clients) + "/alpha_" + str(alpha) + "/"
+
+
+        filename_train = """{}train/idx_train_{}.csv""".format(dir_path,
+                                                                                                               client_id)
+        filename_test = """{}test/idx_test_{}.csv""".format(dir_path,
+                                                                                                             client_id)
 
         print("escrever: ", filename_train)
         os.makedirs(os.path.dirname(filename_train), exist_ok=True)
@@ -360,85 +362,6 @@ def save_dataloaders_widsm(dataset_name="WISDM-W", num_clients=10, num_classes=1
 
         data_train = {"X": data_train.tolist(), "Y": target_train.tolist()}
         data_test = {"X": data_test.tolist(), "Y": target_test.tolist()}
-
-        for df, filename in zip([data_train, data_test], [filename_train, filename_test]):
-
-            pd.DataFrame(df).to_csv(filename, index=False)
-
-
-def save_dataloaders_cologne(dataset_name="Cologne", num_clients=10, num_classes=10, niid=True, balance=False, partition="dir",
-                 class_per_client=2,
-                 batch_size=10, train_size=0.8, alpha=0.1, dataset_dir="./dataset/", sim_id=0):
-
-
-    modality = ""
-    window = 10
-    n_classes = 15
-    dataset = load_dataset_cologne(n_classes=n_classes, window=window, reprocess=False)
-
-
-    partition_type = 'dirichlet'
-    # dataset_name = 'WISDM-WATCH'
-    client_num_per_round = 6
-
-    partition, client_num_in_total, client_num_per_round = get_partition(partition_type,
-                                                                         dataset_name,
-                                                                         n_classes,
-                                                                         num_clients,
-                                                                         client_num_per_round,
-                                                                         alpha,
-                                                                         dataset)
-
-    client_datasets_train = partition(dataset['train'])
-    client_datasets_test = partition(dataset['test'])
-    print(len(client_datasets_train))
-    # exit()
-    final_target = []
-    classes_list = []
-
-    for client_id in range(len(client_datasets_train)):
-        index_train = list(client_datasets_train[client_id].indices)
-        index_test = list(client_datasets_test[client_id].indices)
-        data_train = client_datasets_train[client_id].dataset.data[index_train]
-        data_test = client_datasets_test[client_id].dataset.data[index_test]
-        target_train = client_datasets_train[client_id].dataset.targets[index_train]
-        target_test = client_datasets_test[client_id].dataset.targets[index_test]
-        final_target += list(target_train) + list(target_test)
-        print("dimensao: ", target_train.shape)
-        # print(target_train)
-        classes = len(pd.Series(target_train).unique().tolist())
-        classes_list.append(classes)
-        # " Sem duplicadas: ", len(pd.Series(data_train).drop_duplicates()),
-        print("Original: ", len(data_train),
-              " classes: ", classes, " teste: ", len(data_test))
-        print("Suporte: \n", pd.Series(target_train).astype(str).value_counts())
-
-
-        filename_train = """dataset_utils/data/{}/{}_clients/classes_per_client_{}/alpha_{}/{}/idx_train_{}.csv""".format(dataset_name,
-                                                                                                               num_clients,
-                                                                                                               class_per_client,
-                                                                                                               alpha,
-                                                                                                               client_id,
-                                                                                                               client_id)
-        filename_test = """dataset_utils/data/{}/{}_clients/classes_per_client_{}/alpha_{}/{}/idx_test_{}.csv""".format(dataset_name,
-                                                                                                             num_clients,
-                                                                                                             class_per_client,
-                                                                                                             alpha,
-                                                                                                             client_id,
-                                                                                                             client_id)
-
-        print("escrever: ", filename_train)
-        os.makedirs(os.path.dirname(filename_train), exist_ok=True)
-        os.makedirs(os.path.dirname(filename_test), exist_ok=True)
-
-        # with open(filename_train, 'wb') as handle:
-        #     pickle.dump(index_train, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        #
-        # with open(filename_test, 'wb') as handle:
-        #     pickle.dump(index_test, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-        data_train = {"X": data_train.tolist(), "Y": target_train.astype(int).tolist()}
-        data_test = {"X": data_test.tolist(), "Y": target_test.astype(int).tolist()}
 
         for df, filename in zip([data_train, data_test], [filename_train, filename_test]):
 

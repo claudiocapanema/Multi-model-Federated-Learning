@@ -13,18 +13,45 @@ import scipy.stats as st
 from scipy.integrate import simpson
 from numpy import trapz
 
+def ci(data, f=False):
+
+    mi, ma =  st.t.interval(0.95, len(data)-1, loc=np.mean(data), scale=st.sem(data))
+
+    mean_value = (mi + ma)/2
+    diff = abs(ma) - abs(mean_value)
+    mean_value = round(mean_value, 2)
+    if f:
+        print("loss ci: ", mi, ma)
+        print("loss media: ", np.mean(data))
+        print("calc: ", mean_value)
+        print(data)
+    if np.isnan(mean_value):
+        mean_value = np.mean(data)
+        return """{}""".format(int(mean_value))
+    diff = round(diff, 2)
+    return """{} $\pm$ {}""".format(mean_value, diff)
+
 def group_by(df, first, second, third):
 
     area_first = trapz(df[first].to_numpy(), dx=1)
     area_second = trapz(df[second].to_numpy(), dx=1)
     area_first_efficiency = trapz(df.groupby("Round (t)").apply(lambda e: pd.DataFrame({"eff": [e[first].mean() / e["# training clients"].sum()]}))["eff"].to_numpy(), dx=1)
     area_third = trapz(df["# training clients"].to_numpy(), dx=1)
+    df_2 = df[df["Round (t)"] == 100]
+    acc_efficiency = df_2.groupby("Round (t)").apply(lambda e: pd.DataFrame({"eff": [e[first].mean() / e["# training clients"].sum()]})).reset_index()
+    acc_efficiency = acc_efficiency["eff"].tolist()[0]
+    # acc = ci(df_2[first].to_numpy())
+    acc = df_2[first].mean()
+    # training_clients = ci(df_2["# training clients"].to_numpy(), True)
+    training_clients = df["# training clients"].mean()
+    # loss = ci(df_2[second].to_numpy())
+    loss = df_2[second].mean()
 
     solution = df["Solution"].to_numpy()[0]
     if solution == "FedFairMMFL":
         print(df[first], first, df["# training clients"])
 
-    return pd.DataFrame({"Solution": [solution], "Efficiency AUC": area_first_efficiency, first + " AUC": [area_first], second + " AUC": [area_second], "# training clients AUC": [area_third]})
+    return pd.DataFrame({"Solution": [solution], "Efficiency": [acc_efficiency], "Balanced accuracy": [acc], "# training clients": [training_clients], "Loss": [loss], "Efficiency AUC": area_first_efficiency, first + " AUC": [area_first], second + " AUC": [area_second], "# training clients AUC": [area_third]})
 
 def aggregate_metrics(df):
 
@@ -83,6 +110,20 @@ def bar_auc(df, base_dir, x_column, first, second, third, x_order, hue_order):
     #     dpi=400)
 
     df_2.to_latex("""{}auc.latex""".format(base_dir))
+    print("""{}auc.latex""".format(base_dir))
+
+def bar_performance(df, base_dir, x_column, first, second, third, x_order, hue_order):
+
+    print(df)
+    # df_2 = df[["Solution", "Round (t)", "Balanced accuracy", "# training clients", "Loss"]]
+    df_2 = df.groupby(["Solution", "Dataset", "Round (t)"]).apply(lambda x: x.mean()).reset_index()
+    df_2 = df_2.groupby(["Solution"]).apply(lambda x: group_by(x, first, second, third)).round(
+        5).reset_index(1).round(2)[["Efficiency", "Balanced accuracy", "# training clients", "Loss"]]
+    print(df_2)
+    # exit()
+
+
+    df_2.to_latex("""{}global_metrics.latex""".format(base_dir))
     print("""{}auc.latex""".format(base_dir))
 
 def bar_metric(df, base_dir, x_column, first, second, x_order, hue_order):
@@ -215,6 +256,8 @@ if __name__ == "__main__":
     bar_metric(df, base_dir, "Solution", first, second, x_order, hue_order)
     plt.plot()
     bar_auc(df, base_dir, "Solution", first, second, third, solutions, solutions)
+    plt.plot()
+    bar_performance(df, base_dir, "Solution", first, second, third, solutions, solutions)
     plt.plot()
     line(df, base_dir, "Round (t)", first, second, "Solution", None)
 

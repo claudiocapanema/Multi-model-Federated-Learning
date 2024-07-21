@@ -133,7 +133,7 @@ if __name__ == "__main__":
 
     alphas = ['0.1', '5.0']
     # alphas = ['5.0', '0.1']
-    configuration = {"dataset": ["WISDM-W", "ImageNet100"], "alpha": [float(i) for i in alphas]}
+    configuration = {"dataset": ["WISDM-P", "ImageNet"], "alpha": [float(i) for i in alphas]}
     models_names = ["gru", "cnn_a"]
     datasets = configuration["dataset"]
     # solutions = ["FedNome",  "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg"]

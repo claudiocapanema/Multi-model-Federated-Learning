@@ -33,12 +33,21 @@ def m(df, first, second, third):
     first_efficiency = df[first].mean() / df[third].mean()
     second_efficiency = df[second].mean() / df[third].mean()
     training_clients = df[third].mean()
-    acc = ci(df[first])
-    loss = ci(df["Loss"])
+    acc = df[first].mean()
+    loss = df["Loss"].mean()
     acc_std = df[first].std()
     loss_std = df["Loss"].std()
     print(first_efficiency, second_efficiency)
     return pd.DataFrame({"Efficiency": [first_efficiency], second + " efficiency": [second_efficiency], third: [int(training_clients)], first: [acc], "Loss": [loss], first + " std": [acc_std], "Loss std": [loss_std]})
+
+def group_by(df, first, second, third):
+
+    area_first = trapz(df[first].to_numpy(), dx=1)
+    area_second = trapz(df[second].to_numpy(), dx=1)
+    area_first_efficiency = trapz(df.groupby("Round (t)").apply(lambda e: pd.DataFrame({"eff": [e[first].mean() / e["# training clients"].sum()]}))["eff"].to_numpy(), dx=1)
+    area_third = trapz(df["# training clients"].to_numpy(), dx=1)
+
+    return pd.DataFrame({"Efficiency AUC": area_first_efficiency, first + " AUC": [area_first], second + " AUC": [area_second], "# training clients AUC": [area_third]})
 
 def latex(df, dir_path):
     df = df[df["Round (t)"] == 100]
@@ -46,6 +55,12 @@ def latex(df, dir_path):
     df = df.set_index(["Solution", "Dataset"])
     print(df)
     df.to_latex(dir_path + "dataset.latex")
+
+def auc_latex(df, dir_path):
+
+    df = df.groupby(["Solution", "Dataset"]).apply(lambda e: group_by(e, "Avg. $acc_b$", "Loss", "# training clients")).reset_index().set_index(["Solution", "Dataset"])[["Efficiency AUC", "Avg. $acc_b$ AUC", "Loss AUC", "# training clients AUC"]].round(2)
+    df.to_latex(dir_path + "dataset_metrics.latex")
+    print(df)
 
 if __name__ == "__main__":
 
@@ -110,8 +125,6 @@ if __name__ == "__main__":
     third = 'Efficiency'
     fourth = 'Loss efficiency'
 
-    print(df)
-
     x_order = alphas
 
     hue_order = datasets
@@ -119,6 +132,7 @@ if __name__ == "__main__":
 
     rounds_semi_convergence = [13, 36, 40, 47, 53]
     latex(df, base_dir)
+    auc_latex(df, base_dir)
 
 
 
