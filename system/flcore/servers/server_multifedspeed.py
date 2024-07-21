@@ -92,6 +92,7 @@ class FedNome(Server):
         self.unique_count_samples = {m: np.array([0 for i in range(self.num_classes[m])]) for m in range(self.M)}
         self.similarity_matrix = np.zeros((self.M, self.num_clients))
         self.accuracy_gain_models = {m: [] for m in range(self.M)}
+        self.re_per_model = int(args.reduction)
 
     def cold_start_selection(self):
 
@@ -364,17 +365,18 @@ class FedNome(Server):
 
                 clients_losses = []
                 metric = "Accuracy"
-                losses_m = {m: [] for m in range(self.M)}
-                samples_m = {m: [] for m in range(self.M)}
-                for client in self.clients:
-                    for m in range(len(client.train_metrics_list_dict)):
-                        local_loss = self.clients_train_metrics[client.id]["Loss"][m]
-                        losses_m[m].append(local_loss)
-                        samples = self.clients_train_metrics[client.id]["Samples"][m]
-                        samples_m[m].append(samples)
-                for m in range(self.M):
-                    losses_m[m] = np.max(losses_m[m])
-                    samples_m[m] = np.max(samples_m[m])
+                # losses_m = {m: [] for m in range(self.M)}
+                # samples_m = {m: [] for m in range(self.M)}
+                # for client in self.clients:
+                #     for m in range(len(client.train_metrics_list_dict)):
+                #         local_loss = self.clients_train_metrics[client.id]["Loss"][m]
+                #         losses_m[m].append(local_loss)
+                #         samples = self.clients_train_metrics[client.id]["Samples"][m]
+                #         samples_m[m].append(samples)
+                # for m in range(self.M):
+                #     print(losses_m[m])
+                #     losses_m[m] = np.max(losses_m[m])
+                #     samples_m[m] = np.max(samples_m[m])
 
                 for client in self.clients:
                     cid = client.id
@@ -428,7 +430,7 @@ class FedNome(Server):
                         if local_loss_relative_diff <= 0:
                             local_loss_relative_diff = 0
                         local_loss_relative_diff = min(local_loss_relative_diff, 1)
-                        print("ant:1: ", metrics_m['Samples'], samples_m[m], local_acc_diff, (metrics_m['Samples'] / samples_m[m]) * local_loss_relative_diff)
+                        print("ant:1: ", metrics_m['Samples'],local_acc_diff, (metrics_m['Samples']) * local_loss_relative_diff)
                         client_losses.append((metrics_m['Samples'] ) * local_loss_diff)
                     client_losses = np.array(client_losses)
                     # client_losses = (client_losses / np.sum(client_losses))
@@ -451,7 +453,9 @@ class FedNome(Server):
                 num_join_clients = self.num_join_clients
                 for m in range(self.M):
                     if self.models_semi_convergence_flag[m]:
-                        num_join_clients -= min(self.models_semi_convergence_count[m], 2)
+                        num_join_clients -= min(self.models_semi_convergence_count[m], self.re_per_model)
+                # if all(self.models_semi_convergence_flag) == True:
+                #     num_join_clients -= min(min(self.models_semi_convergence_count), 5)
                 remaining_clients_per_model = np.array(remaining_clients_per_model * num_join_clients, dtype=int)
                 print("Clientes resta", remaining_clients_per_model)
 
@@ -498,7 +502,7 @@ class FedNome(Server):
                         window = 5
                     idxs = np.argwhere(global_acc < 0)[-6:]
                     diff = self.models_semi_convergence_min_n_training_clients[m] - min_clients
-                    if len(idxs) >= 2 and diff < 1:
+                    if len(idxs) >= 2 and diff < 1 and self.rounds_since_last_semi_convergence[m] >= 4:
                         self.rounds_since_last_semi_convergence[m] = 0
                         idxs_rounds = np.array(idxs, dtype=np.int32).flatten()
                         print("indices: ", idxs_rounds, idxs_rounds[-1])
@@ -836,6 +840,50 @@ class FedNome(Server):
         print(m, i, self.clients_cosine_similarities_with_current_model[m])
         return weights_prime
 
+    def train_metrics(self, m, t):
+        if self.eval_new_clients and self.num_new_clients > 0:
+            return [0], [1], [0]
+
+        accs = []
+        losses = []
+        num_samples = []
+        balanced_accs = []
+        micro_fscores = []
+        macro_fscores = []
+        weighted_fscores = []
+        for i in range(len(self.clients)):
+            c = self.clients[i]
+            train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore = c.train_metrics(m)
+            accs.append(train_acc * train_num)
+            num_samples.append(train_num)
+            balanced_accs.append(train_balanced_acc * train_num)
+            micro_fscores.append(train_micro_fscore * train_num)
+            macro_fscores.append(train_macro_fscore * train_num)
+            weighted_fscores.append(train_weighted_fscore * train_num)
+            self.clients_train_metrics[c.id]["Samples"][m].append(num_samples)
+            self.clients_train_metrics[c.id]["Accuracy"][m].append(train_acc)
+            self.clients_train_metrics[c.id]["Loss"][m].append(train_loss)
+            self.clients_train_metrics[c.id]["Balanced accuracy"][m].append(train_balanced_acc)
+            self.clients_train_metrics[c.id]["Micro f1-score"][m].append(train_micro_fscore)
+            self.clients_train_metrics[c.id]["Macro f1-score"][m].append(train_macro_fscore)
+            self.clients_train_metrics[c.id]["Weighted f1-score"][m].append(train_weighted_fscore)
+
+        ids = [c.id for c in self.clients]
+
+        decimals = 5
+        print("amostras: ", num_samples, accs, self.selected_clients)
+        if len(num_samples) == 0:
+            return None
+        acc = round(sum(accs) / sum(num_samples), decimals)
+        loss = round(sum(losses) / sum(num_samples), decimals)
+        balanced_acc = round(sum(balanced_accs) / sum(num_samples), decimals)
+        micro_fscore = round(sum(micro_fscores) / sum(num_samples), decimals)
+        macro_fscore = round(sum(macro_fscores) / sum(num_samples), decimals)
+        weighted_fscore = round(sum(weighted_fscores) / sum(num_samples), decimals)
+
+        return {'ids': ids, 'num_samples': num_samples, 'Accuracy': acc, "Loss": loss,
+                'Balanced accuracy': balanced_acc,
+                'Micro f1-score': micro_fscore, 'Macro f1-score': macro_fscore, 'Weighted f1-score': weighted_fscore}
 
 
 
