@@ -18,7 +18,7 @@
 import time
 import numpy as np
 from flcore.clients.clientavg import clientAVG
-from flcore.servers.serveravg import MultiFedAvg
+from flcore.servers.server_multifedavg import MultiFedAvg
 from threading import Thread
 
 

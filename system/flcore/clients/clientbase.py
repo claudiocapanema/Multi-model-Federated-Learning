@@ -39,7 +39,11 @@ class Client(object):
     """
 
     def __init__(self, args, id, train_samples, test_samples, **kwargs):
-        torch.manual_seed(0)
+        g = torch.Generator()
+        g.manual_seed(id)
+        random.seed(id)
+        np.random.seed(id)
+        torch.manual_seed(id)
         self.args = args
         self.M = len(args.dataset)
         self.model = copy.deepcopy(args.model)
@@ -84,8 +88,10 @@ class Client(object):
         self.optimizer = []
         self.learning_rate_scheduler = []
         for m in range(self.M):
-            if self.dataset[m] in ['ExtraSensory', 'WISDM-WATCH', 'WISDM-P']:
+            if self.dataset[m] in ['ExtraSensory', 'WISDM-W', 'WISDM-P']:
                 self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.001))
+                # self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.0001)) # loss constante não aprende
+                # self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
             elif self.dataset[m] in ["Tiny-ImageNet", "ImageNet"]:
                 self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=0.001))
             else:
@@ -176,6 +182,10 @@ class Client(object):
 
             g = torch.Generator()
             g.manual_seed(cid)
+            np.random.seed(cid)
+            random.seed(cid)
+
+            print("batch wisdm: ", batch_size)
 
             trainLoader = DataLoader(training_dataset, batch_size, shuffle=True, worker_init_fn=seed_worker, generator=g)
             testLoader = DataLoader(validation_dataset, batch_size, drop_last=False, shuffle=False)
@@ -196,6 +206,12 @@ class Client(object):
             traindir = """/home/claudio/Documentos/pycharm_projects/Multi-model-Federated-Learning/dataset/ImageNet/clients_40/alpha_5.0/rawdata/ImageNet/train/"""
             filename_train = dir_path + """train/idx_train_{}.pickle""".format(self.id)
             filename_test = dir_path + "test/idx_test_{}.pickle""".format(self.id)
+
+            random.seed(self.id)
+            np.random.seed(self.id)
+            torch.manual_seed(self.id)
+            g = torch.Generator()
+            g.manual_seed(self.id)
 
             transmforms = {'train': transforms.Compose(
                     [
@@ -235,7 +251,7 @@ class Client(object):
                 transmforms
             )
 
-            np.random.seed(self.id)
+            # np.random.seed(self.id)
 
             dataset_image = []
             dataset_samples = []
@@ -284,9 +300,15 @@ class Client(object):
             def seed_worker(worker_id):
                 np.random.seed(self.id)
                 random.seed(self.id)
+                torch.manual_seed(self.id)
+                g = torch.Generator()
+                g.manual_seed(self.id)
 
             g = torch.Generator()
             g.manual_seed(self.id)
+            random.seed(self.id)
+            np.random.seed(self.id)
+            torch.manual_seed(self.id)
 
             unique_count = {i: 0 for i in range(self.args.num_classes[m])}
             unique, count = np.unique(y, return_counts=True)
@@ -351,7 +373,18 @@ class Client(object):
             param.data = new_param.data.clone()
 
     def test_metrics(self, m, model):
+
+        g = torch.Generator()
+        g.manual_seed(self.id)
+        random.seed(self.id)
+        np.random.seed(self.id)
+        torch.manual_seed(self.id)
         testloaderfull = self.testloaderfull[m]
+        g = torch.Generator()
+        g.manual_seed(self.id)
+        random.seed(self.id)
+        np.random.seed(self.id)
+        torch.manual_seed(self.id)
         # self.model = self.load_model('model')
         # self.model.to(self.device)
         #self.set_parameters(m, model)
@@ -425,7 +458,18 @@ class Client(object):
                 test_weighted_fscore)
 
     def train_metrics(self, m):
+
+        g = torch.Generator()
+        g.manual_seed(self.id)
+        random.seed(self.id)
+        np.random.seed(self.id)
+        torch.manual_seed(self.id)
         trainloader, self.train_class_count[m] = self.load_train_data(m)
+        g = torch.Generator()
+        g.manual_seed(self.id)
+        random.seed(self.id)
+        np.random.seed(self.id)
+        torch.manual_seed(self.id)
         # self.model = self.load_model('model')
         # self.model.to(self.device)
         self.model[m].eval()

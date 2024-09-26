@@ -26,7 +26,8 @@ import numpy as np
 import torchvision
 import logging
 
-from flcore.servers.serveravg import MultiFedAvg
+from flcore.servers.server_multifedavg_separated import MultiFedAvg_Separated
+from flcore.servers.server_multifedavg import MultiFedAvg
 from flcore.servers.serverpFedMe import pFedMe
 from flcore.servers.serverperavg import PerAvg
 from flcore.servers.serverprox import FedProx
@@ -63,7 +64,8 @@ from flcore.servers.servergh import FedGH
 from flcore.servers.serveravgDBE import FedAvgDBE
 from flcore.servers.serveravg_with_fedpredict import MultiFedAvgWithFedPredict
 from flcore.servers.server_fedfairmmfl import FedFairMMFL
-from flcore.servers.server_fednome import FedNome
+from flcore.servers.server_multifedspeed import MultiFedSpeed
+from flcore.servers.server_multifedspeed_deterministic_selection import MultiFedSpeed_Deterministic_Selection
 from flcore.servers.serveravg_rr import MultiFedAvgRR
 
 from flcore.trainmodel.models import *
@@ -82,6 +84,9 @@ logger.setLevel(logging.ERROR)
 
 warnings.simplefilter("ignore")
 torch.manual_seed(0)
+random.seed(0)
+np.random.seed(0)
+torch.manual_seed(0)
 
 # hyper-params for Text tasks
 vocab_size = 98635   #98635 for AG_News and 399198 for Sogou_News
@@ -96,8 +101,8 @@ def run(args):
     dts = args.dataset
     num_classes = []
     for dt in dts:
-        num_classes.append({'EMNIST': 47, 'MNIST': 10, 'Cifar10': 10, 'GTSRB': 43, 'WISDM-W': 20, 'WISDM-P': 20, 'Tiny-ImageNet': 200,
-                            'ImageNet100': 25, 'ImageNet': 12}[dt])
+        num_classes.append({'EMNIST': 47, 'MNIST': 10, 'Cifar10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'Tiny-ImageNet': 200,
+                            'ImageNet100': 15, 'ImageNet': 15}[dt])
 
     args.num_classes = num_classes
 
@@ -142,6 +147,10 @@ def run(args):
             elif model_str == "gru":
                 if dt in ["WISDM-W", "WISDM-P"]:
                     model = GRU(6, num_layers=1, hidden_size=4, sequence_length=200, num_classes=num_classes_m).to(args.device)
+
+            elif model_str == "lstm":
+                if dt in ["WISDM-W", "WISDM-P"]:
+                    model = LSTM_NET(6, hidden_dim=6, num_classes=num_classes_m).to(args.device)
 
             elif "cnn_b" in model_str:
                 if "GTSRB" == dt:
@@ -387,6 +396,12 @@ def run(args):
                 model = BaseHeadSplit(model, head)
                 server = FedAvgDBE
 
+            elif args.algorithm == "MultiFedAvg_Separated":
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = MultiFedAvg_Separated
+
             elif args.algorithm == "FedAvgWithFedPredict":
                 head = copy.deepcopy(model.fc)
                 model.fc = nn.Identity()
@@ -403,11 +418,16 @@ def run(args):
                 model.fc = nn.Identity()
                 model = BaseHeadSplit(model, head)
                 server = MultiFedAvgRR
+            elif "MultiFedSpeed_D" in args.algorithm:
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = MultiFedSpeed_Deterministic_Selection
             elif "MultiFedSpeed" in args.algorithm:
                 head = copy.deepcopy(model.fc)
                 model.fc = nn.Identity()
                 model = BaseHeadSplit(model, head)
-                server = FedNome
+                server = MultiFedSpeed
 
             else:
                 print(args.algorithm)
@@ -443,13 +463,13 @@ if __name__ == "__main__":
     parser.add_argument('-mds', "--models",  default=['dnn', 'cnn'])
     parser.add_argument('-go', "--goal", type=str, default="test", 
                         help="The goal for this experiment")
-    parser.add_argument('-dev', "--device", type=str, default="cuda:0",
+    parser.add_argument('-dev', "--device", type=str, default="cuda",
                         choices=["cpu", "cuda"])
     parser.add_argument('-did', "--device_id", type=str, default="0")
     parser.add_argument('-data', "--dataset", action="append")
     parser.add_argument('-nb', "--num_classes", default=[10, 10])
     parser.add_argument('-m', "--model",  action="append")
-    parser.add_argument('-lbs', "--batch_size", type=int, default=10)
+    parser.add_argument('-lbs', "--batch_size", type=int, default=32)
     parser.add_argument('-lr', "--local_learning_rate", type=float, default=0.005,
                         help="Local learning rate")
     parser.add_argument('-ld', "--learning_rate_decay", type=bool, default=False)

@@ -47,11 +47,14 @@ def group_by(df, first, second, third):
     # loss = ci(df_2[second].to_numpy())
     loss = df_2[second].mean()
 
+    kb_transmitted = (df["# training clients"].to_numpy() * df["Model size"].to_numpy()).sum()
+    kb_transmitted_auc = trapz(df.groupby("Round (t)").apply(lambda e: pd.DataFrame({"kb": [(e["# training clients"].to_numpy() * e["Model size"].to_numpy()).sum()]}))["kb"].to_numpy(), dx=1)
+
     solution = df["Solution"].to_numpy()[0]
     if solution == "FedFairMMFL":
         print(df[first], first, df["# training clients"])
 
-    return pd.DataFrame({"Solution": [solution], "Efficiency": [acc_efficiency], "Balanced accuracy": [acc], "# training clients": [training_clients], "Loss": [loss], "Efficiency AUC": area_first_efficiency, first + " AUC": [area_first], second + " AUC": [area_second], "# training clients AUC": [area_third]})
+    return pd.DataFrame({"Solution": [solution], "Efficiency": [acc_efficiency], "Balanced accuracy": [acc], "# training clients": [training_clients], "Loss": [loss], "Efficiency AUC": area_first_efficiency, first + " AUC": [area_first], second + " AUC": [area_second], "# training clients AUC": [area_third], "Communication cost (KB)": [kb_transmitted], "Communication cost (KB) AUC": [kb_transmitted_auc]})
 
 def aggregate_metrics(df):
 
@@ -66,9 +69,9 @@ def aggregate_metrics(df):
 
 def bar_auc(df, base_dir, x_column, first, second, third, x_order, hue_order):
 
-    df_2 = df.groupby(["Solution", "Dataset", "Round (t)"]).apply(lambda x: x.mean()).reset_index()
+    df_2 = df.groupby(["Solution", "Dataset", "Round (t)", "Model"]).apply(lambda x: x.mean()).reset_index()
     df_2 = df_2.groupby(["Solution"]).apply(lambda x: group_by(x, first, second, third)).round(
-        5).reset_index(1)[["Efficiency AUC", "Balanced accuracy AUC", "# training clients AUC", "Loss AUC"]].round(2)
+        5).reset_index(1)[["Efficiency AUC", "Balanced accuracy AUC", "# training clients AUC", "Loss AUC", "Communication cost (KB) AUC"]].round(2)
     # print(df.drop(index=["Dataset", "Solution"]))
     # exit()
     # df_2 = df.reset_index().groupby("Solution").apply(lambda x: group_by(x, first, second)).round(2).reset_index(1)[
@@ -116,9 +119,9 @@ def bar_performance(df, base_dir, x_column, first, second, third, x_order, hue_o
 
     print(df)
     # df_2 = df[["Solution", "Round (t)", "Balanced accuracy", "# training clients", "Loss"]]
-    df_2 = df.groupby(["Solution", "Dataset", "Round (t)"]).apply(lambda x: x.mean()).reset_index()
+    df_2 = df.groupby(["Solution", "Dataset", "Round (t)", "Model"]).apply(lambda x: x.mean()).reset_index()
     df_2 = df_2.groupby(["Solution"]).apply(lambda x: group_by(x, first, second, third)).round(
-        5).reset_index(1).round(2)[["Efficiency", "Balanced accuracy", "# training clients", "Loss"]]
+        5).reset_index(1).round(2)[["Efficiency", "Balanced accuracy", "# training clients", "Loss", "Communication cost (KB)"]]
     print(df_2)
     # exit()
 
@@ -190,13 +193,16 @@ def line(df, base_dir, x_column, first, second, hue, ci=None):
 
 if __name__ == "__main__":
 
-    alphas = ['0.1', '5.0']
-    # alphas = ['5.0', '0.1']
-    configuration = {"dataset": ["WISDM-P", "ImageNet"], "alpha": [float(i) for i in alphas]}
-    models_names = ["gru", "cnn_a"]
+    # alphas = ['0.1', '5.0']
+    alphas = ['5.0', '5.0']
+    models_names = ["cnn_a", "cnn_a"]
+    configuration = {"dataset": ["Cifar10", "ImageNet"], "alpha": [float(i) for i in alphas]}
+    models_names = ["cnn_a", "cnn_a"]
     datasets = configuration["dataset"]
-    # solutions = ["FedNome",  "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg", "MultiFedSpeedv1", "MultiFedSpeedv0", ]
-    solutions = ["MultiFedSpeed@1", "MultiFedSpeed@2", "MultiFedSpeed@3", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
+    models_size = {"Cifar10": 3514.152, "ImageNet": 3524.412}
+    solutions = ["FedNome", "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg", "MultiFedSpeedv1", "MultiFedSpeedv0"]
+    # solutions = ["MultiFedSpeed@1", "MultiFedSpeed@2", "MultiFedSpeed@3", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
+    solutions = ["MultiFedSpeed@3", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
     num_classes = {"EMNIST": 47, "Cifar10": 10, "GTSRB": 43}
     num_clients = 40
     fc = 0.3
@@ -213,38 +219,51 @@ if __name__ == "__main__":
     read_std_dataset = []
     read_num_samples_std = []
 
-    d = """results/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(num_clients, alphas, datasets, models_names, fc, rounds, epochs)
+    d = """results/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(num_clients, alphas, datasets,
+                                                                                  models_names, fc, rounds, epochs)
     read_solutions = []
     read_accs = []
     read_loss = []
+    read_training_clients = []
     read_round = []
-    dts = []
-    weight = []
-    first = 'Balanced accuracy'
-    n_clients = []
+    read_datasets = []
+    read_models = []
+    read_sizes = []
     for solution in solutions:
         acc = []
         loss = []
+        training_clients = []
+        size = []
         for dataset in datasets:
-            df = pd.read_csv("""{}{}_{}_test_0_clients.csv""".format(d, dataset, solution))
-            # total_samples = df["Samples"].max()
-            # samples = df["Samples"].to_numpy()
-            acc += list(df[first].to_numpy())
-            loss += list(df["Loss"].to_numpy())
-            n_clients += df["# training clients"].tolist()
-            dts += [dataset] * len(df)
+            df = pd.read_csv("""{}{}_{}_test_0.csv""".format(d, dataset, solution))
+            print("""{}{}_{}_test_0.csv""".format(d, dataset, solution))
+            print(df["Accuracy"].to_numpy())
+            print(df["# training clients"].to_numpy())
+            acc += df["Balanced accuracy"].tolist()
+            loss += df["Loss"].tolist()
+            training_clients += df["# training clients"].tolist()
             read_round += df["Round"].tolist()
+            read_datasets += [dataset] * len(df)
+            read_models += [{"EMNIST": "CNN-A", "Cifar10": "CNN-A", "WISDM-W": "GRU", "ImageNet": "CNN-B"}[
+                                dataset]] * len(df)
+            model_size = models_size[dataset]
+            size += [model_size] * len(df)
         read_solutions += [solution] * len(acc)
         read_accs += acc
         read_loss += loss
+        read_training_clients += training_clients
+        read_sizes += size
 
-
+    first = 'Balanced accuracy'
     second = 'Loss'
     third = '# training clients'
-    df = pd.DataFrame({'Solution': read_solutions, first: np.array(read_accs) * 100, second: read_loss, "Round (t)": read_round, "Dataset": dts, "# training clients": n_clients})
-
-    # df = df.groupby(["Solution", "Round (t)", "Dataset"]).apply(lambda e: aggregate_metrics(e)).reset_index()
+    df = pd.DataFrame(
+        {'Solution': read_solutions, first: np.array(read_accs) * 100, "Loss": read_loss, "Round (t)": read_round,
+         "Model": read_models, "Dataset": read_datasets, '# training clients': read_training_clients,
+         "Model size": read_sizes})
     # df_2 = pd.DataFrame({'\u03B1': read_std_alpha, 'Dataset': read_std_dataset, 'Samples (%) std': read_num_samples_std})
+    # df['Accuracy efficiency'] = df['Accuracy'] / df['# training clients']
+    # df['Loss efficiency'] = df['Loss'] / df['# training clients']
 
     print(df)
 

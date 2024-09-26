@@ -75,6 +75,7 @@ class Server(object):
         # Set up the main attributes
         self.args = args
         self.models_names = args.models_names
+        self.models_size = []
         self.device = args.device
         self.dataset = args.dataset
         # self.num_classes = args.num_classes
@@ -109,7 +110,7 @@ class Server(object):
         self.uploaded_models = []
 
         self.train_metrics_names = ["Accuracy", "Loss", "Samples", "AUC", "Balanced accuracy", "Micro f1-score", "Weighted f1-score", "Macro f1-score", "Round", "Fraction fit", "# training clients"]
-        self.test_metrics_names = ["Accuracy", "Std Accuracy", "Loss", "Std loss", "AUC", "Balanced accuracy", "Micro f1-score", "Weighted f1-score", "Macro f1-score", "Round", "Fraction fit", "# training clients"]
+        self.test_metrics_names = ["Accuracy", "Std Accuracy", "Loss", "Std loss", "AUC", "Balanced accuracy", "Micro f1-score", "Weighted f1-score", "Macro f1-score", "Round", "Fraction fit", "# training clients", "training clients and models", "model size"]
         self.rs_test_acc = []
         self.rs_test_auc = []
         self.rs_train_loss = []
@@ -335,8 +336,10 @@ class Server(object):
 
                 data.append(row)
 
-            print("File path: " + file_path)
 
+
+            print("File path: " + file_path)
+            print(data)
             print("me: ", self.rs_test_acc)
             self.clients_test_metrics_preprocess(m, file_path)
             self._write_header(file_path, header=header)
@@ -376,7 +379,7 @@ class Server(object):
             self.clients_test_metrics[i]["Balanced accuracy"][m].append(test_balanced_acc)
             self.clients_test_metrics[i]["Micro f1-score"][m].append(test_micro_fscore)
             self.clients_test_metrics[i]["Samples"][m].append(test_num)
-            print("test_weighted_fscore: ", test_weighted_fscore, len(self.clients_test_metrics[i]["Weighted f1-score"][m]))
+            # print("test_weighted_fscore: ", test_weighted_fscore, len(self.clients_test_metrics[i]["Weighted f1-score"][m]))
             self.clients_test_metrics[i]["Weighted f1-score"][m].append(test_weighted_fscore)
             self.clients_test_metrics[i]["Macro f1-score"][m].append(test_macro_fscore)
             self.clients_test_metrics[i]["Round"][m].append(t)
@@ -500,6 +503,8 @@ class Server(object):
         self.results_test_metrics[m]['Round'].append(t)
         self.results_test_metrics[m]['Fraction fit'].append(self.join_ratio)
         self.results_test_metrics[m]['# training clients'].append(len(self.selected_clients[m]))
+        self.results_test_metrics[m]['training clients and models'].append(list(self.selected_clients[m]))
+        self.results_test_metrics[m]['model size'].append(self.models_size[m])
 
         
         if acc == None:
@@ -515,6 +520,7 @@ class Server(object):
         print("Evaluate model {}".format(m))
         print("Averaged Train Loss: {:.4f}".format(train_loss))
         print("Averaged Test Accurancy: {:.4f}".format(test_acc))
+        print("Averaged Test Loss: {:.4f}".format(test_loss))
         print("Averaged Test AUC: {:.4f}".format(test_auc))
         # self.print_(test_acc, train_acc, train_loss)
         print("Std Test Accurancy: {:.4f}".format(test_std_acc))
@@ -687,3 +693,17 @@ class Server(object):
         with open(filename, mode) as server_log_file:
             writer = csv.writer(server_log_file)
             writer.writerows(data)
+
+    def _get_models_size(self):
+
+        models_size = []
+        for model in self.global_model:
+            parameters = [i.detach().cpu().numpy() for i in model.parameters()]
+            size = 0
+            for i in range(len(parameters)):
+                size += parameters[i].nbytes
+            models_size.append(size)
+
+        self.models_size = models_size
+
+

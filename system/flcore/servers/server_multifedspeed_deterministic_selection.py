@@ -46,7 +46,7 @@ NDArray = npt.NDArray[Any]
 NDArrays = List[NDArray]
 
 
-class MultiFedSpeed(Server):
+class MultiFedSpeed_Deterministic_Selection(Server):
     def __init__(self, args, times):
         super().__init__(args, times)
 
@@ -604,7 +604,8 @@ class MultiFedSpeed(Server):
                                 # print("tudo: ", remaining_clients, remaining_clients.shape, clients_losses.shape)
                                 m_clients_losses = np.array([available_clients[i][m] for i in available_clients])
                                 # m_clients_losses = m_clients_losses[available_clients]
-                                cid = np.random.choice(list(available_clients.keys()), p=(m_clients_losses / np.sum(m_clients_losses)))
+                                # cid = np.random.choice(list(available_clients.keys()), p=(m_clients_losses / np.sum(m_clients_losses)))
+                                cid = list(available_clients.keys())[np.argmax(m_clients_losses / np.sum(m_clients_losses))]
                                 available_clients.pop(cid)
                                 selected_clients_m[m].append(cid)
                                 # available_clients.remove(cid)
@@ -656,7 +657,6 @@ class MultiFedSpeed(Server):
 
     def train(self):
 
-        self._get_models_size()
         for m in range(self.M):
             for i in range(self.num_clients):
                 self.client_class_count[m][i] = self.clients[i].train_class_count[m]
