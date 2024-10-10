@@ -171,7 +171,10 @@ class Server(object):
             self.send_slow_rate)
 
     def select_clients(self, t):
+        g = torch.Generator()
+        g.manual_seed(t)
         np.random.seed(t)
+        random.seed(t)
         if self.random_join_ratio:
             self.current_num_join_clients = np.random.choice(range(self.num_join_clients, self.num_clients+1), 1, replace=False)[0]
         else:
@@ -703,7 +706,7 @@ class Server(object):
             for i in range(len(parameters)):
                 size += parameters[i].nbytes
             models_size.append(size)
-
+        print("models size: ", models_size)
         self.models_size = models_size
 
 

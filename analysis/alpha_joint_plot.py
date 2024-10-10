@@ -15,8 +15,8 @@ import scipy.stats as st
 if __name__ == "__main__":
 
     alphas = [0.1, 1.0, 3.0, 5.0]
-    datasets = ["EMNIST", "GTSRB", "Cifar10"]
-    num_classes = {"EMNIST": 47, "Cifar10": 10, "GTSRB": 43}
+    datasets = ["EMNIST", "GTSRB", "CIFARr10"]
+    num_classes = {"EMNIST": 47, "CIFAR10": 10, "GTSRB": 43}
     num_clients = 20
 
     read_alpha = []

@@ -159,7 +159,7 @@ def get_processed_dataframe(reprocess=False, modality='watch'):
     return processed_df
 
 
-def create_dataset(df, clients=None, window=200, overlap=1):
+def create_dataset(df, clients=None, window=200, overlap=0.5):
     """
     Create a dataset from the input DataFrame based on the specified parameters.
 
@@ -246,7 +246,7 @@ def split_dataset(data: dict, client_mapping_train: dict, client_mapping_test: d
     return WISDMDataset(train_data), WISDMDataset(test_data), {'train': mapping_train, 'test': mapping_test}
 
 
-def load_dataset(window=200, overlap=0.6, reprocess=True, split=0.8, modality='watch'):
+def load_dataset(window=200, overlap=0.7, reprocess=True, split=0.8, modality='watch'):
     """
     Load the WISDM dataset, either from disk or by reprocessing it based on the specified parameters.
 

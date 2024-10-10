@@ -244,6 +244,13 @@ def split_data(X, y):
 
 def save_file(config_path, train_path, test_path, train_data, test_data, num_clients, 
                 num_classes, statistic, niid=False, balance=True, partition=None):
+
+    if not os.path.exists(train_path):
+        os.makedirs(train_path)
+
+    if not os.path.exists(test_path):
+        os.makedirs(test_path)
+
     config = {
         'num_clients': num_clients, 
         'num_classes': num_classes, 

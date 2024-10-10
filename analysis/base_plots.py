@@ -519,7 +519,7 @@ def heatmap_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, l
         palette = sns.color_palette()
         figure = sns.heatmap(x=x_column, y=y_column, data=df, hue=hue, ax=ax, palette=palette, hue_order=hue_order, style=hue).set_title(title)
     else:
-        figure = sns.lineplot(x=x_column, y=y_column, data=df, hue=hue, ax=ax, hue_order=hue_order, style=hue).set_title(title)
+        figure = sns.heatmap(data=df, ax=ax).set_title(title)
 
     if type == 2:
         plt.legend(bbox_to_anchor=(0.5, 1), loc='upper left', borderaxespad=0, title='Rounds since the last training (nt)')

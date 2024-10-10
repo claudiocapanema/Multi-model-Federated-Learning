@@ -38,11 +38,13 @@ class MultiFedAvg(Server):
 
 
     def train(self):
+        self._get_models_size()
         for t in range(1, self.global_rounds+1):
             s_t = time.time()
             self.selected_clients = self.select_clients(t)
             # self.send_models()
             print(self.selected_clients)
+
             for m in range(len(self.selected_clients)):
 
 

@@ -77,10 +77,10 @@ if __name__ == "__main__":
 
     alphas = ['0.1', '5.0']
     # alphas = ['5.0', '0.1']
-    configuration = {"dataset": ["Cifar10", "GTSRB"], "alpha": [5.0, 0.1]}
+    configuration = {"dataset": ["CIFAR10", "GTSRB"], "alpha": [5.0, 0.1]}
     datasets = configuration["dataset"]
     solutions = ["FedNome",  "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg"]
-    num_classes = {"EMNIST": 47, "Cifar10": 10, "GTSRB": 43}
+    num_classes = {"EMNIST": 47, "CIFAR10": 10, "GTSRB": 43}
     num_clients = 40
     fc = 0.3
     rounds = 40

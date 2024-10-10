@@ -92,10 +92,11 @@ class Client(object):
                 self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.001))
                 # self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.0001)) # loss constante não aprende
                 # self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
-            elif self.dataset[m] in ["Tiny-ImageNet", "ImageNet"]:
-                self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=0.001))
+            elif self.dataset[m] in ["Tiny-ImageNet", "ImageNet", "ImageNet_v2"]:
+                self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=0.0005))
             else:
                 self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=self.learning_rate))
+                # self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=self.learning_rate)) # , weight_decay=0.5
                 self.learning_rate_scheduler.append(torch.optim.lr_scheduler.ExponentialLR(
                     optimizer=self.optimizer[m],
                     gamma=args.learning_rate_decay_gamma
@@ -185,8 +186,6 @@ class Client(object):
             np.random.seed(cid)
             random.seed(cid)
 
-            print("batch wisdm: ", batch_size)
-
             trainLoader = DataLoader(training_dataset, batch_size, shuffle=True, worker_init_fn=seed_worker, generator=g)
             testLoader = DataLoader(validation_dataset, batch_size, drop_last=False, shuffle=False)
 
@@ -199,11 +198,11 @@ class Client(object):
             print("load WISDM client base")
             print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
 
-    def load_imagenet(self, m, mode="train", batch_size=32, dataset_name=None):
+    def load_imagenet(self, name, m, mode="train", batch_size=32, ):
 
         try:
-            dir_path = "../dataset/ImageNet/" + "clients_" + str(self.args.num_clients) + "/alpha_" + str(self.args.alpha[m]) + "/"
-            traindir = """/home/claudio/Documentos/pycharm_projects/Multi-model-Federated-Learning/dataset/ImageNet/clients_40/alpha_5.0/rawdata/ImageNet/train/"""
+            dir_path = "../dataset/" + name + "/" + "clients_" + str(self.args.num_clients) + "/alpha_" + str(self.args.alpha[m]) + "/"
+            traindir = """/home/claudio/Documentos/pycharm_projects/Multi-model-Federated-Learning/dataset/{}/clients_40/alpha_{}/rawdata/{}/train/""".format(name, self.args.alpha[m], name)
             filename_train = dir_path + """train/idx_train_{}.pickle""".format(self.id)
             filename_test = dir_path + "test/idx_test_{}.pickle""".format(self.id)
 
@@ -333,8 +332,8 @@ class Client(object):
     def load_train_data(self, m, batch_size=None):
         if self.dataset[m] in ["WISDM-W", "WISDM-P"]:
             return self.load_wisdm(m,name=self.dataset[m],  mode='train')
-        elif self.dataset[m] == "ImageNet":
-            return self.load_imagenet(m, mode='train')
+        elif "ImageNet" in self.dataset[m]:
+            return self.load_imagenet(self.dataset[m], m, mode='train')
         else:
             if batch_size == None:
                 batch_size = self.batch_size
@@ -344,8 +343,8 @@ class Client(object):
     def load_test_data(self, m, batch_size=None):
         if self.dataset[m] in ["WISDM-W", "WISDM-P"]:
             return self.load_wisdm(m, name=self.dataset[m], mode='test')
-        elif self.dataset[m] == "ImageNet":
-            return self.load_imagenet(m, mode='test')
+        elif "ImageNet" in self.dataset[m]:
+            return self.load_imagenet(self.dataset[m], m, mode='test')
         else:
             if batch_size == None:
                 batch_size = self.batch_size

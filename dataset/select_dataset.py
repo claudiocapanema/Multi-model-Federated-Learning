@@ -1,3 +1,5 @@
+from xml.sax.expatreader import version
+
 import tensorflow as tf
 import torch
 import numpy as np
@@ -338,11 +340,11 @@ class ManageDatasets():
 
         return x_train, y_train, x_test, y_test
 
-    def load_imagenet(self):
+    def load_imagenet(self, name):
 
         num_clients = 40
-        alpha = 5.0
-        dir_path = "ImageNet/" + "clients_" + str(num_clients) + "/alpha_" + str(alpha) + "/"
+        alpha = 100.0
+        dir_path = name + "/clients_" + str(num_clients) + "/alpha_" + str(alpha) + "/"
 
         if not os.path.exists(dir_path):
             os.makedirs(dir_path)
@@ -352,7 +354,7 @@ class ManageDatasets():
         train_path = dir_path + "train/"
         test_path = dir_path + "test/"
 
-        trainset, valset = load_data_imagenet(dir_path + "rawdata/ImageNet/train/")
+        trainset, valset = load_data_imagenet(dir_path + "rawdata/" + name + "/train/")
 
         # trainset = ImageFolder_custom(root=dir_path + '', transform=transform)
         # testset = ImageFolder_custom(root=dir_path + '', transform=transform)
@@ -623,7 +625,9 @@ class ManageDatasets():
             return self.load_CIFAR10()
 
         elif dataset_name == 'ImageNet':
-            return self.load_imagenet()
+            return self.load_imagenet(dataset_name)
+        elif dataset_name == 'ImageNet_v2':
+            return self.load_imagenet(dataset_name)
 
         elif dataset_name == "State Farm":
             return self.load_statefarm()

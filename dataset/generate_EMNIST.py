@@ -27,8 +27,8 @@ from utils.dataset_utils import check, separate_data, split_data, save_file
 
 random.seed(1)
 np.random.seed(1)
-num_clients = 20
-alpha = 5.0
+num_clients = 40
+alpha = 0.1
 dir_path = "EMNIST/" + "clients_" + str(num_clients) + "/alpha_" + str(alpha) + "/"
 
 
@@ -49,9 +49,9 @@ def generate_dataset(dir_path, num_clients, niid, balance, partition, alpha):
     transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0.5], [0.5])])
 
     trainset = torchvision.datasets.EMNIST(
-        root=dir_path+"rawdata", split='digits', train=True, download=True, transform=transform)
+        root=dir_path+"rawdata", split='balanced', train=True, download=True, transform=transform)
     testset = torchvision.datasets.EMNIST(
-        root=dir_path+"rawdata", split='digits', train=False, download=True, transform=transform)
+        root=dir_path+"rawdata", split='balanced', train=False, download=True, transform=transform)
     trainloader = torch.utils.data.DataLoader(
         trainset, batch_size=len(trainset.data), shuffle=False)
     testloader = torch.utils.data.DataLoader(

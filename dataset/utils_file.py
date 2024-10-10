@@ -220,7 +220,7 @@ def save_dataloaders(dataset_name="CIFAR10", num_clients=40, num_classes=10, nii
                  class_per_client=10,
                  batch_size=10, train_size=0.8, alpha=0.1, dataset_dir="./dataset/", sim_id=0):
 
-    num_classes = {'ImageNet': 12, 'CIFAR10': 10, 'MNIST': 10, 'EMNIST': 47, "State Farm": 10, 'GTSRB': 43}[dataset_name]
+    num_classes = {'ImageNet': 15, "ImageNet_v2": 15, 'CIFAR10': 10, 'MNIST': 10, 'EMNIST': 47, "State Farm": 10, 'GTSRB': 43}[dataset_name]
 
     num_clients = 40
     dir_path = dataset_name + "/" + "clients_" + str(num_clients) + "/alpha_" + str(alpha) + "/"

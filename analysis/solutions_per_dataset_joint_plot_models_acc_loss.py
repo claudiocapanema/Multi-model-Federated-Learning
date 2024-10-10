@@ -34,7 +34,7 @@ def bar(df, base_dir, x_column, first, second, x_order, hue_order):
     # axs[i].legend(fontsize=10)
     # fig.suptitle("", fontsize=16)
     plt.tight_layout()
-    plt.subplots_adjust(wspace=0.07, hspace=0.14)
+    plt.subplots_adjust(wspace=0.07, hspace=0.12)
     fig.savefig(
         """{}solutions_{}_clients_bar_per_dataset_efficiency.png""".format(base_dir,
                                                              num_clients), bbox_inches='tight',
@@ -44,13 +44,12 @@ def bar(df, base_dir, x_column, first, second, x_order, hue_order):
                                                              num_clients), bbox_inches='tight',
         dpi=400)
 
-def line(df, base_dir, x_column, first, second, third, hue, hue_order, rounds_semi_covnergence, ci=None, style=None):
-    fig, axs = plt.subplots(1, 2, sharex='all', figsize=(9, 4))
+def line(df, base_dir, x_column, first, second, hue, datasets, rounds_semi_covnergence, ci=None, style=None, hue_order=None):
+    fig, axs = plt.subplots(2, 1, sharex='all', figsize=(4, 4))
     titles = ["Average accuracy", "Average loss"]
     y_columns = [first, second]
     y_maxs = [100, 6]
     y_lims = [True, True]
-    datasets = [first, second]
     print("aa: ", df)
 
     i = 0
@@ -62,12 +61,12 @@ def line(df, base_dir, x_column, first, second, third, hue, hue_order, rounds_se
     print("""x column: {} first: {} second: {} hue: {} order: {}""".format(x_column, first, second, hue, hue_order))
     line_plot(df=df, base_dir=base_dir, ax=axs[i],
               file_name="""solutions_{}_""".format(datasets), x_column=x_column, y_column='Avg. $acc_b$',
-              hue=hue, ci=ci, title="Performance per model", tipo=None, hue_order=hue_order, style="Model", y_lim=y_lim, y_max=y_max)
-    # axs[i].legend(fontsize=8)
+              hue=hue, ci=ci, title="Balanced accuracy", tipo=None, hue_order=hue_order, style="Model", y_lim=y_lim, y_max=y_max)
     axs[i].get_legend().remove()
     axs[i].set_xlabel("")
     axs[i].set_ylabel("$Acc_B$", labelpad=-4)
-    fig.text(0.5, 0, 'Round (t)', ha='center', fontsize=12)
+
+    fig.text(0.575, 0, 'Round (t)', ha='center', fontsize=12)
 
     i = 1
     y_column = y_columns[i]
@@ -78,12 +77,17 @@ def line(df, base_dir, x_column, first, second, third, hue, hue_order, rounds_se
     print("""x column: {} first: {} second: {} hue: {} order: {}""".format(x_column, first, second, hue, hue_order))
     line_plot(df=df, base_dir=base_dir, ax=axs[i],
               file_name="""solutions_{}_""".format(datasets), x_column=x_column, y_column='Loss',
-              hue=hue, ci=ci, title="Loss per model", tipo=None,style="Model",  hue_order=hue_order, y_lim=y_lim, y_max=y_max)
-    axs[i].legend(fontsize=8)
+              hue=hue, ci=ci, title="Loss", tipo=None,style="Model",  hue_order=hue_order, y_lim=y_lim, y_max=y_max)
+    handles, labels = plt.gca().get_legend_handles_labels()
+    order = [0, 3, 2, 1, 4, 5, 6, 7, 9, 8]
+    axs[i].legend([handles[i] for i in order], [labels[i] for i in order], fontsize=6.5, ncols=3)
     axs[i].set_xlabel("")
+    # axs[i].get_legend().remove()
 
-    plt.tight_layout()
-    # plt.subplots_adjust(wspace=0.15, hspace=0.14)
+
+
+    # specify order
+
 
     for r in rounds_semi_convergence:
         for i in range(2):
@@ -91,16 +95,20 @@ def line(df, base_dir, x_column, first, second, third, hue, hue_order, rounds_se
                 axs[i].grid(False)
                 axs[i].vlines(x=[int(r)], ymin=0, ymax=100, colors='silver', ls='--', lw=1,
                               label='vline_multiple - full height')
+    plt.tight_layout()
+
+    plt.subplots_adjust(wspace=0.23, hspace=0.25)
+
     fig.savefig(
-        """{}solutions_{}_efficiency_acc_loss.png""".format(base_dir,
+        """{}solutions_{}_{}_models_acc_loss.png""".format(base_dir, datasets,
                                                      num_clients), bbox_inches='tight',
         dpi=400)
     fig.savefig(
-        """{}solutions_{}_efficiency_acc_loss.svg""".format(base_dir,
+        """{}solutions_{}_{}_models_acc_loss.svg""".format(base_dir, datasets,
                                                      num_clients), bbox_inches='tight',
         dpi=400)
 
-    print(""""{}solutions_{}_efficiency_acc_loss.png""".format(base_dir,
+    print(""""{}solutions_{}_{}_models_acc_loss.png""".format(base_dir, datasets,
                                                      num_clients))
 
 def m(df, first, second, third):
@@ -115,18 +123,39 @@ def m(df, first, second, third):
     return pd.DataFrame({"Efficiency": [first_efficiency], second + " efficiency": [second_efficiency], third: [training_clients], first: [acc], "Loss": [loss], "Communication cost (KB)": [kb_transmitted]})
 
 if __name__ == "__main__":
+    #
+    rounds_semi_convergence = []
 
-    # alphas = ['0.1', '5.0']
-    alphas = ['5.0', '5.0']
+    # alphas = ['100.0', '100.0']
+    # models_names = ["cnn_a", "cnn_a"]
+    # configuration = {"dataset": ["CIFAR10", "ImageNet"], "alpha": [float(i) for i in alphas]}
+    # solutions = ["MultiFedSpeed@3", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
+    # solutions = ["MultiFedSpeed@3", "MultiFedSpeed@2", "MultiFedSpeed@1", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
+
+    alphas = ['1.0', '100.0']
+    models_names = ["gru", "cnn_a"]
+    configuration = {"dataset": ["WISDM-W", "ImageNet"], "alpha": [float(i) for i in alphas]}
+    solutions = ["MultiFedSpeed@3", "MultiFedSpeed@2", "MultiFedSpeed@1", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
+    rounds_semi_convergence = [5, 9, 16, 30, 33, 39, 49, 55, 59]
+
+    alphas = ['100.0', '100.0']
+    models_names = ["gru", "cnn_a"]
+    configuration = {"dataset": ["WISDM-W", "ImageNet"], "alpha": [float(i) for i in alphas]}
+    solutions = ["MultiFedSpeed@3", "MultiFedSpeed@2", "MultiFedSpeed@1", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
+    rounds_semi_convergence = [5, 9, 26, 30, 35, 39, 43, 49]
+    #
+    alphas = ['100.0', '100.0']
     models_names = ["cnn_a", "cnn_a"]
-    configuration = {"dataset": ["Cifar10", "ImageNet"], "alpha": [float(i) for i in alphas]}
-    models_names = ["cnn_a", "cnn_a"]
+    configuration = {"dataset": ["ImageNet", "ImageNet_v2"], "alpha": [float(i) for i in alphas]}
+    solutions = ["MultiFedSpeed@3", "MultiFedSpeed@2", "MultiFedSpeed@1", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
+    rounds_semi_convergence = [22, 27, 33, 35, 38, 44, 45, 57]
+
+
+    # models_names = ["cnn_a", "cnn_a"]
     datasets = configuration["dataset"]
-    models_size = {"Cifar10": 3514.152, "ImageNet": 3524.412}
-    solutions = ["FedNome",  "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg", "MultiFedSpeedv1", "MultiFedSpeedv0"]
-    # solutions = ["MultiFedSpeed@1", "MultiFedSpeed@2", "MultiFedSpeed@3", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
-    solutions = ["MultiFedSpeed@3", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
-    num_classes = {"EMNIST": 47, "Cifar10": 10, "GTSRB": 43}
+    models_size = {"WISDM-P": 0.039024, "WISDM-W": 0.039024, "CIFAR10": 3.514152, "ImageNet": 3.524412, "ImageNet_v2": 3.524412}
+
+    num_classes = {"EMNIST": 47, "CIFAR10": 10, "GTSRB": 43}
     num_clients = 40
     fc = 0.3
     rounds = 100
@@ -166,7 +195,8 @@ if __name__ == "__main__":
             training_clients += df["# training clients"].tolist()
             read_round += df["Round"].tolist()
             read_datasets += [dataset] * len(df)
-            read_models += [{"EMNIST": "CNN-A", "Cifar10": "CNN-A", "WISDM-W": "GRU", "ImageNet": "CNN-B"}[dataset]] * len(df)
+            read_models += [{"EMNIST": "CNN-A", "CIFAR10": "CNN-B", "WISDM-P": "GRU", "WISDM-W": "GRU", "ImageNet": "CNN-A", "ImageNet_v2": "CNN-B"}[
+                                dataset]] * len(df)
             model_size = models_size[dataset]
             size += [model_size] * len(df)
         read_solutions += [solution] * len(acc)
@@ -194,12 +224,10 @@ if __name__ == "__main__":
     hue_order = datasets
     base_dir = """analysis/solutions/clients_{}/{}/fc_{}/{}/{}/rounds_{}/""".format(num_clients, x_order, fc, hue_order, models_names, rounds)
 
-    rounds_semi_convergence = [5, 13, 17, 34, 36, 44, 50, 54, 55]
-
-    line(df, base_dir, "Round (t)", third, first, second, "Solution", rounds_semi_covnergence=rounds_semi_convergence, hue_order=solutions, ci=None)
+    line(df, base_dir, "Round (t)", first, second, "Solution", datasets, rounds_semi_covnergence=rounds_semi_convergence, hue_order=solutions, ci=None)
     plt.plot()
     # bar(df, base_dir, "Solution", third, second, x_order, hue_order)
-    line(df, base_dir, "Round (t)", third, first, second, "Solution", rounds_semi_covnergence=rounds_semi_convergence, hue_order=solutions, ci=None)
+    line(df, base_dir, "Round (t)", first, second, "Solution", datasets, rounds_semi_covnergence=rounds_semi_convergence, hue_order=solutions, ci=None)
 
 
 

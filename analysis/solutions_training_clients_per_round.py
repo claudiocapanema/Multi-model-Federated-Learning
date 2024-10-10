@@ -136,7 +136,7 @@ if __name__ == "__main__":
     datasets = configuration["dataset"]
     # solutions = ["FedNome",  "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg"]
     solutions = ["MultiFedSpeed", "MultiFedAvg",  "FedFairMMFL"]
-    num_classes = {"EMNIST": 47, "Cifar10": 10, "GTSRB": 43}
+    num_classes = {"EMNIST": 47, "CIFAR10": 10, "GTSRB": 43}
     num_clients = 40
     fc = 0.3
     rounds = 100

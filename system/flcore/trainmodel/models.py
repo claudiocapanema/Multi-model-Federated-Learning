@@ -165,38 +165,61 @@ class AmazonMLP(nn.Module):
 
 class FedAvgCNN(nn.Module):
     def __init__(self, in_features=1, num_classes=10, dim=1024):
+        random.seed(0)
+        np.random.seed(0)
+        torch.manual_seed(0)
         super().__init__()
-        self.conv1 = nn.Sequential(
-            nn.Conv2d(in_features,
-                        32,
-                        kernel_size=5,
-                        padding=0,
-                        stride=1,
-                        bias=True),
-            nn.ReLU(inplace=True), 
-            nn.MaxPool2d(kernel_size=(2, 2))
-        )
-        self.conv2 = nn.Sequential(
-            nn.Conv2d(32,
-                        64,
-                        kernel_size=5,
-                        padding=0,
-                        stride=1,
-                        bias=True),
-            nn.ReLU(inplace=True), 
-            nn.MaxPool2d(kernel_size=(2, 2))
-        )
-        self.fc1 = nn.Sequential(
-            nn.Linear(dim, 512), 
-            nn.ReLU(inplace=True)
-        )
+        random.seed(0)
+        np.random.seed(0)
+        torch.manual_seed(0)
+        # self.conv1 = nn.Sequential(
+        #     nn.Conv2d(in_features,
+        #                 32,
+        #                 kernel_size=5,
+        #                 padding=0,
+        #                 stride=1,
+        #                 bias=True),
+        #     nn.ReLU(inplace=True),
+        #     nn.MaxPool2d(kernel_size=(2, 2))
+        # )
+        # self.conv2 = nn.Sequential(
+        #     nn.Conv2d(32,
+        #                 64,
+        #                 kernel_size=5,
+        #                 padding=0,
+        #                 stride=1,
+        #                 bias=True),
+        #     nn.ReLU(inplace=True),
+        #     nn.MaxPool2d(kernel_size=(2, 2))
+        # )
+        # self.fc1 = nn.Sequential(
+        #     nn.Linear(dim, 512),
+        #     nn.ReLU(inplace=True)
+        # )
+        # self.fc = nn.Linear(512, num_classes)
+        self.conv1 = nn.Conv2d(in_features,
+                      32,
+                      kernel_size=5,
+                      padding=0,
+                      stride=1,
+                      bias=True)
+        self.conv2 = nn.Conv2d(32,
+                      64,
+                      kernel_size=5,
+                      padding=0,
+                      stride=1,
+                      bias=True)
+        self.fc1 = nn.Linear(dim, 512)
         self.fc = nn.Linear(512, num_classes)
 
     def forward(self, x):
-        out = self.conv1(x)
-        out = self.conv2(out)
+        random.seed(0)
+        np.random.seed(0)
+        torch.manual_seed(0)
+        out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv1(x)))
+        out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv2(out)))
         out = torch.flatten(out, 1)
-        out = self.fc1(out)
+        out = nn.ReLU(inplace=True)(self.fc1(out))
         out = self.fc(out)
         return out
 
@@ -226,7 +249,7 @@ class TinyImageNetCNN(nn.Module):
         self.pool1 = nn.MaxPool2d(2)
         self.conv2 = nn.Conv2d(6, 16, kernel_size=5)
         self.pool2 = nn.MaxPool2d(2)
-        self.fc = nn.Linear(400, 25)
+        self.fc = nn.Linear(400, 12)
         # self.fc = nn.Linear(200, 200)
 
     def forward(self, x):
@@ -513,6 +536,7 @@ class GRU(torch.nn.Module):
             self.time_length = sequence_length
 
             self.gru = nn.GRU(self.input_size, self.hidden_size, self.num_layers, batch_first=True)
+            self.dp = nn.Dropout(0.2)
             self.fc = nn.Linear(self.time_length * self.hidden_size, self.output_size, bias=True)
         except Exception as e:
             print("GRU init")
@@ -524,11 +548,47 @@ class GRU(torch.nn.Module):
             np.random.seed(0)
             torch.manual_seed(0)
             x, h = self.gru(x)
-            out = self.fc(nn.Flatten()(x))
+            x = nn.Flatten()(x)
+            x = self.dp(x)
+            out = self.fc(x)
             return out
         except Exception as e:
             print("GRU forward")
             print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
+
+# ====================================================================================================================
+
+class LSTM_NET(nn.Module):
+    """Class to design a LSTM model."""
+
+    def __init__(self, input_dim=6, hidden_dim=6, time_length=200, num_classes=12):
+        """Initialisation of the class (constructor)."""
+        # Input:
+        # input_dim, integer
+        # hidden_dim; integer
+        # time_length; integer
+
+        super().__init__()
+
+        self.lstm = nn.LSTM(input_dim, hidden_dim, batch_first=True, num_layers=1)
+        self.fc = nn.Sequential(nn.Flatten(),
+                                 nn.Dropout(0.2),
+                                 nn.Linear(time_length * hidden_dim, 128),
+                                 nn.ReLU(),
+                                 nn.Dropout(0.2),
+                                 nn.Linear(128, num_classes))
+
+    def forward(self, input_data):
+        """The layers are stacked to transport the data through the neural network for the forward part."""
+        # Input:
+        # input_data; torch.Tensor
+        # Output:
+        # x; torch.Tensor
+
+        x, h = self.lstm(input_data)
+        x = self.fc(x)
+
+        return x
 
 # ====================================================================================================================
 

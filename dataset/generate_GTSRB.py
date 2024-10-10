@@ -7,10 +7,9 @@ import torchvision
 import torchvision.transforms as transforms
 from utils.dataset_utils import check, separate_data, split_data, save_file
 
-
 random.seed(1)
 np.random.seed(1)
-num_clients = 20
+num_clients = 40
 alpha = 3.0
 dir_path = "GTSRB/" + "clients_" + str(num_clients) + "/alpha_" + str(alpha) + "/"
 
@@ -19,7 +18,7 @@ dir_path = "GTSRB/" + "clients_" + str(num_clients) + "/alpha_" + str(alpha) + "
 def generate_dataset(dir_path, num_clients, niid, balance, partition, alpha):
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
-        
+
     # Setup directory for train/test data
     config_path = dir_path + "config.json"
     train_path = dir_path + "train/"
@@ -30,17 +29,17 @@ def generate_dataset(dir_path, num_clients, niid, balance, partition, alpha):
 
     dataset_image = []
     dataset_label = []
-        
+
     # Get GTSRB data
     transform = transforms.Compose(
-        [transforms.Resize((32, 32)), 
-        transforms.ToTensor(), 
-        transforms.Normalize((0.5), (0.5))]
+        [transforms.Resize((32, 32)),
+         transforms.ToTensor(),
+         transforms.Normalize((0.5), (0.5))]
     )
 
     def load_data(split="train"):
         trainset = torchvision.datasets.GTSRB(
-            root=dir_path+"rawdata", split=split, download=True, transform=transform)
+            root=dir_path + "rawdata", split=split, download=True, transform=transform)
         trainloader = torch.utils.data.DataLoader(
             trainset, batch_size=len(trainset), shuffle=False)
         for _, train_data in enumerate(trainloader, 0):
@@ -57,11 +56,11 @@ def generate_dataset(dir_path, num_clients, niid, balance, partition, alpha):
     num_classes = len(set(dataset_label))
     print(f'Number of classes: {num_classes}')
 
-    X, y, statistic = separate_data((dataset_image, dataset_label), num_clients, num_classes, 
+    X, y, statistic = separate_data((dataset_image, dataset_label), num_clients, num_classes,
                                     niid, balance, partition, class_per_client=4, alpha=alpha)
     train_data, test_data = split_data(X, y)
-    save_file(config_path, train_path, test_path, train_data, test_data, num_clients, num_classes, 
-        statistic, niid, balance, partition)
+    save_file(config_path, train_path, test_path, train_data, test_data, num_clients, num_classes,
+              statistic, niid, balance, partition)
 
 
 if __name__ == "__main__":

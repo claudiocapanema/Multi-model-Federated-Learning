@@ -93,7 +93,7 @@ if __name__ == "__main__":
     # solutions = ["FedNome",  "MultiFedAvgRR", "FedFairMMFL", "MultiFedAvg", "MultiFedSpeedv1", "MultiFedSpeedv0", ]
     # solutions = ["MultiFedSpeed@1", "MultiFedSpeed@2", "MultiFedSpeed@3", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
     solutions = ["MultiFedSpeed@3", "MultiFedAvg"]
-    num_classes = {"EMNIST": 47, "Cifar10": 10, "GTSRB": 43}
+    num_classes = {"EMNIST": 47, "CIFAR10": 10, "GTSRB": 43}
     num_clients = 40
     fc = 0.3
     rounds = 40

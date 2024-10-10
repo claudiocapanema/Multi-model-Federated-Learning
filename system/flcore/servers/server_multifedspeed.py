@@ -19,6 +19,7 @@ import time
 import sys
 import math
 import numpy as np
+import random
 from flcore.clients.clientfednome import clientFedNome
 from flcore.servers.serverbase import Server
 from threading import Thread
@@ -73,12 +74,16 @@ class MultiFedSpeed(Server):
         self.rounds_client_trained_model = {cid: {m: [] for m in range(self.M)} for cid in range(self.num_clients)}
         self.minimum_training_clients_per_model = {0.1: 1, 0.2: 2, 0.3: 2}[self.join_ratio]
         self.minimum_training_clients_per_model_percentage = self.minimum_training_clients_per_model / self.num_join_clients
+        self.use_cold_start_m = np.array([True for m in range(self.M)])
         self.cold_start_max_non_iid_level = 1
         self.cold_start_training_level = np.array([0] * self.M)
         self.minimum_training_level = 2 / self.num_clients
         self.models_semi_convergence_rounds_n_clients = {m: [] for m in range(self.M)}
         self.max_n_training_clients = 10
-        self.convergence_detection_window = 4
+        # Semi convergence detection window of rounds
+        self.tw = []
+        for d in self.dataset:
+            self.tw.append({"WISDM-W": 4, "WISDM-P": 4, "ImageNet": 4, "CIFAR10": 4, "ImageNet_v2": 4}[d])
         self.models_semi_convergence_min_n_training_clients = {m: self.minimum_training_clients_per_model for m in range(self.M)}
         self.models_semi_convergence_min_n_training_clients_percentage = {m: self.minimum_training_clients_per_model/self.num_join_clients for m in
                                                                range(self.M)}
@@ -92,17 +97,24 @@ class MultiFedSpeed(Server):
         self.unique_count_samples = {m: np.array([0 for i in range(self.num_classes[m])]) for m in range(self.M)}
         self.similarity_matrix = np.zeros((self.M, self.num_clients))
         self.accuracy_gain_models = {m: [] for m in range(self.M)}
+        self.stop_cpd = [False for m in range(self.M)]
         self.re_per_model = int(args.reduction)
+        # self.selected_clients_cosine = {m: {} for m in range(self.M)}
 
     def cold_start_selection(self):
 
         prob = [np.array([0 for i in range(self.num_clients)]) for j in range(self.M)]
+        if (self.use_cold_start_m).all() == False:
+            return prob, self.use_cold_start_m
         use_cold_start = np.array([False] * self.M)
         for m in range(self.M):
             for i in range(self.num_clients):
-                if self.clients_training_count[m][i] == 0 and self.non_iid_degree[m]['unique local classes'] <= 100 * self.cold_start_max_non_iid_level:
+                if self.clients_training_count[m][i] == 0:
                     prob[m][i] = 1
-                    use_cold_start[m] = True
+                    self.use_cold_start_m[m] = True
+
+        if np.sum(prob) == 0:
+            self.use_cold_start_m = np.array([False for m in range(self.M)])
 
         return prob, use_cold_start
 
@@ -338,7 +350,10 @@ class MultiFedSpeed(Server):
             #     remaining_clients = int(self.num_clients * self.join_ratio) - n_clients_selected
             #     print("m: ", m, " remaining: ", remaining_clients)
 
+            g = torch.Generator()
+            g.manual_seed(t)
             np.random.seed(t)
+            random.seed(t)
             if t == 1:
                 self.previous_selected_clients = super().select_clients(t)
                 n_clients_m = {m: 0 for m in range(self.M)}
@@ -392,12 +407,9 @@ class MultiFedSpeed(Server):
                         global_acc = self.results_train_metrics[m][metric]
 
                         if len(local_acc) >= 2 and len(self.clients_training_round_per_model[cid][m]) >= 2:
-                            print("los ", local_loss)
                             local_acc = local_acc[rounds]
                             local_loss = local_loss[rounds]
-                            print("aaa: ", len(global_acc), self.clients_training_round_per_model[cid][m])
-                            tr = self.clients_training_round_per_model[cid][m]
-                            # if q == 0:
+                            # tr = self.clients_training_round_per_model[cid][m]
                             local_acc_diff = (local_acc[-1] - local_acc[-2])
                             local_loss_diff = (local_loss[-2] - local_loss[-1])
 
@@ -458,13 +470,14 @@ class MultiFedSpeed(Server):
                     index += 1
                     if index == len(remaining_clients_per_model):
                         index = 0
+                print("num joint clients antes: ", num_join_clients, self.models_semi_convergence_count)
                 for m in range(self.M):
                     if self.models_semi_convergence_flag[m]:
                         num_join_clients -= min(self.models_semi_convergence_count[m], self.re_per_model)
                         remaining_clients_per_model[m] -= min(self.models_semi_convergence_count[m], self.re_per_model)
                 # if all(self.models_semi_convergence_flag) == True:
                 #     num_join_clients -= min(min(self.models_semi_convergence_count), 5)
-                print("num join clients: ", num_join_clients)
+                print("num join clients: ", t, num_join_clients)
                 # remaining_clients_per_model = np.array(remaining_clients_per_model * num_join_clients, dtype=int)
 
                 print("Clientes resta", remaining_clients_per_model)
@@ -504,34 +517,49 @@ class MultiFedSpeed(Server):
                 min_clients = np.min(list(self.models_semi_convergence_min_n_training_clients.values()))
                 flag = True
                 for m in range(self.M):
-                    self.rounds_since_last_semi_convergence[m] += 1
-                    global_acc = np.array(self.relative_accuracy_gain_models[m][-self.convergence_detection_window:])
-                    print("globl: ", global_acc)
-                    if t < 40:
-                        window = 7
-                    else:
-                        window = 5
-                    idxs = np.argwhere(global_acc < 0)[-6:]
-                    diff = self.models_semi_convergence_min_n_training_clients[m] - min_clients
-                    if len(idxs) >= 2 and diff < 1 and self.rounds_since_last_semi_convergence[m] >= 4:
-                        self.rounds_since_last_semi_convergence[m] = 0
-                        idxs_rounds = np.array(idxs, dtype=np.int32).flatten()
-                        print("indices: ", idxs_rounds, idxs_rounds[-1])
-                        print("ab: ", self.training_clients_per_model_per_round[m])
-                        self.models_semi_convergence_rounds_n_clients[m].append({'round': t - 2, 'n_training_clients':
-                            self.training_clients_per_model_per_round[m][t-2]})
-                        # more clients are trained for the semi converged model
-                        print("treinados na rodada passada: ", m , self.training_clients_per_model_per_round[m][t-2])
-                        # self.models_semi_convergence_min_n_training_clients[m] = min(
-                        #     self.models_semi_convergence_min_n_training_clients[m] + 1, 4)
+                    if not self.stop_cpd[m]:
+                        self.rounds_since_last_semi_convergence[m] += 1
+                        global_acc = np.array(self.relative_accuracy_gain_models[m][-self.tw[m]:])
 
-                        if flag:
-                            self.models_semi_convergence_flag[m] = True
-                            self.models_semi_convergence_count[m] += 1
-                            flag = False
-                    # updates the probability of training a semi converged model
-                    self.models_semi_convergence_training_probability[m] = max((num_join_clients - self.models_semi_convergence_min_n_training_clients[
-                                                                                m]) / num_join_clients, 1/num_join_clients)
+                        """Stop CPD"""
+                        losses = self.results_test_metrics[m]["Loss"][-self.tw[m]:]
+                        cpd_min_occurrences = int(self.tw[m] * 0.5)
+                        cpd_max_occurrences = int(self.tw[m] * 1)
+                        if len(np.argwhere(global_acc < 0)[-self.tw[m]:]) == self.tw[m] and self.models_semi_convergence_flag[m]:
+                            self.models_semi_convergence_count[m] -= 1
+                            self.models_semi_convergence_count[m] = max(self.models_semi_convergence_count[m], 0)
+                            self.stop_cpd[m] = True
+                            print("Stop CPD, model: ", m, self.dataset[m], self.models_semi_convergence_count[m], t)
+                            print("Sequence of losses: ", losses)
+                        print("globl: ", global_acc)
+                        if t < 40:
+                            window = 7
+                        else:
+                            window = 5
+                        idxs = np.argwhere(global_acc < 0)
+                        diff = self.models_semi_convergence_min_n_training_clients[m] - min_clients
+                        if m == 0:
+                            print("Checagem WISDM ", t)
+                            print(len(idxs) <= int(self.tw[m] * 0.75), len(idxs) >= int(self.tw[m] * 0.25), diff < 1, self.rounds_since_last_semi_convergence[m] >= 4)
+                        if len(idxs) <= int(self.tw[m] * 0.75) and len(idxs) >= int(self.tw[m] * 0.25) and diff < 1 and self.rounds_since_last_semi_convergence[m] >= 4:
+                            self.rounds_since_last_semi_convergence[m] = 0
+                            idxs_rounds = np.array(idxs, dtype=np.int32).flatten()
+                            print("indices: ", idxs_rounds, idxs_rounds[-1])
+                            print("ab: ", self.training_clients_per_model_per_round[m])
+                            self.models_semi_convergence_rounds_n_clients[m].append({'round': t - 2, 'n_training_clients':
+                                self.training_clients_per_model_per_round[m][t-2]})
+                            # more clients are trained for the semi converged model
+                            print("treinados na rodada passada: ", m , self.training_clients_per_model_per_round[m][t-2])
+                            # self.models_semi_convergence_min_n_training_clients[m] = min(
+                            #     self.models_semi_convergence_min_n_training_clients[m] + 1, 4)
+
+                            if flag:
+                                self.models_semi_convergence_flag[m] = True
+                                self.models_semi_convergence_count[m] += 1
+                                flag = False
+                        # updates the probability of training a semi converged model
+                        self.models_semi_convergence_training_probability[m] = max((num_join_clients - self.models_semi_convergence_min_n_training_clients[
+                                                                                    m]) / num_join_clients, 1/num_join_clients)
                     # self.models_semi_convergence_min_n_training_clients[m] = min(
                     #     self.models_semi_convergence_min_n_training_clients[m], num_join_clients)
 
@@ -662,11 +690,11 @@ class MultiFedSpeed(Server):
                 self.client_class_count[m][i] = self.clients[i].train_class_count[m]
                 print("no train: ", " cliente: ", i, " modelo: ", m, " train class count: ", self.clients[i].train_class_count[m])
 
-        self.detect_non_iid_degree()
+        # self.detect_non_iid_degree()
 
-        print("Non iid degree")
-        print("#########")
-        print("""M1: {}\nM2: {}""".format(self.non_iid_degree[0], self.non_iid_degree[1]))
+        # print("Non iid degree")
+        # print("#########")
+        # print("""M1: {}\nM2: {}""".format(self.non_iid_degree[0], self.non_iid_degree[1]))
 
         for t in range(1, self.global_rounds+1):
             s_t = time.time()
@@ -777,8 +805,8 @@ class MultiFedSpeed(Server):
         print(self.unique_count_samples)
         print(unique_count_samples)
         print(self.client_selection_model_weight)
-        self.data_quality_selection()
-        print(self.clients_cosine_similarities)
+        # self.data_quality_selection()
+        # print(self.clients_cosine_similarities)
         # ruim
         # self.client_selection_model_weight[0] = 0.4
         # self.client_selection_model_weight[1] = 0.6
@@ -794,66 +822,74 @@ class MultiFedSpeed(Server):
 
         # self.cold_start_max_non_iid_level = self.cold_start_training_level / np.sum(self.cold_start_training_level)
 
-    def aggregate(self, results: List[Tuple[NDArrays, float]], m: int) -> NDArrays:
-        """Compute weighted average."""
-        # Calculate the total number of examples used during training
-        num_examples_total = sum([num_examples for _, num_examples, cid in results])
-        num_similarities_total = sum([self.clients_cosine_similarities[m][cid] for _, _, cid in results])
-        total = num_examples_total + num_similarities_total
-        # print("exemplo: ", self.clients_cosine_similarities[m][3] / num_similarities_total)
-        # print("exemplo: ", self.clients_cosine_similarities[m][4] / num_similarities_total)
-        # print("exemplo: ", self.clients_cosine_similarities[m][5] / num_similarities_total)
-        # print("exemplo: ", self.clients_cosine_similarities[m][6] / num_similarities_total)
-        #
-        # exit()
-
-
-        # Create a list of weights, each multiplied by the related number of examples
-        weighted_weights = [
-            [layer.detach().cpu().numpy() * (self.clients_cosine_similarities[m][cid]) for layer in weights.parameters()] for weights, num_examples, cid in results
-        ]
-
-        # weighted_weights = [
-        #     [layer.detach().cpu().numpy() * (num_examples / num_examples_total) for
-        #      layer in weights.parameters()] for weights, num_examples, cid in results
-        # ]
-
-        # Compute average weights of each layer
-        # weights_prime: NDArrays = [
-        #     reduce(np.add, layer_updates) / num_examples_total
-        #     for layer_updates in zip(*weighted_weights)
-        # ]
-        weights_prime: NDArrays = [
-            reduce(np.add, layer_updates) / num_similarities_total
-            for layer_updates in zip(*weighted_weights)
-        ]
-
-        weights_prime = [Parameter(torch.Tensor(i.tolist())) for i in weights_prime]
-
-        self.current_model_unique_count_samples = [np.array([0.0 for i in range(self.num_classes[m])]) for m in range(self.M)]
-
-        for _, _, cid in results:
-            self.current_model_unique_count_samples[m] += (np.array(self.client_class_count[m][cid]))
-
-        self.current_model_unique_count_samples[m] = np.array([self.current_model_unique_count_samples[m]])
-        # print(self.current_model_unique_count_samples[m])
-        # exit()
-
-
-        # print(self.client_class_count[m][0])
-        for i in range(self.num_clients):
-            # self.client_class_count[m][i] = self.clients[i].train_class_count[m]
-            total  = np.sum(self.client_class_count[m][i])
-            normalized = np.array([self.client_class_count[m][i]])
-            # print("unique: ", self.current_model_unique_count_samples[m], self.current_model_unique_count_samples[m].ndim)
-            # print("normalized: ", list(normalized), cosine_similarity(self.current_model_unique_count_samples[m], normalized))
-            self.clients_cosine_similarities_with_current_model[m][i] = cosine_similarity(self.current_model_unique_count_samples[m], normalized)[0][0]
-
-
-        # exit()
-        print("Similaridade atual: ")
-        print(m, i, self.clients_cosine_similarities_with_current_model[m])
-        return weights_prime
+    # def aggregate(self, results: List[Tuple[NDArrays, float]], m: int) -> NDArrays:
+    #
+    #     # pseudo_gradient: NDArrays = [
+    #     #     x - y
+    #     #     for x, y in zip(
+    #     #         self.initial_parameters, fedavg_result
+    #     #     )
+    #     # ]
+    #     #
+    #     # fedavg_result = [
+    #     #     x - self.server_learning_rate * y
+    #     #     for x, y in zip(self.initial_parameters, pseudo_gradient)
+    #     # ]
+    #
+    #
+    #     """Compute weighted average."""
+    #     # Calculate the total number of examples used during training
+    #     num_examples_total = sum([num_examples for _, num_examples, cid in results])
+    #     num_similarities_total = sum([self.clients_cosine_similarities[m][cid] for _, _, cid in results])
+    #     total = num_examples_total + num_similarities_total
+    #
+    #     # Create a list of weights, each multiplied by the related number of examples
+    #     weighted_weights = [
+    #         [layer.detach().cpu().numpy() * (self.clients_cosine_similarities[m][cid]) for layer in weights.parameters()] for weights, num_examples, cid in results
+    #     ]
+    #
+    #     # weighted_weights = [
+    #     #     [layer.detach().cpu().numpy() * (num_examples / num_examples_total) for
+    #     #      layer in weights.parameters()] for weights, num_examples, cid in results
+    #     # ]
+    #
+    #     # Compute average weights of each layer
+    #     # weights_prime: NDArrays = [
+    #     #     reduce(np.add, layer_updates) / num_examples_total
+    #     #     for layer_updates in zip(*weighted_weights)
+    #     # ]
+    #     print("similaridades total: ", num_similarities_total, self.clients_cosine_similarities[m][1])
+    #     weights_prime: NDArrays = [
+    #         reduce(np.add, layer_updates) / num_similarities_total
+    #         for layer_updates in zip(*weighted_weights)
+    #     ]
+    #
+    #     weights_prime = [Parameter(torch.Tensor(i.tolist())) for i in weights_prime]
+    #
+    #     self.current_model_unique_count_samples = [np.array([0.0 for i in range(self.num_classes[m])]) for m in range(self.M)]
+    #
+    #     for _, _, cid in results:
+    #         self.current_model_unique_count_samples[m] += (np.array(self.client_class_count[m][cid]))
+    #
+    #     self.current_model_unique_count_samples[m] = np.array([self.current_model_unique_count_samples[m]])
+    #     # print(self.current_model_unique_count_samples[m])
+    #     # exit()
+    #
+    #
+    #     # print(self.client_class_count[m][0])
+    #     for i in range(self.num_clients):
+    #         # self.client_class_count[m][i] = self.clients[i].train_class_count[m]
+    #         total  = np.sum(self.client_class_count[m][i])
+    #         normalized = np.array([self.client_class_count[m][i]])
+    #         # print("unique: ", self.current_model_unique_count_samples[m], self.current_model_unique_count_samples[m].ndim)
+    #         # print("normalized: ", list(normalized), cosine_similarity(self.current_model_unique_count_samples[m], normalized))
+    #         self.clients_cosine_similarities_with_current_model[m][i] = cosine_similarity(self.current_model_unique_count_samples[m], normalized)[0][0]
+    #
+    #
+    #     # exit()
+    #     print("Similaridade atual: ")
+    #     print(m, i, self.clients_cosine_similarities_with_current_model[m])
+    #     return weights_prime
 
     def train_metrics(self, m, t):
         if self.eval_new_clients and self.num_new_clients > 0:

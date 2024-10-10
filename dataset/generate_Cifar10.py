@@ -27,9 +27,9 @@ from utils.dataset_utils import check, separate_data, split_data, save_file
 
 random.seed(1)
 np.random.seed(1)
-num_clients = 20
-alpha = 5.0
-dir_path = "Cifar10/" + "clients_" + str(num_clients) + "/alpha_" + str(alpha) + "/"
+num_clients = 40
+alpha = 10.0
+dir_path = "CIFAR10/" + "clients_" + str(num_clients) + "/alpha_" + str(alpha) + "/"
 
 
 # Allocate data to users

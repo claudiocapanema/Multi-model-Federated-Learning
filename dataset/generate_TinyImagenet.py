@@ -27,8 +27,9 @@ from torchvision.datasets import ImageFolder, DatasetFolder
 
 random.seed(1)
 np.random.seed(1)
-num_clients = 20
-dir_path = "TinyImagenet/"
+num_clients = 40
+alpha = 0.1
+dir_path = "Tiny-ImageNet/" + "clients_" + str(num_clients) + "/alpha_" + str(alpha) + "/"
 
 # https://github.com/QinbinLi/MOON/blob/6c7a4ed1b1a8c0724fa2976292a667a828e3ff5d/datasets.py#L148
 class ImageFolder_custom(DatasetFolder):
@@ -66,7 +67,7 @@ class ImageFolder_custom(DatasetFolder):
 
 
 # Allocate data to users
-def generate_dataset(dir_path, num_clients, niid, balance, partition):
+def generate_dataset(dir_path, num_clients, niid, balance, partition, alpha):
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
         
@@ -119,7 +120,7 @@ def generate_dataset(dir_path, num_clients, niid, balance, partition):
     #     dataset.append(dataset_image[idx])
 
     X, y, statistic = separate_data((dataset_image, dataset_label), num_clients, num_classes, 
-                                    niid, balance, partition, class_per_client=20)
+                                    niid, balance, partition, class_per_client=2, alpha=alpha)
     train_data, test_data = split_data(X, y)
     save_file(config_path, train_path, test_path, train_data, test_data, num_clients, num_classes, 
         statistic, niid, balance, partition)
@@ -130,4 +131,4 @@ if __name__ == "__main__":
     balance = True if sys.argv[2] == "balance" else False
     partition = sys.argv[3] if sys.argv[3] != "-" else None
 
-    generate_dataset(dir_path, num_clients, niid, balance, partition)
+    generate_dataset(dir_path, num_clients, niid, balance, partition, alpha)

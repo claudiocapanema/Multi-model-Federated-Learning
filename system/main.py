@@ -101,8 +101,8 @@ def run(args):
     dts = args.dataset
     num_classes = []
     for dt in dts:
-        num_classes.append({'EMNIST': 47, 'MNIST': 10, 'Cifar10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'Tiny-ImageNet': 200,
-                            'ImageNet100': 15, 'ImageNet': 15}[dt])
+        num_classes.append({'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'Tiny-ImageNet': 200,
+                            'ImageNet100': 15, 'ImageNet': 15, "ImageNet_v2": 15}[dt])
 
     args.num_classes = num_classes
 
@@ -121,7 +121,7 @@ def run(args):
             if "mlr" in model_str: # convex
                 if "MNIST" == dt:
                     model = Mclr_Logistic(1*28*28, num_classes=num_classes_m).to(args.device)
-                elif "Cifar10" == dt:
+                elif "CIFAR10" == dt:
                     model = Mclr_Logistic(3*32*32, num_classes=num_classes_m).to(args.device)
                 else:
                     model = Mclr_Logistic(60, num_classes=num_classes_m).to(args.device)
@@ -129,16 +129,16 @@ def run(args):
             elif "cnn_a" in model_str: # non-convex
                 if "EMNIST" == dt or "MNIST" == dt:
                     model = FedAvgCNN(in_features=1, num_classes=num_classes_m, dim=1024).to(args.device)
-                elif "Cifar10" == dt:
+                elif "CIFAR10" == dt:
                     model = FedAvgCNN(in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
                 elif "GTSRB" == dt:
                     model = FedAvgCNN(in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
                 elif "Omniglot" == dt:
                     model = FedAvgCNN(in_features=1, num_classes=num_classes_m, dim=33856).to(args.device)
-                    # model = CifarNet(num_classes=num_classes_m).to(args.device)
+                    # model = CIFARNet(num_classes=num_classes_m).to(args.device)
                 elif "Digit5" == dt:
                     model = Digit5CNN().to(args.device)
-                elif dt in ["ImageNet100", "ImageNet"]:
+                elif dt in ["ImageNet100", "ImageNet", "ImageNet_v2"]:
                     # model = TinyImageNetCNN().to(args.device)
                     model = FedAvgCNN(in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
                 else:
@@ -159,7 +159,7 @@ def run(args):
             elif "dnn" in model_str: # non-convex
                 if dt in ["MNIST", "EMNIST"]:
                     model = DNN(1*28*28, 100, num_classes=num_classes_m).to(args.device)
-                elif "Cifar10" == dt:
+                elif "CIFAR10" == dt:
                     model = DNN(3*32*32, 100, num_classes=num_classes_m).to(args.device)
                 else:
                     model = DNN(60, 20, num_classes=num_classes_m).to(args.device)
@@ -450,7 +450,7 @@ def run(args):
 
     print("All done!")
 
-    reporter.report()
+    # reporter.report()
 
 
 if __name__ == "__main__":
@@ -459,18 +459,18 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     # general
-    # parser.add_argument('-dts', "--datasets", action="append", type=str, default=['MNIST', 'Cifar10'])
+    # parser.add_argument('-dts', "--datasets", action="append", type=str, default=['MNIST', 'CIFAR10'])
     parser.add_argument('-mds', "--models",  default=['dnn', 'cnn'])
     parser.add_argument('-go', "--goal", type=str, default="test", 
                         help="The goal for this experiment")
-    parser.add_argument('-dev', "--device", type=str, default="cuda",
+    parser.add_argument('-dev', "--device", type=str, default="cpu",
                         choices=["cpu", "cuda"])
     parser.add_argument('-did', "--device_id", type=str, default="0")
     parser.add_argument('-data', "--dataset", action="append")
     parser.add_argument('-nb', "--num_classes", default=[10, 10])
     parser.add_argument('-m', "--model",  action="append")
     parser.add_argument('-lbs', "--batch_size", type=int, default=32)
-    parser.add_argument('-lr', "--local_learning_rate", type=float, default=0.005,
+    parser.add_argument('-lr', "--local_learning_rate", type=float, default=0.01, # 0.01 e 0.05 aumenta a loss quando reduz a quantidade de clintes usando SGD
                         help="Local learning rate")
     parser.add_argument('-ld', "--learning_rate_decay", type=bool, default=False)
     parser.add_argument('-ldg', "--learning_rate_decay_gamma", type=float, default=0.99)
@@ -626,6 +626,7 @@ if __name__ == "__main__":
                                                                                                args.global_rounds,
                                                                                                args.local_epochs,
                                                                                                 args.algorithm)
+    print("log: ", result_path)
     import sys
 
     # Abra um arquivo para gravação
