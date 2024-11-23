@@ -47,7 +47,7 @@ NDArray = npt.NDArray[Any]
 NDArrays = List[NDArray]
 
 
-class MultiFedSpeed(Server):
+class MultiFedSpeedRelative(Server):
     def __init__(self, args, times):
         super().__init__(args, times)
 
@@ -233,7 +233,7 @@ class MultiFedSpeed(Server):
                     acc_gain_models[m].append(global_acc[i] - global_acc[i-1])
                     relative_acc_gain_models[m].append(-(global_acc[i] - global_acc[i-1]) / global_acc[i-1])
                     if n_training_clinets > 0:
-                        acc_gain_efficiency[m].append(-(global_acc[-1] - global_acc[i]) / n_training_clinets)
+                        acc_gain_efficiency[m].append(-(global_acc[-i] - global_acc[i-1]) / n_training_clinets)
                     else:
                         acc_gain_efficiency[m].append(0)
 
@@ -250,106 +250,6 @@ class MultiFedSpeed(Server):
 
     def select_clients(self, t):
         try:
-            # np.random.seed(t)
-            # if self.random_join_ratio:
-            #     self.current_num_join_clients = np.random.choice(range(self.num_join_clients, self.num_clients+1), 1, replace=False)[0]
-            # else:
-            #     self.current_num_join_clients = self.num_join_clients
-            # np.random.seed(t)
-            # selected_clients_m = [[] for i in range(self.M)]
-            # selected_clients = []
-            # n_clients_m = [0] * self.M
-            # n_clients_selected = 0
-            # remaining_clients = int(self.num_clients * self.join_ratio)
-            # uniform_selection_m = self.uniform_selection(t)
-            # # data_quality_selection_m = self.data_quality_selection()
-            # data_quality_selection_m = self.clients_cosine_similarities
-            # prob_cold_start_m, use_cold_start_m = self.cold_start_selection()
-            # cold_start_clients_m = [np.array([]) for i in range(self.M)]
-            # print(self.client_selection_model_weight)
-            # print(self.cold_start_training_level)
-            # print(use_cold_start_m)
-            # clients_cumulative_prob_m = np.zeros((self.M, self.num_clients))
-            # total = 0
-            # for client in range(self.num_clients):
-            #     for m in range(self.M):
-            #         clients_cumulative_prob_m[m][client] = uniform_selection_m[m][client] + data_quality_selection_m[m][client]
-            #         total += clients_cumulative_prob_m[m][client]
-            #
-            # m_order = np.argwhere(use_cold_start_m == True)
-            # m_order = m_order.flatten()
-            # print("prim: ", m_order)
-            # for i in range(self.M):
-            #     if i not in m_order:
-            #         m_order = np.append(m_order, [i])
-            # print("m order: ", m_order)
-            # for i in range(len(m_order)):
-            #     m = m_order[i]
-            #     if use_cold_start_m[m]:
-            #         n_selected_clients_m = math.ceil(self.num_clients*self.join_ratio*self.cold_start_training_level[m])
-            #         if n_selected_clients_m > remaining_clients:
-            #             n_selected_clients_m = remaining_clients
-            #         print("co: ", self.num_clients, self.join_ratio, self.cold_start_training_level[m])
-            #         p = prob_cold_start_m[m]
-            #         p = np.array([p[i] if i not in selected_clients else 0 for i in range(len(p))])
-            #         p = np.argwhere(p == 1).flatten()[:n_selected_clients_m]
-            #         # cold_start_clients_m[m] = np.argwhere(prob_cold_start_m[m][prob_cold_start_m[m] == 1]).flatten()[:n_selected_clients_m]
-            #         remaining_clients = n_selected_clients_m - len(p)
-            #         print("faltantes: ", n_selected_clients_m - len(p))
-            #         if n_selected_clients_m - len(p) > 0:
-            #             # prob_m = uniform_selection_m[m] * (1 - self.client_selection_model_weight[m]) + data_quality_selection_m[m] * self.client_selection_model_weight[m]
-            #             prob_m = clients_cumulative_prob_m[m]
-            #             prob_m[p] = 0
-            #             prob_m = np.array([prob_m[i] if i not in selected_clients else 0 for i in range(len(prob_m))])
-            #             prob_m = np.argsort(prob_m)[-(n_selected_clients_m - len(p)):]
-            #             print("f adicionados: ", len(prob_m))
-            #             # prob_m = np.array([i if i not in prob_m else 0 for i in prob_m])
-            #             # prob_m = np.argwhere(prob_m > 0).flatten()[]
-            #         else:
-            #             prob_m = np.array([])
-            #         if len(p) > 0 and len(prob_m) == 0:
-            #             selected_clients_m[m] = p
-            #         else:
-            #             selected_clients_m[m] = np.array(list(p) + list(prob_m))
-            #
-            #     else:
-            #         # print("f", self.num_clients * self.join_ratio - n_clients_selected)
-            #         if True not in use_cold_start_m:
-            #             n_clients = math.ceil(self.num_clients * self.join_ratio * self.client_selection_model_weight[m])
-            #         else:
-            #             n_clients = min(math.ceil(self.num_clients * self.join_ratio - n_clients_selected), math.ceil(self.num_clients * self.join_ratio * self.client_selection_model_weight[m]))
-            #         if n_clients > remaining_clients or (n_clients < remaining_clients and i == self.M - 1):
-            #             print("ent", remaining_clients)
-            #             n_clients = remaining_clients
-            #         prob_m = clients_cumulative_prob_m[m]
-            #
-            #         print(prob_m)
-            #         prob_m = np.array([prob_m[i] if i not in selected_clients else 0 for i in range(len(prob_m))])
-            #         prob_m = prob_m / np.sum(prob_m)
-            #         print("ee: ", prob_m)
-            #         prob_m = list(np.random.choice([i for i in range(len(self.clients))], n_clients, replace=False, p=prob_m))
-            #         selected_clients_m[m] = prob_m
-            #
-            #         # np.random.seed(t)
-            #         # if self.random_join_ratio:
-            #         #     self.current_num_join_clients = \
-            #         #     np.random.choice(range(self.num_join_clients, self.num_clients + 1), 1, replace=False)[0]
-            #         # else:
-            #         #     self.current_num_join_clients = self.num_join_clients
-            #         # np.random.seed(t)
-            #         # selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
-            #         # selected_clients = [i.id for i in selected_clients]
-            #         #
-            #         # n = len(selected_clients) // self.M
-            #         # sc = np.array_split(selected_clients, self.M)
-            #         # # sc = [np.array(selected_clients[0:12])]
-            #         # # sc.append(np.array(selected_clients[12:]))
-            #         # selected_clients_m[m] = sc[m]
-            #
-            #     selected_clients += list(selected_clients_m[m])
-            #     n_clients_selected += len(selected_clients_m[m])
-            #     remaining_clients = int(self.num_clients * self.join_ratio) - n_clients_selected
-            #     print("m: ", m, " remaining: ", remaining_clients)
 
             g = torch.Generator()
             g.manual_seed(t)
@@ -380,6 +280,7 @@ class MultiFedSpeed(Server):
                 self.calculate_accuracy_gain_models()
 
                 clients_losses = []
+                local_losses_diff_list = []
                 metric = "Accuracy"
                 # losses_m = {m: [] for m in range(self.M)}
                 # samples_m = {m: [] for m in range(self.M)}
@@ -397,27 +298,31 @@ class MultiFedSpeed(Server):
                 for client in self.clients:
                     cid = client.id
                     client_losses = []
+                    client_local_losses_diff_list = []
                     improvements = []
                     for m in range(len(client.train_metrics_list_dict)):
                         rounds = self.clients_training_round_per_model[cid][m][-2:]
-                        rounds = np.array(rounds) - 1
-                        print("r tre", rounds)
                         metrics_m = client.train_metrics_list_dict[m]
                         local_acc = np.array(self.clients_train_metrics[client.id][metric][m])
                         local_loss = np.array(self.clients_train_metrics[client.id]["Loss"][m])
+                        print("Client: ", cid, " trained: ", self.clients_training_round_per_model[cid][m], " m: ", m)
+                        rounds = np.array(rounds) - 1
+                        print("rounds reduzidos: ", rounds, " tamanho losses: ", len(local_loss), "\n losses: ", local_loss)
+
                         global_acc = self.results_train_metrics[m][metric]
 
                         if len(local_acc) >= 2 and len(self.clients_training_round_per_model[cid][m]) >= 2:
+                            print("depois: ", local_loss[rounds])
                             local_acc = local_acc[rounds]
                             local_loss = local_loss[rounds]
-                            # tr = self.clients_training_round_per_model[cid][m]
                             local_acc_diff = (local_acc[-1] - local_acc[-2])
                             local_loss_diff = (local_loss[-2] - local_loss[-1])
 
                             if local_loss_diff == 0 or local_loss[-2] == 0:
                                 local_loss_relative_diff = 0
                             else:
-                                local_loss_relative_diff = local_loss[-1]/local_loss[-2]
+                                local_loss_relative_diff = local_loss_diff/local_loss[-2] # execução 51
+                                # local_loss_relative_diff = 1 - local_loss_diff / local_loss[-2] # execução 52
                             # else:
                             #     local_diff = (local_acc[-1] - local_acc[-2]) / q
                             if local_acc_diff > 0:
@@ -432,28 +337,38 @@ class MultiFedSpeed(Server):
                             local_acc_diff = relative_diff * relative_diff + local_acc_diff
                         elif len(local_acc) == 1:
                             local_acc_diff = local_acc[-1]
-                            local_loss_diff = local_loss[-1]
+                            if (local_loss[0] - local_loss[-1]) > 0:
+                                local_loss_diff = local_loss[0] - local_loss[-1]
+                            else:
+                                local_loss_diff = local_loss[-1]
                             local_loss_relative_diff = 1
                         else:
                             local_acc_diff = 1
                             local_loss_diff = 1
                             local_loss_relative_diff = 1
                         local_acc_diff = max(local_acc_diff, 0.01)
-                        local_loss_diff = max(local_loss_diff, 0.01)
+                        # local_loss_diff = max(local_loss_diff, 0.01)
+                        local_loss_diff = max(local_loss_diff, 0.1) # execução 54 melhor
+                        # local_loss_diff = max(local_loss_diff, 1)  # execução 55
                         if local_loss_relative_diff <= 0:
                             local_loss_relative_diff = 0
                         local_loss_relative_diff = min(local_loss_relative_diff, 1)
-                        print("ant:1: ", metrics_m['Samples'],local_acc_diff, (metrics_m['Samples']) * local_loss_relative_diff)
-                        client_losses.append((metrics_m['Samples'] ) * local_loss_diff)
+                        print("ant:1: ", metrics_m['Samples'],local_acc_diff, (metrics_m['Samples']) * local_loss_relative_diff, local_loss_diff, (metrics_m['Samples'] ) * local_loss_diff)
+                        client_losses.append((metrics_m['Samples'] ) * local_loss_diff) # execução 53
+                        # client_losses.append((metrics_m['Samples']) * local_loss_relative_diff) # execução 51 e 52
+                        client_local_losses_diff_list.append(local_loss_diff)
                     client_losses = np.array(client_losses)
+                    # client_local_losses_diff_list = np.array(client_local_losses_diff_list)
                     # client_losses = (client_losses / np.sum(client_losses))
                     if np.isnan(client_losses).any():
                         client_losses = np.ones(len(client_losses))
                     clients_losses.append(client_losses)
+                    local_losses_diff_list.append(client_local_losses_diff_list)
 
                 clients_losses = np.array(clients_losses)
                 print("fo: ", clients_losses.shape)
                 print("Valor das losses: ", clients_losses)
+                print("Valor das local losses diff list: \n", local_losses_diff_list)
 
                 prob_cold_start_m, use_cold_start_m = self.cold_start_selection()
                 print("cold: ", t, use_cold_start_m)
@@ -563,17 +478,6 @@ class MultiFedSpeed(Server):
                                                                                     m]) / num_join_clients, 1/num_join_clients)
                     # self.models_semi_convergence_min_n_training_clients[m] = min(
                     #     self.models_semi_convergence_min_n_training_clients[m], num_join_clients)
-
-                """Concept-drift detection"""
-                min_clients = np.min(list(self.models_semi_convergence_min_n_training_clients.values()))
-                flag = True
-                for m in range(self.M):
-                    if not self.stop_cpd[m]:
-                        self.rounds_since_last_semi_convergence[m] += 1
-                        global_acc = np.array(self.relative_accuracy_gain_models[m][-self.tw[m]:])
-
-                        """Get losses"""
-                        losses = self.results_test_metrics[m]["Loss"][-self.tw[m]:]
 
                 print("semi convergen: ", self.models_semi_convergence_flag, self.models_semi_convergence_count, t)
                 print("semi conver prob: ", self.models_semi_convergence_training_probability)
@@ -719,7 +623,6 @@ class MultiFedSpeed(Server):
 
                 for i in range(len(self.selected_clients[m])):
                     client_id = self.selected_clients[m][i]
-                    self.clients_training_round_per_model[client_id][m].append(t)
                     self.clients[client_id].train(m, self.global_model[m], self.clients_cosine_similarities_with_current_model[m][client_id])
                     self.clients_training_count[m][client_id] += 1
                     self.current_training_class_count[m] += self.clients[client_id].train_class_count[m]
@@ -916,7 +819,7 @@ class MultiFedSpeed(Server):
         weighted_fscores = []
         for i in range(len(self.clients)):
             c = self.clients[i]
-            train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore, alpha = c.train_metrics(m, t)
+            train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore = c.train_metrics(m, t)
             accs.append(train_acc * train_num)
             num_samples.append(train_num)
             balanced_accs.append(train_balanced_acc * train_num)
@@ -946,7 +849,7 @@ class MultiFedSpeed(Server):
 
         return {'ids': ids, 'num_samples': num_samples, 'Accuracy': acc, "Loss": loss,
                 'Balanced accuracy': balanced_acc,
-                'Micro f1-score': micro_fscore, 'Macro f1-score': macro_fscore, 'Weighted f1-score': weighted_fscore, "Alpha": alpha}
+                'Micro f1-score': micro_fscore, 'Macro f1-score': macro_fscore, 'Weighted f1-score': weighted_fscore}
 
 
 

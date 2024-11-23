@@ -65,6 +65,8 @@ from flcore.servers.serveravgDBE import FedAvgDBE
 from flcore.servers.serveravg_with_fedpredict import MultiFedAvgWithFedPredict
 from flcore.servers.server_fedfairmmfl import FedFairMMFL
 from flcore.servers.server_multifedspeed import MultiFedSpeed
+from flcore.servers.server_multifedspeed_dynamic import MultiFedSpeedDynamic
+from flcore.servers.server_multifedspeed_relative import MultiFedSpeedRelative
 from flcore.servers.server_multifedspeed_deterministic_selection import MultiFedSpeed_Deterministic_Selection
 from flcore.servers.serveravg_rr import MultiFedAvgRR
 
@@ -418,11 +420,22 @@ def run(args):
                 model.fc = nn.Identity()
                 model = BaseHeadSplit(model, head)
                 server = MultiFedAvgRR
+            elif "MultiFedSpeedRelative" in args.algorithm:
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = MultiFedSpeedRelative
+            elif "MultiFedSpeedDynamic" in args.algorithm:
+                head = copy.deepcopy(model.fc)
+                model.fc = nn.Identity()
+                model = BaseHeadSplit(model, head)
+                server = MultiFedSpeedDynamic
             elif "MultiFedSpeed_D" in args.algorithm:
                 head = copy.deepcopy(model.fc)
                 model.fc = nn.Identity()
                 model = BaseHeadSplit(model, head)
                 server = MultiFedSpeed_Deterministic_Selection
+
             elif "MultiFedSpeed" in args.algorithm:
                 head = copy.deepcopy(model.fc)
                 model.fc = nn.Identity()
@@ -535,6 +548,8 @@ if __name__ == "__main__":
     parser.add_argument('-sg', "--sigma", type=float, default=1.0)
     # APFL
     parser.add_argument('-al', "--alpha", action="append")
+    parser.add_argument('-cd', "--concept_drift", default="")
+    parser.add_argument('-exp', "--concept_drift_experiment", default=1)
     # Ditto / FedRep
     parser.add_argument('-pls', "--plocal_epochs", type=int, default=1)
     # MOON

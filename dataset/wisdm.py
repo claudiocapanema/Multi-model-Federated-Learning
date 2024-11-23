@@ -109,7 +109,7 @@ def process_dataset(act_df: pandas.DataFrame, data_path: str, modality='watch'):
         pandas.DataFrame: The concatenated and merged DataFrame of accelerometer and gyroscope data.
     """
     dfs = []
-    data_path = "/home/claudio/Documentos/wisdm+smartphone+and+smartwatch+activity+and+biometrics+dataset (1)/wisdm-dataset"
+    data_path = "/home/claudio/Documentos/wisdm+smartphone+and+smartwatch+activity+and+biometrics+dataset/wisdm-dataset"
     for i in tqdm(range(1600, 1651)):
         df_wa = define_cols(
             pd.read_csv(f'{data_path}/raw/{modality}/accel/data_{i}_accel_{modality}.txt', header=None, sep=',|;',

@@ -49,7 +49,7 @@ class MultiFedAvg(Server):
 
 
                 for i in range(len(self.selected_clients[m])):
-                    self.clients[self.selected_clients[m][i]].train(m, self.global_model[m])
+                    self.clients[self.selected_clients[m][i]].train(m, self.global_model[m], t)
 
                 if t%self.eval_gap == 0:
                     print(f"\n-------------Round number: {t}-------------")

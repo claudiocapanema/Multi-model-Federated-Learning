@@ -109,13 +109,15 @@ class Server(object):
         self.uploaded_ids = []
         self.uploaded_models = []
 
-        self.train_metrics_names = ["Accuracy", "Loss", "Samples", "AUC", "Balanced accuracy", "Micro f1-score", "Weighted f1-score", "Macro f1-score", "Round", "Fraction fit", "# training clients"]
-        self.test_metrics_names = ["Accuracy", "Std Accuracy", "Loss", "Std loss", "AUC", "Balanced accuracy", "Micro f1-score", "Weighted f1-score", "Macro f1-score", "Round", "Fraction fit", "# training clients", "training clients and models", "model size"]
+        self.train_metrics_names = ["Accuracy", "Loss", "Samples", "AUC", "Balanced accuracy", "Micro f1-score", "Weighted f1-score", "Macro f1-score", "Round", "Fraction fit", "# training clients", "Alpha"]
+        self.test_metrics_names = ["Accuracy", "Std Accuracy", "Loss", "Std loss", "AUC", "Balanced accuracy", "Micro f1-score", "Weighted f1-score", "Macro f1-score", "Round", "Fraction fit", "# training clients", "training clients and models", "model size", "Alpha"]
         self.rs_test_acc = []
         self.rs_test_auc = []
         self.rs_train_loss = []
         self.results_train_metrics = {m: {metric: [] for metric in self.train_metrics_names} for m in range(self.M)}
+        self.results_train_metrics_w = {m: {metric: [] for metric in self.train_metrics_names} for m in range(self.M)}
         self.results_test_metrics = {m: {metric: [] for metric in self.test_metrics_names} for m in range(self.M)}
+        self.results_test_metrics_w = {m: {metric: [] for metric in self.test_metrics_names} for m in range(self.M)}
         self.clients_results_test_metrics = {m: {metric: [] for metric in self.test_metrics_names} for m in range(self.M)}
 
         self.times = times
@@ -311,10 +313,17 @@ class Server(object):
         model_path = os.path.join("models", self.dataset)
         model_path = os.path.join(model_path, self.algorithm + "_server" + ".pt")
         return os.path.exists(model_path)
-        
-    def save_results(self, m):
+
+    def get_results(self, m):
+
         algo = self.dataset[m] + "_" + self.algorithm
-        result_path = """../results/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(self.num_clients, self.alpha, self.dataset, self.models_names, self.args.join_ratio, self.args.global_rounds, self.local_epochs)
+        result_path = """../results/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(self.num_clients,
+                                                                                                   self.alpha,
+                                                                                                   self.dataset,
+                                                                                                   self.models_names,
+                                                                                                   self.args.join_ratio,
+                                                                                                   self.args.global_rounds,
+                                                                                                   self.local_epochs)
         if not os.path.exists(result_path):
             os.makedirs(result_path)
 
@@ -339,11 +348,59 @@ class Server(object):
 
                 data.append(row)
 
+            print("File path: " + file_path)
+            print(data)
+            print("me: ", self.rs_test_acc)
 
+            return file_path, header, data
+
+    def get_results_weighted(self, m):
+
+        algo = self.dataset[m] + "_" + self.algorithm + "_weighted"
+        result_path = """../results/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(self.num_clients,
+                                                                                                   self.alpha,
+                                                                                                   self.dataset,
+                                                                                                   self.models_names,
+                                                                                                   self.args.join_ratio,
+                                                                                                   self.args.global_rounds,
+                                                                                                   self.local_epochs)
+        if not os.path.exists(result_path):
+            os.makedirs(result_path)
+
+        if (len(self.rs_test_acc)):
+            algo = algo + "_" + self.goal + "_" + str(self.times)
+            file_path = result_path + "{}.csv".format(algo)
+            header = self.test_metrics_names
+            print(self.rs_test_acc)
+            print(self.rs_test_auc)
+            print(self.rs_train_loss)
+            list_of_metrics = []
+            for me in self.results_test_metrics_w[m]:
+                print(me, len(self.results_test_metrics_w[m][me]))
+                length = len(self.results_test_metrics_w[m][me])
+                list_of_metrics.append(self.results_test_metrics_w[m][me])
+
+            data = []
+            for i in range(length):
+                row = []
+                for j in range(len(list_of_metrics)):
+                    row.append(list_of_metrics[j][i])
+
+                data.append(row)
 
             print("File path: " + file_path)
             print(data)
             print("me: ", self.rs_test_acc)
+
+            return file_path, header, data
+        
+    def save_results(self, m):
+
+            file_path, header, data = self.get_results(m)
+            self.clients_test_metrics_preprocess(m, file_path)
+            self._write_header(file_path, header=header)
+            self._write_outputs(file_path, data=data)
+            file_path, header, data = self.get_results_weighted(m)
             self.clients_test_metrics_preprocess(m, file_path)
             self._write_header(file_path, header=header)
             self._write_outputs(file_path, data=data)
@@ -364,6 +421,15 @@ class Server(object):
             test_clients = self.clients
 
         num_samples = []
+        accs_w = []
+        std_accs_w = []
+        loss_w = []
+        std_losses_w = []
+        auc_w = []
+        balanced_acc_w = []
+        micro_fscore_w = []
+        weighted_fscore_w = []
+        macro_fscore_w = []
         accs = []
         std_accs = []
         loss = []
@@ -373,10 +439,11 @@ class Server(object):
         micro_fscore = []
         weighted_fscore = []
         macro_fscore = []
+        alpha_list = []
         for i in range(len(test_clients)):
             # if i in self.selected_clients[m] or t == 1:
             c = test_clients[i]
-            test_acc, test_loss, test_num, test_auc, test_balanced_acc, test_micro_fscore, test_macro_fscore, test_weighted_fscore = c.test_metrics(m, copy.deepcopy(self.global_model[m].to(self.device)))
+            test_acc, test_loss, test_num, test_auc, test_balanced_acc, test_micro_fscore, test_macro_fscore, test_weighted_fscore, alpha = c.test_metrics(m, copy.deepcopy(self.global_model[m].to(self.device)), t)
             self.clients_test_metrics[i]["Accuracy"][m].append(test_acc)
             self.clients_test_metrics[i]["Loss"][m].append(test_loss)
             self.clients_test_metrics[i]["Balanced accuracy"][m].append(test_balanced_acc)
@@ -394,16 +461,28 @@ class Server(object):
             # micro_fscore.append(test_micro_fscore*test_num)
             # weighted_fscore.append(test_weighted_fscore*test_num)
             # macro_fscore.append(test_macro_fscore*test_num)
-            accs.append(test_acc * test_num)
-            std_accs.append(test_acc * test_num)
-            auc.append(test_auc * test_num)
+            accs_w.append(test_acc * test_num)
+            std_accs_w.append(test_acc * test_num)
+            auc_w.append(test_auc * test_num)
             num_samples.append(test_num)
-            loss.append(test_loss * test_num)
-            std_losses.append(test_loss * test_num)
-            balanced_acc.append(test_balanced_acc * test_num)
-            micro_fscore.append(test_micro_fscore * test_num)
-            weighted_fscore.append(test_weighted_fscore * test_num)
-            macro_fscore.append(test_macro_fscore * test_num)
+            loss_w.append(test_loss * test_num)
+            std_losses_w.append(test_loss * test_num)
+            balanced_acc_w.append(test_balanced_acc * test_num)
+            micro_fscore_w.append(test_micro_fscore * test_num)
+            weighted_fscore_w.append(test_weighted_fscore * test_num)
+            macro_fscore_w.append(test_macro_fscore * test_num)
+
+            accs.append(test_acc)
+            std_accs.append(test_acc)
+            auc.append(test_auc)
+            # num_samples.append(test_num)
+            loss.append(test_loss)
+            std_losses.append(test_loss)
+            balanced_acc.append(test_balanced_acc)
+            micro_fscore.append(test_micro_fscore)
+            weighted_fscore.append(test_weighted_fscore)
+            macro_fscore.append(test_macro_fscore)
+            alpha_list.append(alpha)
 
             # print(test_num)
             # exit()
@@ -411,19 +490,35 @@ class Server(object):
         ids = [c.id for c in test_clients]
 
         decimals = 5
-        acc = round(sum(accs) / sum(num_samples), decimals)
-        std_acc = np.round(np.std(np.array(std_accs) / sum(num_samples)), decimals)
-        auc = round(sum(auc) / sum(num_samples), decimals)
-        loss = round(sum(loss) / sum(num_samples), decimals)
-        std_loss = np.round(np.std(np.array(std_losses) / sum(num_samples)), decimals)
-        balanced_acc = round(sum(balanced_acc) / sum(num_samples), decimals)
-        micro_fscore = round(sum(micro_fscore) / sum(num_samples), decimals)
-        weighted_fscore = round(sum(weighted_fscore) / sum(num_samples), decimals)
-        macro_fscore = round(sum(macro_fscore) / sum(num_samples), decimals)
+        acc_w = round(sum(accs_w) / sum(num_samples), decimals)
+        std_acc_w = np.round(np.std(np.array(std_accs_w) / sum(num_samples)), decimals)
+        auc_w = round(sum(auc_w) / sum(num_samples), decimals)
+        loss_w = round(sum(loss_w) / sum(num_samples), decimals)
+        std_loss_w = np.round(np.std(np.array(std_losses_w) / sum(num_samples)), decimals)
+        balanced_acc_w = round(sum(balanced_acc_w) / sum(num_samples), decimals)
+        micro_fscore_w = round(sum(micro_fscore_w) / sum(num_samples), decimals)
+        weighted_fscore_w = round(sum(weighted_fscore_w) / sum(num_samples), decimals)
+        macro_fscore_w = round(sum(macro_fscore_w) / sum(num_samples), decimals)
 
-        return {'ids': ids, 'num_samples': num_samples, 'Accuracy': acc, "Std Accuracy": std_acc, 'AUC': auc,
+        acc = round(np.mean(accs), decimals)
+        std_acc = np.round(np.std(np.array(std_accs)), decimals)
+        auc = round(np.mean(auc), decimals)
+        loss = round(np.mean(loss), decimals)
+        std_loss = np.round(np.std(np.array(std_losses)), decimals)
+        balanced_acc = round(np.mean(balanced_acc), decimals)
+        micro_fscore = round(np.mean(micro_fscore), decimals)
+        weighted_fscore = round(np.mean(weighted_fscore), decimals)
+        macro_fscore = round(np.mean(macro_fscore), decimals)
+
+        server_metrics = {'ids': ids, 'num_samples': num_samples, 'Accuracy': acc, "Std Accuracy": std_acc, 'AUC': auc,
                 "Loss": loss, "Std loss": std_loss, "Balanced accuracy": balanced_acc, "Micro f1-score": micro_fscore,
-                "Weighted f1-score": weighted_fscore, "Macro f1-score": macro_fscore}
+                "Weighted f1-score": weighted_fscore, "Macro f1-score": macro_fscore, "Alpha": alpha_list[0]}
+
+        server_metrics_weighted = {'ids': ids, 'num_samples': num_samples, 'Accuracy': acc_w, "Std Accuracy": std_acc_w, 'AUC': auc_w,
+                "Loss": loss_w, "Std loss": std_loss_w, "Balanced accuracy": balanced_acc_w, "Micro f1-score": micro_fscore_w,
+                "Weighted f1-score": weighted_fscore_w, "Macro f1-score": macro_fscore_w, "Alpha": alpha_list[0]}
+
+        return server_metrics, server_metrics_weighted
 
     def train_metrics(self, m, t):
         if self.eval_new_clients and self.num_new_clients > 0:
@@ -439,7 +534,7 @@ class Server(object):
         for i in range(len(self.clients)):
             c = self.clients[i]
             if i in self.selected_clients[m] or t == 1:
-                train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore = c.train_metrics(m)
+                train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore, alpha = c.train_metrics(m, t)
                 accs.append(train_acc * train_num)
                 num_samples.append(train_num)
                 balanced_accs.append(train_balanced_acc * train_num)
@@ -468,16 +563,23 @@ class Server(object):
         weighted_fscore = round(sum(weighted_fscores) / sum(num_samples), decimals)
 
         return {'ids': ids, 'num_samples': num_samples, 'Accuracy': acc, "Loss": loss, 'Balanced accuracy': balanced_acc,
-                'Micro f1-score': micro_fscore, 'Macro f1-score': macro_fscore, 'Weighted f1-score': weighted_fscore}
+                'Micro f1-score': micro_fscore, 'Macro f1-score': macro_fscore, 'Weighted f1-score': weighted_fscore, "Alpha": alpha}
 
     # evaluate selected clients
     def evaluate(self, m, t, acc=None, loss=None):
-        test_metrics = self.test_metrics(m, t)
+        test_metrics, test_metrics_w = self.test_metrics(m, t)
         test_acc = test_metrics['Accuracy']
         test_std_acc = test_metrics["Std Accuracy"]
         test_std_loss = test_metrics["Std loss"]
         test_loss = test_metrics['Loss']
         test_auc = test_metrics['AUC']
+
+        test_acc_w = test_metrics_w['Accuracy']
+        test_std_acc_w = test_metrics_w["Std Accuracy"]
+        test_std_loss_w = test_metrics_w["Std loss"]
+        test_loss_w = test_metrics_w['Loss']
+        test_auc_w = test_metrics_w['AUC']
+
         train_metrics = self.train_metrics(m, t)
         if train_metrics is not None:
             self.past_train_metrics_m[m] = train_metrics
@@ -495,10 +597,12 @@ class Server(object):
             if metric in ['ids', 'num_samples']:
                 continue
             self.results_test_metrics[m][metric].append(test_metrics[metric])
+            self.results_test_metrics_w[m][metric].append(test_metrics_w[metric])
         for metric in train_metrics:
             if metric in ['ids', 'num_samples']:
                 continue
             self.results_train_metrics[m][metric].append(train_metrics[metric])
+            # self.results_train_metrics_w[m][metric].append(train_metrics_w[metric])
         self.results_train_metrics[m]['Round'].append(t)
         self.results_train_metrics[m]['Fraction fit'].append(self.join_ratio)
         self.results_train_metrics[m]['# training clients'].append(len(self.selected_clients[m]))
@@ -507,7 +611,15 @@ class Server(object):
         self.results_test_metrics[m]['Fraction fit'].append(self.join_ratio)
         self.results_test_metrics[m]['# training clients'].append(len(self.selected_clients[m]))
         self.results_test_metrics[m]['training clients and models'].append(list(self.selected_clients[m]))
+        # print("ddd: ", self.models_size)
         self.results_test_metrics[m]['model size'].append(self.models_size[m])
+
+        self.results_test_metrics_w[m]['Round'].append(t)
+        self.results_test_metrics_w[m]['Fraction fit'].append(self.join_ratio)
+        self.results_test_metrics_w[m]['# training clients'].append(len(self.selected_clients[m]))
+        self.results_test_metrics_w[m]['training clients and models'].append(list(self.selected_clients[m]))
+        # print("ddd: ", self.models_size)
+        self.results_test_metrics_w[m]['model size'].append(self.models_size[m])
 
         
         if acc == None:
@@ -522,16 +634,18 @@ class Server(object):
 
         print("Evaluate model {}".format(m))
         print("Averaged Train Loss: {:.4f}".format(train_loss))
-        print("Averaged Test Accurancy: {:.4f}".format(test_acc))
+        print("Averaged Test Accuracy: {:.4f}".format(test_acc))
+        print("Averaged Test Accuracy w: {:.4f}".format(test_acc_w))
         print("Averaged Test Loss: {:.4f}".format(test_loss))
+        print("Averaged Test Loss w: {:.4f}".format(test_loss_w))
         print("Averaged Test AUC: {:.4f}".format(test_auc))
         # self.print_(test_acc, train_acc, train_loss)
-        print("Std Test Accurancy: {:.4f}".format(test_std_acc))
+        print("Std Test Accuracy: {:.4f}".format(test_std_acc))
         print("Std Test Loss: {:.4f}".format(test_std_loss))
         print("Std Test AUC: {:.4f}".format(np.std(test_auc)))
 
     def print_(self, test_acc, test_auc, train_loss):
-        print("Average Test Accurancy: {:.4f}".format(test_acc))
+        print("Average Test Accuracy: {:.4f}".format(test_acc))
         print("Average Test AUC: {:.4f}".format(test_auc))
         print("Average Train Loss: {:.4f}".format(train_loss))
 

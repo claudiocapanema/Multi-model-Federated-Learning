@@ -343,7 +343,7 @@ class ManageDatasets():
     def load_imagenet(self, name):
 
         num_clients = 40
-        alpha = 0.1
+        alpha = 100.0
         dir_path = name + "/clients_" + str(num_clients) + "/alpha_" + str(alpha) + "/"
 
         if not os.path.exists(dir_path):

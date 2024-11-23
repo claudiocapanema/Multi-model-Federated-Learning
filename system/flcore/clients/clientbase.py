@@ -49,10 +49,11 @@ class Client(object):
         self.model = copy.deepcopy(args.model)
         self.algorithm = args.algorithm
         self.dataset = args.dataset
+        self.alpha = [args.alpha[i] for i in range(self.M)]
         self.device = args.device
         self.id = id  # integer
         self.save_folder_name = args.save_folder_name
-
+        self.current_alpha = copy.deepcopy(self.alpha)
         self.num_classes = args.num_classes
         self.train_samples = train_samples
         self.test_samples = test_samples
@@ -61,20 +62,31 @@ class Client(object):
         self.local_epochs = args.local_epochs
         self.testloaderfull = []
         self.trainloader = []
+        self.update_loader = [False for j in range(self.M)]
         self.train_class_count = [np.array([0 for j in range(self.num_classes[i])]) for i in range(self.M)]
         self.test_loss = [[] for m in range(self.M)]
-
+        self.experiment_config_df = pd.read_csv(
+            """../concept_drift_configs/rounds_{}/datasets_{}/experiment_{}.csv""".format(self.args.global_rounds,
+                                                                                          self.dataset,
+                                                                                          self.args.concept_drift_experiment))
         # check BatchNorm
         self.has_BatchNorm = False
         for m in range(self.M):
             print(self.model)
-            self.testloaderfull.append(self.load_test_data(m))
-            train, self.train_class_count[m] = self.load_train_data(m)
+            self.testloaderfull.append(self.load_test_data(m, 1))
+            train, self.train_class_count[m] = self.load_train_data(m, 1)
             self.trainloader.append(train)
             for layer in self.model[m].children():
                 if isinstance(layer, nn.BatchNorm2d):
                     self.has_BatchNorm = True
                     break
+
+        # self.concept_drift_config = {m: {"concept_dirft_round": None, "alpha": None} for m in range(self.M)}
+        # self.concept_drift_config[0]["concept_drift_round"] = int(self.args.global_rounds*self.args.concept_drift_rounds_percent)
+        # self.concept_drift_config[0]["alpha"] = 1.0
+        # self.concept_drift_config[1]["concept_drift_round"] = int(self.args.global_rounds*self.args.concept_drift_rounds_percent)
+        # self.concept_drift_config[1]["alpha"] = 1.0
+        
 
         self.train_slow = kwargs['train_slow']
         self.send_slow = kwargs['send_slow']
@@ -106,15 +118,16 @@ class Client(object):
         self.test_metrics_list_dict = [{} for m in range(self.M)]
         self.train_metrics_list_dict = [{} for m in range(self.M)]
 
+
         for m in range(self.M):
-            trainloader, self.train_class_count[m] = self.load_train_data(m)
+            trainloader, self.train_class_count[m] = self.load_train_data(m, 1)
 
             print("Cliente: ", self.id, " modelo: ", m, " train class count: ", self.train_class_count[m])
 
-    def load_wisdm(self, m, name, mode="train", batch_size=32, dataset_name=None):
+    def load_wisdm(self, m, name, alpha, mode="train", batch_size=32, dataset_name=None):
 
         try:
-            dir_path = "../dataset/" + name + "/" + "clients_" + str(self.args.num_clients) + "/alpha_" + str(self.args.alpha[m]) + "/"
+            dir_path = "../dataset/" + name + "/" + "clients_" + str(self.args.num_clients) + "/alpha_" + str(alpha) + "/"
             filename_train = dir_path + """train/idx_train_{}.csv""".format(self.id)
             filename_test = dir_path + "test/idx_test_{}.csv""".format(self.id)
             cid = self.id
@@ -198,11 +211,11 @@ class Client(object):
             print("load WISDM client base")
             print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
 
-    def load_imagenet(self, name, m, mode="train", batch_size=32, ):
+    def load_imagenet(self, name, m, alpha, t, mode="train", batch_size=32, ):
 
         try:
-            dir_path = "../dataset/" + name + "/" + "clients_" + str(self.args.num_clients) + "/alpha_" + str(self.args.alpha[m]) + "/"
-            traindir = """/home/claudio/Documentos/pycharm_projects/Multi-model-Federated-Learning/dataset/{}/clients_40/alpha_{}/rawdata/{}/train/""".format(name, self.args.alpha[m], name)
+            dir_path = "../dataset/" + name + "/" + "clients_" + str(self.args.num_clients) + "/alpha_" + str(alpha) + "/"
+            traindir = """/home/claudio/Documentos/pycharm_projects/Multi-model-Federated-Learning/dataset/{}/clients_40/alpha_{}/rawdata/{}/train/""".format(name, alpha, name)
             filename_train = dir_path + """train/idx_train_{}.pickle""".format(self.id)
             filename_test = dir_path + "test/idx_test_{}.pickle""".format(self.id)
 
@@ -320,6 +333,10 @@ class Client(object):
                                      generator=g)
             testLoader = DataLoader(dataset=validation_dataset, batch_size=32, shuffle=False)
 
+            if self.id == 10:
+
+                print("Cliente 10 rodada ", t, " alpha: ", alpha, " dataset: ", name, " value counts: ", pd.Series(y_test).value_counts())
+
             if mode == "train":
                 return trainLoader, unique_count
             else:
@@ -329,22 +346,33 @@ class Client(object):
             print("load ImageNet")
             print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
 
-    def load_train_data(self, m, batch_size=None):
+    def load_train_data(self, m, t, batch_size=None):
+
+        alpha = self.alpha[m]
+        if bool(self.args.concept_drift):
+            alpha = float(self.experiment_config_df.query("""Dataset == '{}' and Round == {}""".format(self.dataset[m], t))["Alpha"])
+            self.current_alpha[m] = alpha
         if self.dataset[m] in ["WISDM-W", "WISDM-P"]:
-            return self.load_wisdm(m,name=self.dataset[m],  mode='train')
+            return self.load_wisdm(m=m, alpha=alpha, name=self.dataset[m],  mode='train')
         elif "ImageNet" in self.dataset[m]:
-            return self.load_imagenet(self.dataset[m], m, mode='train')
+            return self.load_imagenet(self.dataset[m], m=m, alpha=alpha, t=t, mode='train')
         else:
             if batch_size == None:
                 batch_size = self.batch_size
             train_data, unique_count = read_client_data(m, self.id, args=self.args, is_train=True)
             return DataLoader(train_data, batch_size, drop_last=True, shuffle=True), unique_count
 
-    def load_test_data(self, m, batch_size=None):
+    def load_test_data(self, m, t, batch_size=None):
+        alpha = self.alpha[m]
+        if bool(self.args.concept_drift):
+            alpha = float(
+                self.experiment_config_df.query("""Dataset == '{}' and Round == {}""".format(self.dataset[m], t))[
+                    "Alpha"])
+            self.current_alpha[m] = alpha
         if self.dataset[m] in ["WISDM-W", "WISDM-P"]:
-            return self.load_wisdm(m, name=self.dataset[m], mode='test')
+            return self.load_wisdm(m=m, name=self.dataset[m], alpha=alpha, mode='test')
         elif "ImageNet" in self.dataset[m]:
-            return self.load_imagenet(self.dataset[m], m, mode='test')
+            return self.load_imagenet(name=self.dataset[m], m=m, alpha=alpha, t=t, mode='test')
         else:
             if batch_size == None:
                 batch_size = self.batch_size
@@ -371,13 +399,24 @@ class Client(object):
         for param, new_param in zip(model.parameters(), new_params):
             param.data = new_param.data.clone()
 
-    def test_metrics(self, m, model):
+    def test_metrics(self, m, model, t):
 
         g = torch.Generator()
         g.manual_seed(self.id)
         random.seed(self.id)
         np.random.seed(self.id)
         torch.manual_seed(self.id)
+        if bool(self.args.concept_drift):
+            alpha = float(
+                self.experiment_config_df.query("""Dataset == '{}' and Round == {}""".format(self.dataset[m], t))[
+                    "Alpha"])
+            if self.alpha[m] != alpha:
+                self.alpha[m] = alpha
+                self.update_loader[m] = True
+                self.testloaderfull[m] = self.load_test_data(m, t)
+                self.trainloader[m], self.train_class_count[m] = self.load_train_data(m, t)
+            else:
+                self.update_loader[m] = False
         testloaderfull = self.testloaderfull[m]
         g = torch.Generator()
         g.manual_seed(self.id)
@@ -454,16 +493,28 @@ class Client(object):
                 test_balanced_acc,
                 test_micro_fscore,
                 test_macro_fscore,
-                test_weighted_fscore)
+                test_weighted_fscore,
+                self.current_alpha[m])
 
-    def train_metrics(self, m):
+    def train_metrics(self, m, t):
 
         g = torch.Generator()
         g.manual_seed(self.id)
         random.seed(self.id)
         np.random.seed(self.id)
         torch.manual_seed(self.id)
-        trainloader, self.train_class_count[m] = self.load_train_data(m)
+        if bool(self.args.concept_drift):
+            alpha = float(
+                self.experiment_config_df.query("""Dataset == '{}' and Round == {}""".format(self.dataset[m], t))[
+                    "Alpha"])
+            if self.alpha[m] != alpha:
+                self.alpha[m] = alpha
+                self.update_loader[m] = True
+                self.testloaderfull[m] = self.load_test_data(m, t)
+                self.trainloader[m], self.train_class_count[m] = self.load_train_data(m, t)
+            else:
+                self.update_loader[m] = False
+        trainloader = self.trainloader[m]
         g = torch.Generator()
         g.manual_seed(self.id)
         random.seed(self.id)
@@ -527,7 +578,7 @@ class Client(object):
                                            'Balanced accuracy': train_balanced_acc, 'Micro f1-score': train_micro_fscore,
                                            'Macro f1-score': train_macro_fscore, 'Weighted f1-score': train_weighted_fscore}
 
-        return train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore
+        return train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore, self.current_alpha[m]
 
     # def get_next_train_batch(self):
     #     try:
