@@ -317,13 +317,15 @@ class Server(object):
     def get_results(self, m):
 
         algo = self.dataset[m] + "_" + self.algorithm
-        result_path = """../results/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(self.num_clients,
-                                                                                                   self.alpha,
-                                                                                                   self.dataset,
-                                                                                                   self.models_names,
-                                                                                                   self.args.join_ratio,
-                                                                                                   self.args.global_rounds,
-                                                                                                   self.local_epochs)
+        cd = bool(self.args.concept_drift)
+        result_path = """../results/concept_drift_{}/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(cd,
+                                                                                                                    self.num_clients,
+                                                                                                                   self.alpha,
+                                                                                                                   self.dataset,
+                                                                                                                   self.models_names,
+                                                                                                                   self.args.join_ratio,
+                                                                                                                   self.args.global_rounds,
+                                                                                                                   self.local_epochs)
         if not os.path.exists(result_path):
             os.makedirs(result_path)
 
