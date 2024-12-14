@@ -39,7 +39,7 @@ class ClientAvgWithFedPredict(clientAVG):
         # combined_model = fedpredict_client_torch(local_model=self.model[m], global_model=global_model,
         #                                          t=t, T=100, nt=nt)
         # self.set_parameters(m, combined_model)
-        return super().train(m, global_model)
+        return super().train(m, global_model, t)
 
     def set_parameters_combined_model(self, m, model):
         for new_param, old_param in zip(model.parameters(), self.combined_model[m].parameters()):
@@ -51,7 +51,7 @@ class ClientAvgWithFedPredict(clientAVG):
         combined_model = fedpredict_client_torch(local_model=self.model[m], global_model=global_model,
                                   t=t, T=100, nt=nt)
         self.set_parameters_combined_model(m, combined_model)
-        testloaderfull = self.load_test_data(m)
+        testloaderfull = self.load_test_data(m, t)
         # self.model = self.load_model('model')
         # self.model.to(self.device)
         # self.set_parameters(m, model)
@@ -70,7 +70,9 @@ class ClientAvgWithFedPredict(clientAVG):
                     x[0] = x[0].to(self.device)
                 else:
                     x = x.to(self.device)
-                y = y.to(self.device)
+                if type(y) == tuple:
+                    y = torch.from_numpy(np.array(list(y), dtype=np.int32))
+                y = y.type(torch.LongTensor).to(self.device)
                 output = self.combined_model[m](x)
                 loss = self.loss(output, y)
                 test_loss += loss.item() * y.shape[0]
@@ -87,31 +89,39 @@ class ClientAvgWithFedPredict(clientAVG):
                     lb = lb[:, :2]
                 y_true.append(lb)
 
-        # self.model.cpu()
-        # self.save_model(self.model, 'model')
+                # self.model.cpu()
+                # self.save_model(self.model, 'model')
 
-        test_loss = test_loss / test_num
+            test_loss = test_loss / test_num
 
-        y_prob = np.concatenate(y_prob, axis=0)
-        y_true = np.concatenate(y_true, axis=0)
-        test_auc = metrics.roc_auc_score(y_true, y_prob, average='micro')
+            y_prob = np.concatenate(y_prob, axis=0)
+            y_true = np.concatenate(y_true, axis=0)
+            test_auc = metrics.roc_auc_score(y_true, y_prob, average='micro')
 
-        y_prob = y_prob.argmax(axis=1)
-        y_true = y_true.argmax(axis=1)
+            y_prob = y_prob.argmax(axis=1)
+            y_true = y_true.argmax(axis=1)
 
-        test_acc = test_acc / test_num
-        test_balanced_acc = metrics.balanced_accuracy_score(y_true, y_prob)
-        test_micro_fscore = metrics.f1_score(y_true, y_prob, average='micro')
-        test_macro_fscore = metrics.f1_score(y_true, y_prob, average='macro')
-        test_weighted_fscore = metrics.f1_score(y_true, y_prob, average='weighted')
+            test_acc = test_acc / test_num
+            test_balanced_acc = metrics.balanced_accuracy_score(y_true, y_prob)
+            test_micro_fscore = metrics.f1_score(y_true, y_prob, average='micro')
+            test_macro_fscore = metrics.f1_score(y_true, y_prob, average='macro')
+            test_weighted_fscore = metrics.f1_score(y_true, y_prob, average='weighted')
 
-        # print(self.dataset[m], " micro: ", test_micro_fscore, test_acc)
+            self.test_loss[m].append(test_loss)
 
-        return (test_acc,
-                test_loss,
-                test_num,
-                test_auc,
-                test_balanced_acc,
-                test_micro_fscore,
-                test_macro_fscore,
-                test_weighted_fscore)
+            self.test_metrics_list_dict[m] = {'ids': self.id, 'Accuracy': test_acc, 'AUC': test_auc,
+                                              "Loss": test_loss, "Samples": test_num,
+                                              "Balanced accuracy": test_balanced_acc,
+                                              "Micro f1-score": test_micro_fscore,
+                                              "Weighted f1-score": test_weighted_fscore,
+                                              "Macro f1-score": test_macro_fscore}
+
+            return (test_acc,
+                    test_loss,
+                    test_num,
+                    test_auc,
+                    test_balanced_acc,
+                    test_micro_fscore,
+                    test_macro_fscore,
+                    test_weighted_fscore,
+                    self.current_alpha[m])

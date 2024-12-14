@@ -2,10 +2,11 @@ import os
 import zipfile
 import pandas as pd
 
+v = "v1"
 source = "/home/claudio/Documentos/imagenet-object-localization-challenge.zip"
-destination = "/home/claudio/Documentos/ImageNet_objects/"
+destination = "/home/claudio/Documentos/ImageNet_objects/" + v + "/"
 
-imagenet_classes_file = "imagenet classes.csv"
+imagenet_classes_file = "imagenet classes_15_" + v+ ".csv"
 
 df = pd.read_csv(imagenet_classes_file)
 names = df['folder_name'].tolist()

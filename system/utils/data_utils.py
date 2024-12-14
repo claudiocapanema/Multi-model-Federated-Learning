@@ -33,7 +33,7 @@ import torchvision.datasets as datasets
 
 def read_data(dataset, idx, args, alpha, is_train=True):
     if is_train:
-        path = """../dataset/{}/clients_{}/alpha_{}/train/""".format(dataset, args.num_clients,alpha)
+        path = """../dataset/{}/clients_{}/alpha_{}/train/""".format(dataset, args.num_clients, alpha)
         train_data_dir = path
 
         train_file = train_data_dir + str(idx) + '.npz'
@@ -141,123 +141,123 @@ def load_wisdm(m, name, cid, args, mode="train", batch_size=32, dataset_name=Non
         print("load WISDM")
         print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
 
-    def load_imagenet(self, m, mode="train", batch_size=32, dataset_name=None):
-
-        try:
-            dir_path = "../dataset/ImageNet/" + "clients_" + str(self.args.num_clients) + "/alpha_" + str(self.args.alpha[m]) + "/" + "client_" + str(
-                self.id) + "/"
-            traindir = """/home/claudio/Documentos/pycharm_projects/Multi-model-Federated-Learning/dataset/ImageNet/clients_40/alpha_5.0/rawdata/ImageNet/train/"""
-            filename_train = dir_path + """train/idx_train_{}.pickle""".format(self.id)
-            filename_test = dir_path + "test/idx_test_{}.picle""".format(self.id)
-
-            transmforms = {'train': transforms.Compose(
-                    [
-
-                        transforms.Resize((32, 32)),
-                        transforms.RandomHorizontalFlip(),  # FLips the image w.r.t horizontal axis
-                        transforms.RandomRotation(10),  # Rotates the image to a specified angel
-                        transforms.RandomAffine(0, shear=10, scale=(0.8, 1.2)),
-                        # Performs actions like zooms, change shear angles.
-                        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
-                        transforms.ToTensor(),
-                        transforms.Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
-                    ]
-                ), 'test': transforms.Compose(
-                    [
-
-                        transforms.Resize((32, 32)),
-                        transforms.ToTensor(),
-                        transforms.Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
-                    ]
-                )}[mode]
-
-            training_dataset = datasets.ImageFolder(
-                traindir,
-                transmforms
-            )
-
-            validation_dataset = datasets.ImageFolder(
-                traindir,
-                transmforms
-            )
-
-            np.random.seed(self.id)
-
-            dataset_image = []
-            dataset_samples = []
-            dataset_label = []
-            dataset_samples.extend(training_dataset.samples)
-            dataset_image.extend(training_dataset.imgs)
-            dataset_label.extend(training_dataset.targets)
-
-            with open(filename_train, 'rb') as handle:
-                idx_train = pickle.load(handle)
-
-            with open(filename_test, 'rb') as handle:
-                idx_test = pickle.load(handle)
-
-
-            # print("tipo: ", type(training_dataset.imgs), type(training_dataset.targets), type(training_dataset.samples))
-            imgs = training_dataset.imgs
-            x_train = []
-            x_test = []
-            y_train = []
-            y_test = []
-            for i in range(1):
-                x_train += training_dataset.samples
-                x_test += training_dataset.samples
-                y_train += training_dataset.targets
-                y_test += training_dataset.targets
-
-            x_train = np.array(x_train)
-            y_train = np.array(y_train)
-            x_test = np.array(x_test)
-            y_test = np.array(y_test)
-            x_train = x_train[idx_train]
-            y_train = y_train[idx_train]
-            x_test = x_test[idx_test]
-            y_test = y_test[idx_test]
-
-            training_dataset.samples = list(x_train)
-            training_dataset.targets = list(y_train)
-            validation_dataset.samples = list(x_test)
-            validation_dataset.targets = list(y_test)
-
-
-            # validation_dataset.imgs = list(imgs_test)
-
-            def seed_worker(worker_id):
-                np.random.seed(self.cid)
-                random.seed(self.cid)
-
-            g = torch.Generator()
-            g.manual_seed(self.cid)
-
-            unique_count = {i: 0 for i in range(self.args.num_classes[m])}
-            unique, count = np.unique(y, return_counts=True)
-            data_unique_count_dict = dict(zip(unique, count))
-            for class_ in data_unique_count_dict:
-                unique_count[class_] = data_unique_count_dict[class_]
-            unique_count = np.array(list(unique_count.values()))
-
-            trainLoader = DataLoader(training_dataset, batch_size, shuffle=True, worker_init_fn=seed_worker,
-                                     generator=g)
-            testLoader = DataLoader(dataset=validation_dataset, batch_size=32, shuffle=False)
-
-            if mode == "train":
-                return trainLoader, unique_count
-            else:
-                return testLoader
-
-        except Exception as e:
-            print("load ImageNet")
-            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
+# def load_imagenet(self, m, mode="train", batch_size=32, dataset_name=None):
+#
+#     try:
+#         dir_path = "../dataset/ImageNet/" + "clients_" + str(self.args.num_clients) + "/alpha_" + str(self.args.alpha[m]) + "/" + "client_" + str(
+#             self.id) + "/"
+#         traindir = """/home/claudio/Documentos/pycharm_projects/Multi-model-Federated-Learning/dataset/ImageNet/clients_40/alpha_5.0/rawdata/ImageNet/train/"""
+#         filename_train = dir_path + """train/idx_train_{}.pickle""".format(self.id)
+#         filename_test = dir_path + "test/idx_test_{}.picle""".format(self.id)
+#
+#         transmforms = {'train': transforms.Compose(
+#                 [
+#
+#                     transforms.Resize((32, 32)),
+#                     transforms.RandomHorizontalFlip(),  # FLips the image w.r.t horizontal axis
+#                     transforms.RandomRotation(10),  # Rotates the image to a specified angel
+#                     transforms.RandomAffine(0, shear=10, scale=(0.8, 1.2)),
+#                     # Performs actions like zooms, change shear angles.
+#                     transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+#                     transforms.ToTensor(),
+#                     transforms.Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
+#                 ]
+#             ), 'test': transforms.Compose(
+#                 [
+#
+#                     transforms.Resize((32, 32)),
+#                     transforms.ToTensor(),
+#                     transforms.Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
+#                 ]
+#             )}[mode]
+#
+#         training_dataset = datasets.ImageFolder(
+#             traindir,
+#             transmforms
+#         )
+#
+#         validation_dataset = datasets.ImageFolder(
+#             traindir,
+#             transmforms
+#         )
+#
+#         np.random.seed(self.id)
+#
+#         dataset_image = []
+#         dataset_samples = []
+#         dataset_label = []
+#         dataset_samples.extend(training_dataset.samples)
+#         dataset_image.extend(training_dataset.imgs)
+#         dataset_label.extend(training_dataset.targets)
+#
+#         with open(filename_train, 'rb') as handle:
+#             idx_train = pickle.load(handle)
+#
+#         with open(filename_test, 'rb') as handle:
+#             idx_test = pickle.load(handle)
+#
+#
+#         # print("tipo: ", type(training_dataset.imgs), type(training_dataset.targets), type(training_dataset.samples))
+#         imgs = training_dataset.imgs
+#         x_train = []
+#         x_test = []
+#         y_train = []
+#         y_test = []
+#         for i in range(1):
+#             x_train += training_dataset.samples
+#             x_test += training_dataset.samples
+#             y_train += training_dataset.targets
+#             y_test += training_dataset.targets
+#
+#         x_train = np.array(x_train)
+#         y_train = np.array(y_train)
+#         x_test = np.array(x_test)
+#         y_test = np.array(y_test)
+#         x_train = x_train[idx_train]
+#         y_train = y_train[idx_train]
+#         x_test = x_test[idx_test]
+#         y_test = y_test[idx_test]
+#
+#         training_dataset.samples = list(x_train)
+#         training_dataset.targets = list(y_train)
+#         validation_dataset.samples = list(x_test)
+#         validation_dataset.targets = list(y_test)
+#
+#
+#         # validation_dataset.imgs = list(imgs_test)
+#
+#         def seed_worker(worker_id):
+#             np.random.seed(self.cid)
+#             random.seed(self.cid)
+#
+#         g = torch.Generator()
+#         g.manual_seed(self.cid)
+#
+#         unique_count = {i: 0 for i in range(self.args.num_classes[m])}
+#         unique, count = np.unique(y, return_counts=True)
+#         data_unique_count_dict = dict(zip(unique, count))
+#         for class_ in data_unique_count_dict:
+#             unique_count[class_] = data_unique_count_dict[class_]
+#         unique_count = np.array(list(unique_count.values()))
+#
+#         trainLoader = DataLoader(training_dataset, batch_size, shuffle=True, worker_init_fn=seed_worker,
+#                                  generator=g)
+#         testLoader = DataLoader(dataset=validation_dataset, batch_size=32, shuffle=False)
+#
+#         if mode == "train":
+#             return trainLoader, unique_count
+#         else:
+#             return testLoader
+#
+#     except Exception as e:
+#         print("load ImageNet")
+#         print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
 
 def load_imagenet(m, cid, args, mode="train", batch_size=32, dataset_name=None):
 
     try:
         dir_path = "../dataset/ImageNet/" + "clients_" + str(args.num_clients) + "/alpha_" + str(args.alpha[m]) + "/"
-        traindir = """/home/claudio/Documentos/pycharm_projects/Multi-model-Federated-Learning/dataset/ImageNet/clients_40/alpha_5.0/rawdata/ImageNet/train/"""
+        traindir = """../dataset/ImageNet/rawdata/ImageNet/train/"""
         filename_train = dir_path + """train/idx_train_{}.pickle""".format(cid)
         filename_test = dir_path + "test/idx_test_{}.pickle""".format(cid)
 
@@ -293,7 +293,6 @@ def load_imagenet(m, cid, args, mode="train", batch_size=32, dataset_name=None):
         )
 
         np.random.seed(cid)
-
         dataset_image = []
         dataset_samples = []
         dataset_label = []
@@ -359,7 +358,7 @@ def load_imagenet(m, cid, args, mode="train", batch_size=32, dataset_name=None):
             return testLoader
 
     except Exception as e:
-        print("load ImageNet")
+        print("load ImageNet data utils")
         print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
 
 def read_client_data(m, idx, args={}, is_train=True):
@@ -381,7 +380,6 @@ def read_client_data(m, idx, args={}, is_train=True):
         X_train = torch.Tensor(train_data['x']).type(torch.float32)
         y_train = torch.Tensor(train_data['y']).type(torch.int64)
         y = train_data['y']
-        print("client ", idx, len(y))
         train_data = [(x, y) for x, y in zip(X_train, y_train)]
         unique, count = np.unique(y, return_counts=True)
         data_unique_count_dict = dict(zip(unique, count))

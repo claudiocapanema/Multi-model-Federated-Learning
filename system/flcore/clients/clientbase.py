@@ -65,10 +65,19 @@ class Client(object):
         self.update_loader = [False for j in range(self.M)]
         self.train_class_count = [np.array([0 for j in range(self.num_classes[i])]) for i in range(self.M)]
         self.test_loss = [[] for m in range(self.M)]
-        self.experiment_config_df = pd.read_csv(
-            """../concept_drift_configs/rounds_{}/datasets_{}/experiment_{}.csv""".format(self.args.global_rounds,
-                                                                                          self.dataset,
-                                                                                          self.args.concept_drift_experiment))
+        self.concept_drift = bool(self.args.concept_drift)
+        self.alpha_end= self.args.alpha_end
+        self.rounds_concept_drift = self.args.rounds_concept_drift
+        if self.concept_drift:
+            self.experiment_config_df = pd.read_csv(
+                """../concept_drift_configs/rounds_{}/datasets_{}/concept_drift_rounds_{}_{}/alpha_initial_{}_{}/alpha_end_{}_{}/config.csv""".format(self.args.global_rounds,
+                                                                                                                                                    self.dataset,
+                                                                                                                                                    self.rounds_concept_drift[0],
+                                                                                                                                                    self.rounds_concept_drift[1],
+                                                                                                                                                    self.alpha[0],
+                                                                                                                                                    self.alpha[1],
+                                                                                                                                                    self.alpha_end[0],
+                                                                                                                                                    self.alpha_end[1]))
         # check BatchNorm
         self.has_BatchNorm = False
         for m in range(self.M):
@@ -215,7 +224,7 @@ class Client(object):
 
         try:
             dir_path = "../dataset/" + name + "/" + "clients_" + str(self.args.num_clients) + "/alpha_" + str(alpha) + "/"
-            traindir = """/home/claudio/Documentos/pycharm_projects/Multi-model-Federated-Learning/dataset/{}/clients_40/alpha_{}/rawdata/{}/train/""".format(name, alpha, name)
+            traindir = """../dataset/ImageNet/rawdata/ImageNet/train/"""
             filename_train = dir_path + """train/idx_train_{}.pickle""".format(self.id)
             filename_test = dir_path + "test/idx_test_{}.pickle""".format(self.id)
 
@@ -343,41 +352,49 @@ class Client(object):
                 return testLoader
 
         except Exception as e:
-            print("load ImageNet")
+            print("load ImageNet client base")
             print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
 
     def load_train_data(self, m, t, batch_size=None):
 
-        alpha = self.alpha[m]
-        if bool(self.args.concept_drift):
-            alpha = float(self.experiment_config_df.query("""Dataset == '{}' and Round == {}""".format(self.dataset[m], t))["Alpha"])
-            self.current_alpha[m] = alpha
-        if self.dataset[m] in ["WISDM-W", "WISDM-P"]:
-            return self.load_wisdm(m=m, alpha=alpha, name=self.dataset[m],  mode='train')
-        elif "ImageNet" in self.dataset[m]:
-            return self.load_imagenet(self.dataset[m], m=m, alpha=alpha, t=t, mode='train')
-        else:
-            if batch_size == None:
-                batch_size = self.batch_size
-            train_data, unique_count = read_client_data(m, self.id, args=self.args, is_train=True)
-            return DataLoader(train_data, batch_size, drop_last=True, shuffle=True), unique_count
+        try:
+            alpha = self.alpha[m]
+            if bool(self.args.concept_drift):
+                alpha = float(self.experiment_config_df.query("""Dataset == '{}' and Round == {}""".format(self.dataset[m], t))["Alpha"])
+                self.current_alpha[m] = alpha
+            if self.dataset[m] in ["WISDM-W", "WISDM-P"]:
+                return self.load_wisdm(m=m, alpha=alpha, name=self.dataset[m],  mode='train')
+            elif "ImageNet" in self.dataset[m]:
+                return self.load_imagenet(self.dataset[m], m=m, alpha=alpha, t=t, mode='train')
+            else:
+                if batch_size == None:
+                    batch_size = self.batch_size
+                train_data, unique_count = read_client_data(m, self.id, args=self.args, is_train=True)
+                return DataLoader(train_data, batch_size, drop_last=True, shuffle=True), unique_count
+        except Exception as e:
+            print("load train data")
+            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
 
     def load_test_data(self, m, t, batch_size=None):
-        alpha = self.alpha[m]
-        if bool(self.args.concept_drift):
-            alpha = float(
-                self.experiment_config_df.query("""Dataset == '{}' and Round == {}""".format(self.dataset[m], t))[
-                    "Alpha"])
-            self.current_alpha[m] = alpha
-        if self.dataset[m] in ["WISDM-W", "WISDM-P"]:
-            return self.load_wisdm(m=m, name=self.dataset[m], alpha=alpha, mode='test')
-        elif "ImageNet" in self.dataset[m]:
-            return self.load_imagenet(name=self.dataset[m], m=m, alpha=alpha, t=t, mode='test')
-        else:
-            if batch_size == None:
-                batch_size = self.batch_size
-            test_data = read_client_data(m, self.id, args=self.args, is_train=False)
-            return DataLoader(test_data, batch_size, drop_last=False, shuffle=True)
+        try:
+            alpha = self.alpha[m]
+            if bool(self.args.concept_drift):
+                alpha = float(
+                    self.experiment_config_df.query("""Dataset == '{}' and Round == {}""".format(self.dataset[m], t))[
+                        "Alpha"])
+                self.current_alpha[m] = alpha
+            if self.dataset[m] in ["WISDM-W", "WISDM-P"]:
+                return self.load_wisdm(m=m, name=self.dataset[m], alpha=alpha, mode='test')
+            elif "ImageNet" in self.dataset[m]:
+                return self.load_imagenet(name=self.dataset[m], m=m, alpha=alpha, t=t, mode='test')
+            else:
+                if batch_size == None:
+                    batch_size = self.batch_size
+                test_data = read_client_data(m, self.id, args=self.args, is_train=False)
+                return DataLoader(test_data, batch_size, drop_last=False, shuffle=True)
+        except Exception as e:
+            print("load test data")
+            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
         
     def set_parameters(self, m, model):
         for new_param, old_param in zip(model.parameters(), self.model[m].parameters()):

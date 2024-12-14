@@ -505,7 +505,7 @@ def hist_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, log_
         figure.savefig(base_dir + "png/" + file_name + log + ".png", bbox_inches='tight', dpi=400)
         figure.savefig(base_dir + "svg/" + file_name + log + ".svg", bbox_inches='tight', dpi=400)
 
-def heatmap_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, log_scale=False, ax=None, type=None, hue_order=None):
+def heatmap_plot(df, base_dir, file_name, x_column=None, y_column=None, title="", hue=None, log_scale=False, ax=None, type=None, hue_order=None):
     Path(base_dir).mkdir(parents=True, exist_ok=True)
 
     if ax is None:
