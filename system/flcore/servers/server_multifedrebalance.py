@@ -47,7 +47,7 @@ NDArray = npt.NDArray[Any]
 NDArrays = List[NDArray]
 
 
-class MultiFedPriority(Server):
+class MultiFedRebalance(Server):
     def __init__(self, args, times):
         super().__init__(args, times)
 
@@ -202,70 +202,78 @@ class MultiFedPriority(Server):
                     self.current_num_join_clients = self.num_join_clients
                 np.random.seed(t)
                 selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
-                selected_clients_m = [[] for i in range(self.M)]
+                selected_clients_m_2 = [[] for i in range(self.M)]
 
-                models_clients_losses = []
-                metric = "Loss"
-
-                for client in self.clients:
-                    cid = client.id
-                    clients_losses = []
-                    improvements = []
-                    for m in range(len(client.train_metrics_list_dict)):
-                        rounds = self.clients_training_round_per_model[cid][m][-2:]
-                        rounds = np.array(rounds) - 1
-                        print("r tre", rounds)
-                        metrics_m = client.train_metrics_list_dict[m]
-                        local_acc = np.array(self.clients_train_metrics[client.id]["Accuracy"][m])
-                        local_loss = np.array(self.clients_train_metrics[client.id]["Loss"][m])
-                        global_acc = self.results_train_metrics[m]["Accuracy"]
-                        clients_losses.append(local_loss)
-                    # clients_losses = np.array(clients_losses)
-                    # clients_losses = clients_losses / np.max(clients_losses)
-                    models_clients_losses.append(clients_losses)
-
-                models_clients_losses = np.array(models_clients_losses).T
-                models_clients_losses = models_clients_losses[0]
-                self.clients_model_losses[t] = models_clients_losses
-                for i in range(len(models_clients_losses)):
-                    if t <= 2:
-                        models_clients_losses[i] = models_clients_losses[i] / np.max(models_clients_losses[i])
-                    else:
-                        print("aa ", i)
-                        print(self.clients_model_losses[t-1][i])
-                        models_clients_losses[i] = (self.clients_model_losses[t-1][i] - models_clients_losses[i]) / np.max(self.clients_model_losses[t-1][i] - models_clients_losses[i])
-                    models_clients_losses[i][models_clients_losses[i] < 0] = 0
-
-                print(models_clients_losses.shape)
-                print("fla: ", np.array([models_clients_losses[m] for m in range(self.M)]).flatten())
-                p = np.array([models_clients_losses[m] for m in range(self.M)]).flatten()
-                if np.sum(p) == 0:
-                    p = np.ones(p.shape)
-
-                p = p / np.sum(p)
-
-                selected_clients_m_1 = np.random.choice([i for i in range(int(self.num_clients * self.M))], self.current_num_join_clients, replace=False, p=p)
-                selected_clients_m_2 = np.random.choice([i for i in range(int(self.num_clients * self.M))],
-                                                      self.current_num_join_clients*self.M, replace=False, p=p)
+                # models_losses = {}
+                # models_priorities = [1/self.M for i in range(self.M)]
+                #
+                # if t > 2:
+                #     for m in range(self.M):
+                #
+                #         if self.max_loss_m[m] > 0:
+                #             model_priority = self.past_train_metrics_m[m][t-1]["Loss"] / self.max_loss_m[m]
+                #             models_priorities[m] = model_priority
+                #
+                #     models_priorities = np.array(models_priorities)
+                #     models_priorities = models_priorities / np.sum(models_priorities)
+                #     print("inicial: ", models_priorities)
+                #     min_priority = 0.35
+                #     diff = 0
+                #     number_of_models = 0
+                #     for m in range(self.M):
+                #         if models_priorities[m] < min_priority:
+                #             diff += min_priority - models_priorities[m]
+                #             models_priorities[m] = min_priority
+                #         else:
+                #             number_of_models += 1
+                #
+                #     # distribute diff
+                #     diff_per_model = diff / number_of_models
+                #     for m in range(self.M):
+                #         if models_priorities[m] > min_priority:
+                #             models_priorities[m] += diff_per_model
+                #
+                #     models_priorities = models_priorities / np.sum(models_priorities)
+                #
+                #     print("prioridade: ", models_priorities)
+                #     models_priorities = (models_priorities * self.current_num_join_clients).astype(int)
+                #     print(models_priorities)
+                #     # exit()
 
 
-                selected_clients = []
-                selected_clients_dict = {m: [] for m in range(self.M)}
-                for i in selected_clients_m_2:
-                    client_id = i % self.num_clients
-                    client_model = i // self.num_clients
-
-                    if client_id not in selected_clients:
-                        selected_clients.append(client_id)
-                        selected_clients_dict[client_model].append(client_id)
-                        if len(selected_clients) == self.current_num_join_clients:
-                            break
+                selected_clients_m_2 = np.random.choice([i for i in range(int(self.num_clients))],
+                                                      self.current_num_join_clients, replace=False)
 
 
+                # if t <= 2:
+                #
+                #     selected_clients_m = np.array_split(selected_clients_m_2, self.M)
 
-                self.previous_selected_clients = []
-                for m in range(self.M):
-                    self.previous_selected_clients.append(selected_clients_dict[m])
+                # else:
+                #
+                selected_clients_m = []
+                #
+                #     i = 0
+                #     j = models_priorities[0]
+                #     for m in range(self.M):
+                #         selected_clients_m.append(selected_clients_m_2[i:j])
+                #         i = j
+                #         if m < self.M:
+                #             j += models_priorities[m]
+                #         else:
+                #             j = len(selected_clients_m_2)
+
+                if t>= 29:
+
+                    selected_clients_m.append(selected_clients_m_2[:4])
+                    selected_clients_m.append(selected_clients_m_2[4:])
+                else:
+                    selected_clients_m = np.array_split(selected_clients_m_2, self.M)
+
+
+                self.previous_selected_clients = selected_clients_m
+
+                print("selecionados antes: ", selected_clients_m)
 
                 # for m in range(self.M):
                 #     if len(selected_clients_dict[m]) > self.min_training_clients_per_model[m]:
@@ -319,7 +327,7 @@ class MultiFedPriority(Server):
                 for i in range(len(self.selected_clients[m])):
                     client_id = self.selected_clients[m][i]
                     self.clients_training_round_per_model[client_id][m].append(t)
-                    self.clients[client_id].train(m, self.global_model[m], self.clients_cosine_similarities_with_current_model[m][client_id])
+                    self.clients[client_id].train(m, self.global_model[m], t=t)
                     self.clients_training_count[m][client_id] += 1
                     self.current_training_class_count[m] += self.clients[client_id].train_class_count[m]
 

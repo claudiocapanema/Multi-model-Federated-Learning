@@ -33,13 +33,13 @@ def ci(data, f=False):
     diff = round(diff, 2)
     return """{} $\pm$ {}""".format(mean_value, diff)
 
-def group_by(df, first, second, third):
+def group_by(df, first, second, third, last_round):
 
     area_first = trapz(df[first].to_numpy(), dx=1)
     area_second = trapz(df[second].to_numpy(), dx=1)
     area_first_efficiency = trapz(df.groupby("Round (t)").apply(lambda e: pd.DataFrame({"eff": [e[first].mean() / e["# training clients"].sum()]}))["eff"].to_numpy(), dx=1)
     area_third = trapz(df["# training clients"].to_numpy(), dx=1)
-    df_2 = df[df["Round (t)"] == 100]
+    df_2 = df[df["Round (t)"] == last_round]
     acc_efficiency = df_2.groupby("Round (t)").apply(lambda e: pd.DataFrame({"eff": [e[first].mean() / e["# training clients"].sum()]})).reset_index()
     acc_efficiency = acc_efficiency["eff"].tolist()[0]
     # acc = ci(df_2[first].to_numpy())
@@ -69,10 +69,10 @@ def aggregate_metrics(df):
 
     return aggregated_df[["Balanced accuracy", "Loss", "Balanced accuracy std", "Loss std"]]
 
-def bar_auc(df, base_dir, x_column, first, second, third, x_order, hue_order):
+def bar_auc(df, base_dir, x_column, first, second, third, x_order, hue_order, last_round):
 
     df_2 = df.groupby(["Solution", "Dataset", "Round (t)", "Model"]).apply(lambda x: x.mean()).reset_index()
-    df_2 = df_2.groupby(["Solution"]).apply(lambda x: group_by(x, first, second, third)).round(
+    df_2 = df_2.groupby(["Solution"]).apply(lambda x: group_by(x, first, second, third, last_round)).round(
         5).reset_index(1)[["Efficiency AUC", "Communication cost (MB) AUC", "# training clients AUC", "Balanced accuracy AUC", "Loss AUC"]].round(2).sort_index(key=lambda x: x.map(custom_dict))
     # print(df.drop(index=["Dataset", "Solution"]))
     # exit()
@@ -119,12 +119,12 @@ def bar_auc(df, base_dir, x_column, first, second, third, x_order, hue_order):
     f.write(latex)
     f.close()
 
-def bar_performance(df, base_dir, x_column, first, second, third, x_order, hue_order):
+def bar_performance(df, base_dir, x_column, first, second, third, x_order, hue_order, last_round):
 
     print(df)
     # df_2 = df[["Solution", "Round (t)", "Balanced accuracy", "# training clients", "Loss"]]
     df_2 = df.groupby(["Solution", "Dataset", "Round (t)", "Model"]).apply(lambda x: x.mean()).reset_index()
-    df_2 = df_2.groupby(["Solution"]).apply(lambda x: group_by(x, first, second, third)).round(
+    df_2 = df_2.groupby(["Solution"]).apply(lambda x: group_by(x, first, second, third, last_round)).round(
         5).reset_index(1).round(2)[["Efficiency", "Communication cost (MB)", "# training clients", "Balanced accuracy", "Loss"]].sort_index(key=lambda x: x.map(custom_dict))
     print(df_2)
     # exit()
@@ -216,11 +216,21 @@ if __name__ == "__main__":
     solutions = ["MultiFedSpeed@3", "MultiFedSpeed@2", "MultiFedSpeed@1", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
     rounds_semi_convergence = [5, 9, 26, 30, 35, 39, 43, 49]
     #
-    alphas = ['100.0', '100.0']
-    models_names = ["cnn_a", "cnn_a"]
-    configuration = {"dataset": ["ImageNet", "ImageNet_v2"], "alpha": [float(i) for i in alphas]}
-    solutions = ["MultiFedSpeed@3", "MultiFedSpeed@2", "MultiFedSpeed@1", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
+    # alphas = ['100.0', '100.0']
+    # models_names = ["cnn_a", "cnn_a"]
+    # configuration = {"dataset": ["ImageNet", "ImageNet_v2"], "alpha": [float(i) for i in alphas]}
+    # solutions = ["MultiFedSpeed@3", "MultiFedSpeed@2", "MultiFedSpeed@1", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
+    # rounds_semi_convergence = [22, 27, 33, 35, 38, 44, 45, 57]
+    # alphas_end = ['0.1', '100.0']
+
+    concept_drift = True
+    alphas = ['0.1', '0.1']
+    models_names = ["cnn_a", "gru"]
+    configuration = {"dataset": ["ImageNet", "WISDM-W"], "alpha": [float(i) for i in alphas]}
+    solutions = ["MultiFedAvg", "MultiFedBalance"]
     rounds_semi_convergence = [22, 27, 33, 35, 38, 44, 45, 57]
+    alphas_end = ['0.1', '100.0']
+    rounds_concept_drift = [28, 28]
 
     # models_names = ["cnn_a", "cnn_a"]
     datasets = configuration["dataset"]
@@ -228,7 +238,7 @@ if __name__ == "__main__":
 
     num_clients = 40
     fc = 0.3
-    rounds = 100
+    rounds = 40
     epochs = 1
 
     read_alpha = []
@@ -241,7 +251,7 @@ if __name__ == "__main__":
     read_std_dataset = []
     read_num_samples_std = []
 
-    d = """results/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(num_clients, alphas, datasets,
+    d = """results/concept_drift_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(concept_drift, num_clients, alphas, alphas_end[0], alphas_end[1], datasets, rounds_concept_drift[0], rounds_concept_drift[1],
                                                                                   models_names, fc, rounds, epochs)
     read_solutions = []
     read_accs = []
@@ -296,9 +306,9 @@ if __name__ == "__main__":
 
     bar_metric(df, base_dir, "Solution", first, second, x_order, hue_order)
     plt.plot()
-    bar_auc(df, base_dir, "Solution", first, second, third, solutions, solutions)
+    bar_auc(df, base_dir, "Solution", first, second, third, solutions, solutions, rounds)
     plt.plot()
-    bar_performance(df, base_dir, "Solution", first, second, third, solutions, solutions)
+    bar_performance(df, base_dir, "Solution", first, second, third, solutions, solutions, rounds)
     plt.plot()
     # line(df, base_dir, "Round (t)", first, second, "Solution", None)
 

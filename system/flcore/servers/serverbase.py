@@ -139,7 +139,11 @@ class Server(object):
         self.clients_train_metrics = {i: {metric: {m: [] for m in range(self.M)} for metric in ["Accuracy", "Loss", "Samples", "Balanced accuracy", "Micro f1-score", "Macro f1-score", "Weighted f1-score"]} for
                                      i in range(self.num_clients)}
 
-        self.past_train_metrics_m = {m: [] for m in range(self.M)}
+        self.past_train_metrics_m = {m: {} for m in range(self.M)}
+        self.max_loss_m = {m: 0 for m in range(self.M)}
+        self.concept_drift = bool(self.args.concept_drift)
+        self.alpha_end = self.args.alpha_end
+        self.rounds_concept_drift = self.args.rounds_concept_drift
 
     def set_clients(self, clientObj):
         for i, train_slow, send_slow in zip(range(self.num_clients), self.train_slow_clients, self.send_slow_clients):
@@ -318,14 +322,66 @@ class Server(object):
 
         algo = self.dataset[m] + "_" + self.algorithm
         cd = bool(self.args.concept_drift)
-        result_path = """../results/concept_drift_{}/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(cd,
-                                                                                                                    self.num_clients,
-                                                                                                                   self.alpha,
-                                                                                                                   self.dataset,
-                                                                                                                   self.models_names,
-                                                                                                                   self.args.join_ratio,
-                                                                                                                   self.args.global_rounds,
-                                                                                                                   self.local_epochs)
+        if cd:
+            result_path = """../results/concept_drift_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(cd,
+                                                                                                                        self.num_clients,
+                                                                                                                       self.alpha,
+                                                                                                                        self.alpha_end[
+                                                                                                                            0],
+                                                                                                                        self.alpha_end[
+                                                                                                                            1],
+                                                                                                                       self.dataset,
+                                                                                                                        self.rounds_concept_drift[
+                                                                                                                            0],
+                                                                                                                        self.rounds_concept_drift[
+                                                                                                                            1],
+                                                                                                                       self.models_names,
+                                                                                                                       self.args.join_ratio,
+                                                                                                                       self.args.global_rounds,
+                                                                                                                       self.local_epochs)
+        elif len(self.alpha) == 1:
+            result_path = """../results/concept_drift_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(
+                cd,
+                self.num_clients,
+                self.alpha[0],
+                self.alpha[
+                    0],
+                self.alpha[
+                    0],
+                self.dataset[0],
+                0,
+                0,
+                self.models_names[0],
+                self.args.join_ratio,
+                self.args.global_rounds,
+                self.local_epochs)
+        else:
+
+            result_path = """../results/concept_drift_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(
+                cd,
+                self.num_clients,
+                self.alpha,
+                self.alpha[
+                    0],
+                self.alpha[
+                    1],
+                self.dataset,
+                0,
+                0,
+                self.models_names,
+                self.args.join_ratio,
+                self.args.global_rounds,
+                self.local_epochs)
+
+        # """../concept_drift_configs/rounds_{}/datasets_{}/concept_drift_rounds_{}_{}/alpha_initial_{}_{}/alpha_end_{}_{}/config.csv""".format(
+        #     self.args.global_rounds,
+        #     self.dataset,
+        #     self.rounds_concept_drift[0],
+        #     self.rounds_concept_drift[1],
+        #     self.alpha[0],
+        #     self.alpha[1],
+        #     self.alpha_end[0],
+        #     self.alpha_end[1]
         if not os.path.exists(result_path):
             os.makedirs(result_path)
 
@@ -445,7 +501,7 @@ class Server(object):
         for i in range(len(test_clients)):
             # if i in self.selected_clients[m] or t == 1:
             c = test_clients[i]
-            test_acc, test_loss, test_num, test_auc, test_balanced_acc, test_micro_fscore, test_macro_fscore, test_weighted_fscore, alpha = c.test_metrics(m, copy.deepcopy(self.global_model[m].to(self.device)), t)
+            test_acc, test_loss, test_num, test_auc, test_balanced_acc, test_micro_fscore, test_macro_fscore, test_weighted_fscore, alpha = c.test_metrics(m, copy.deepcopy(self.global_model[m].to(self.device)), t=t)
             self.clients_test_metrics[i]["Accuracy"][m].append(test_acc)
             self.clients_test_metrics[i]["Loss"][m].append(test_loss)
             self.clients_test_metrics[i]["Balanced accuracy"][m].append(test_balanced_acc)
@@ -584,9 +640,10 @@ class Server(object):
 
         train_metrics = self.train_metrics(m, t)
         if train_metrics is not None:
-            self.past_train_metrics_m[m] = train_metrics
+            self.past_train_metrics_m[m][t] = train_metrics
+            self.max_loss_m[m] = max(self.max_loss_m[m], train_metrics["Loss"])
         else:
-            train_metrics = self.past_train_metrics_m[m]
+            train_metrics = self.past_train_metrics_m[m][-1]
 
         # test_acc = sum(stats[2])*1.0 / sum(stats[1])
         # test_auc = sum(stats[3])*1.0 / sum(stats[1])
@@ -613,7 +670,7 @@ class Server(object):
         self.results_test_metrics[m]['Fraction fit'].append(self.join_ratio)
         self.results_test_metrics[m]['# training clients'].append(len(self.selected_clients[m]))
         self.results_test_metrics[m]['training clients and models'].append(list(self.selected_clients[m]))
-        # print("ddd: ", self.models_size)
+        print("ddd: ", self.models_size, m)
         self.results_test_metrics[m]['model size'].append(self.models_size[m])
 
         self.results_test_metrics_w[m]['Round'].append(t)

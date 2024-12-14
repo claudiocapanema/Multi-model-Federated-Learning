@@ -48,7 +48,7 @@ def line(df, base_dir, x_column, first, second, hue, datasets, rounds_semi_covne
     fig, axs = plt.subplots(2, 1, sharex='all', figsize=(4, 4))
     titles = ["Average accuracy", "Average loss"]
     y_columns = [first, second]
-    y_maxs = [100, 6]
+    y_maxs = [100, 7]
     y_lims = [True, True]
     print("aa: ", df)
 
@@ -80,21 +80,21 @@ def line(df, base_dir, x_column, first, second, hue, datasets, rounds_semi_covne
               hue=hue, ci=ci, title="Loss", tipo=None,style="Model",  hue_order=hue_order, y_lim=y_lim, y_max=y_max)
     handles, labels = plt.gca().get_legend_handles_labels()
     order = [0, 3, 2, 1, 4, 5, 6, 7, 9, 8]
-    axs[i].legend([handles[i] for i in order], [labels[i] for i in order], fontsize=6.5, ncols=3)
+    # axs[i].legend([handles[i] for i in order], [labels[i] for i in order], fontsize=6.5, ncols=3)
     axs[i].set_xlabel("")
-    # axs[i].get_legend().remove()
+    axs[i].legend(fontsize=6.5)
 
 
 
     # specify order
 
 
-    for r in rounds_semi_convergence:
-        for i in range(2):
-            for j in range(2):
-                axs[i].grid(False)
-                axs[i].vlines(x=[int(r)], ymin=0, ymax=100, colors='silver', ls='--', lw=1,
-                              label='vline_multiple - full height')
+    # for r in rounds_semi_convergence:
+    #     for i in range(2):
+    #         for j in range(2):
+    #             axs[i].grid(False)
+    #             axs[i].vlines(x=[int(r)], ymin=0, ymax=100, colors='silver', ls='--', lw=1,
+    #                           label='vline_multiple - full height')
     plt.tight_layout()
 
     plt.subplots_adjust(wspace=0.23, hspace=0.25)
@@ -150,6 +150,15 @@ if __name__ == "__main__":
     solutions = ["MultiFedSpeed@3", "MultiFedSpeed@2", "MultiFedSpeed@1", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
     rounds_semi_convergence = [22, 27, 33, 35, 38, 44, 45, 57]
 
+    concept_drift = True
+    alphas = ['0.1', '0.1']
+    models_names = ["cnn_a", "gru"]
+    configuration = {"dataset": ["ImageNet", "WISDM-W"], "alpha": [float(i) for i in alphas]}
+    solutions = ["MultiFedAvg", "MultiFedBalance"]
+    rounds_semi_convergence = [22, 27, 33, 35, 38, 44, 45, 57]
+    alphas_end = ['0.1', '100.0']
+    rounds_concept_drift = [28, 28]
+
 
     # models_names = ["cnn_a", "cnn_a"]
     datasets = configuration["dataset"]
@@ -158,7 +167,7 @@ if __name__ == "__main__":
     num_classes = {"EMNIST": 47, "CIFAR10": 10, "GTSRB": 43}
     num_clients = 40
     fc = 0.3
-    rounds = 100
+    rounds = 40
     epochs = 1
 
     read_alpha = []
@@ -171,7 +180,11 @@ if __name__ == "__main__":
     read_std_dataset = []
     read_num_samples_std = []
 
-    d = """results/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(num_clients, alphas, datasets, models_names, fc, rounds, epochs)
+    # d = """results/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(num_clients, alphas, datasets, models_names, fc, rounds, epochs)
+    d = """results/concept_drift_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(
+        concept_drift, num_clients, alphas, alphas_end[0], alphas_end[1], datasets, rounds_concept_drift[0],
+        rounds_concept_drift[1],
+        models_names, fc, rounds, epochs)
     read_solutions = []
     read_accs = []
     read_loss = []

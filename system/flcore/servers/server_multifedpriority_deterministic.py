@@ -47,7 +47,7 @@ NDArray = npt.NDArray[Any]
 NDArrays = List[NDArray]
 
 
-class MultiFedPriority(Server):
+class MultiFedPriority_deterministic(Server):
     def __init__(self, args, times):
         super().__init__(args, times)
 
@@ -99,9 +99,7 @@ class MultiFedPriority(Server):
         self.accuracy_gain_models = {m: [] for m in range(self.M)}
         self.stop_cpd = [False for m in range(self.M)]
         self.re_per_model = int(args.reduction)
-        self.min_training_clients_per_model = [self.current_num_join_clients // self.M for i in range(self.M)]
         # self.selected_clients_cosine = {m: {} for m in range(self.M)}
-        self.clients_model_losses = {}
 
     def cold_start_selection(self):
 
@@ -226,15 +224,8 @@ class MultiFedPriority(Server):
 
                 models_clients_losses = np.array(models_clients_losses).T
                 models_clients_losses = models_clients_losses[0]
-                self.clients_model_losses[t] = models_clients_losses
                 for i in range(len(models_clients_losses)):
-                    if t <= 2:
-                        models_clients_losses[i] = models_clients_losses[i] / np.max(models_clients_losses[i])
-                    else:
-                        print("aa ", i)
-                        print(self.clients_model_losses[t-1][i])
-                        models_clients_losses[i] = (self.clients_model_losses[t-1][i] - models_clients_losses[i]) / np.max(self.clients_model_losses[t-1][i] - models_clients_losses[i])
-                    models_clients_losses[i][models_clients_losses[i] < 0] = 0
+                    models_clients_losses[i] = models_clients_losses[i] / np.max(models_clients_losses[i])
 
                 print(models_clients_losses.shape)
                 print("fla: ", np.array([models_clients_losses[m] for m in range(self.M)]).flatten())
@@ -244,9 +235,7 @@ class MultiFedPriority(Server):
 
                 p = p / np.sum(p)
 
-                selected_clients_m_1 = np.random.choice([i for i in range(int(self.num_clients * self.M))], self.current_num_join_clients, replace=False, p=p)
-                selected_clients_m_2 = np.random.choice([i for i in range(int(self.num_clients * self.M))],
-                                                      self.current_num_join_clients*self.M, replace=False, p=p)
+                selected_clients_m_2 = np.flip(np.argsort(p))[:int(self.current_num_join_clients * self.M)]
 
 
                 selected_clients = []
@@ -255,35 +244,27 @@ class MultiFedPriority(Server):
                     client_id = i % self.num_clients
                     client_model = i // self.num_clients
 
-                    if client_id not in selected_clients:
+                    if client_id not in selected_clients and len(selected_clients_dict[client_model]) < self.current_num_join_clients // self.M:
                         selected_clients.append(client_id)
                         selected_clients_dict[client_model].append(client_id)
                         if len(selected_clients) == self.current_num_join_clients:
                             break
 
 
-
                 self.previous_selected_clients = []
                 for m in range(self.M):
                     self.previous_selected_clients.append(selected_clients_dict[m])
-
-                # for m in range(self.M):
-                #     if len(selected_clients_dict[m]) > self.min_training_clients_per_model[m]:
-                #         self.previous_selected_clients.append(selected_clients_dict[m])
-                #     else:
-                #         self.previous_selected_clients.append([])
 
                 selected_clients_m = self.previous_selected_clients
 
                 for m in range(self.M):
                     self.clients_rounds_since_last_training[m] += 1
-                    if len(self.previous_selected_clients[m]) > 0:
-                        for c_id in self.previous_selected_clients[m]:
-                            self.clients_training_round_per_model[c_id][m].append(t)
-                            self.clients_rounds_since_last_training[m][c_id] = 0
+                    for c_id in self.previous_selected_clients[m]:
+                        self.clients_training_round_per_model[c_id][m].append(t)
+                        self.clients_rounds_since_last_training[m][c_id] = 0
 
-                        self.clients_rounds_since_last_training_probability[m] = self.clients_rounds_since_last_training[m] / np.max(self.clients_rounds_since_last_training[m])
-                        self.clients_rounds_since_last_training_probability[m] = self.clients_rounds_since_last_training_probability[m] / np.sum(self.clients_rounds_since_last_training_probability[m])
+                    self.clients_rounds_since_last_training_probability[m] = self.clients_rounds_since_last_training[m] / np.max(self.clients_rounds_since_last_training[m])
+                    self.clients_rounds_since_last_training_probability[m] = self.clients_rounds_since_last_training_probability[m] / np.sum(self.clients_rounds_since_last_training_probability[m])
 
 
                 print("selecionado: ", selected_clients_m)

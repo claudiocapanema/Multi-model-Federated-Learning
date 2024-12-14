@@ -340,11 +340,11 @@ class ManageDatasets():
 
         return x_train, y_train, x_test, y_test
 
-    def load_imagenet(self, name):
+    def load_imagenet(self, dataset_name):
 
         num_clients = 40
         alpha = 0.1
-        dir_path = name + "/clients_" + str(num_clients) + "/alpha_" + str(alpha) + "/"
+        dir_path = dataset_name + "/clients_" + str(num_clients) + "/alpha_" + str(alpha) + "/"
 
         if not os.path.exists(dir_path):
             os.makedirs(dir_path)
@@ -354,7 +354,7 @@ class ManageDatasets():
         train_path = dir_path + "train/"
         test_path = dir_path + "test/"
 
-        trainset, valset = load_data_imagenet(dir_path + "rawdata/" + name + "/train/")
+        trainset, valset = load_data_imagenet("""{}/rawdata/{}/train/""".format(dataset_name, dataset_name))
 
         # trainset = ImageFolder_custom(root=dir_path + '', transform=transform)
         # testset = ImageFolder_custom(root=dir_path + '', transform=transform)
@@ -626,6 +626,7 @@ class ManageDatasets():
 
         elif dataset_name == 'ImageNet':
             return self.load_imagenet(dataset_name)
+
         elif dataset_name == 'ImageNet_v2':
             return self.load_imagenet(dataset_name)
 
