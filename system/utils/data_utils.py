@@ -29,6 +29,8 @@ import torchvision.transforms as transforms
 import subprocess
 from torchvision.datasets import ImageFolder, DatasetFolder
 import torchvision.datasets as datasets
+import torchvision
+from torch.utils.data import TensorDataset, DataLoader
 
 
 def read_data(dataset, idx, args, alpha, is_train=True):
@@ -52,6 +54,102 @@ def read_data(dataset, idx, args, alpha, is_train=True):
             test_data = np.load(f, allow_pickle=True)['data'].tolist()
 
         return test_data
+
+def read_client_data_v2(m, name, cid, args, mode="train", batch_size=32):
+    dir_path = """../dataset/{}/clients_{}/alpha_{}/""".format(name, args.num_clients, args.alpha[m])
+    filename_train = dir_path + """train/idx_train_{}.pickle""".format(cid)
+    filename_test = dir_path + "test/idx_test_{}.pickle""".format(cid)
+
+    if name == "CIFAR10":
+        trainset, testset = read_cifar10(dir_path)
+    elif name == "EMNIST":
+        trainset, testset = read_emnist(dir_path)
+
+    with open(filename_train, 'rb') as handle:
+        idx_train = pickle.load(handle)
+
+    with open(filename_test, 'rb') as handle:
+        idx_test = pickle.load(handle)
+
+    dataset_image = []
+    dataset_label = []
+    # print(type(trainset.data), type(testset.data[0]), trainset.data)
+    # exit()
+
+    # x = np.array(trainset.data)
+    # x = np.concatenate([x, testset.data], axis=0)
+    # y = np.array(trainset.targets)
+    # y = np.concatenate([y, testset.targets], axis=0)
+
+    dataset_image.extend(trainset.data)
+    dataset_image.extend(testset.data)
+    dataset_label.extend(trainset.targets)
+    dataset_label.extend(testset.targets)
+    x = np.array(dataset_image)
+    y = np.array(dataset_label)
+
+    x_train = x[idx_train]
+    y_train = y[idx_train]
+    x_test = x[idx_test]
+    y_test = y[idx_test]
+
+    y = np.array(list(y_train))
+
+    print("""Cliente {} dados treino {} dados teste {}""".format(cid, x_train.shape, x_test.shape))
+    # exit()
+
+    trainset = torch.utils.data.TensorDataset(torch.from_numpy(x_train).to(dtype=torch.float32),
+                                                      torch.from_numpy(y_train))
+    testset = torch.utils.data.TensorDataset(torch.from_numpy(x_test).to(dtype=torch.float32),
+                                                        torch.from_numpy(y_test))
+
+    trainset.data = np.array(x_train)
+    trainset.target = np.array(y_train)
+    testset.data = np.array(x_test)
+    testset.target = np.array(y_test)
+
+    g = torch.Generator()
+    g.manual_seed(cid)
+
+    unique_count = {i: 0 for i in range(args.num_classes[m])}
+    unique, count = np.unique(y, return_counts=True)
+    data_unique_count_dict = dict(zip(unique, count))
+    for class_ in data_unique_count_dict:
+        unique_count[class_] = data_unique_count_dict[class_]
+    unique_count = np.array(list(unique_count.values()))
+
+    np.random.seed(cid)
+
+    def seed_worker(worker_id):
+        np.random.seed(cid)
+        random.seed(cid)
+
+    trainloader = DataLoader(dataset=trainset, batch_size=batch_size, shuffle=True, worker_init_fn=seed_worker,
+                             generator=g)
+    testloader = DataLoader(dataset=testset, batch_size=batch_size, shuffle=False, worker_init_fn=seed_worker,
+                             generator=g)
+    # if name == "EMNIST":
+    #     x_train = np.expand_dims(x_train, axis=1)
+    #     x_test = np.expand_dims(x_test, axis=1)
+    print("x train: ", x_train.shape, y_train.shape)
+
+
+    # for i, (x, y) in enumerate(trainloader):
+    #     if i == 0:
+    #         print("aaaa_oi: ", x.shape, y.shape)
+    #         exit()
+    # trainset, trainloader, testset, testloader = create_torch_dataset_from_numpy(x_train, x_test, y_train, y_test, batch_size=batch_size, g=g, cid=cid)
+
+    # print("test loader")
+    # for x, y in testloader:
+    #     print(x.shape, y.shape)
+    #     exit()
+
+
+    if mode == "train":
+        return trainloader, unique_count
+    else:
+        return testloader
 
 def load_wisdm(m, name, cid, args, mode="train", batch_size=32, dataset_name=None):
 
@@ -140,118 +238,6 @@ def load_wisdm(m, name, cid, args, mode="train", batch_size=32, dataset_name=Non
     except Exception as e:
         print("load WISDM")
         print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
-
-# def load_imagenet(self, m, mode="train", batch_size=32, dataset_name=None):
-#
-#     try:
-#         dir_path = "../dataset/ImageNet/" + "clients_" + str(self.args.num_clients) + "/alpha_" + str(self.args.alpha[m]) + "/" + "client_" + str(
-#             self.id) + "/"
-#         traindir = """/home/claudio/Documentos/pycharm_projects/Multi-model-Federated-Learning/dataset/ImageNet/clients_40/alpha_5.0/rawdata/ImageNet/train/"""
-#         filename_train = dir_path + """train/idx_train_{}.pickle""".format(self.id)
-#         filename_test = dir_path + "test/idx_test_{}.picle""".format(self.id)
-#
-#         transmforms = {'train': transforms.Compose(
-#                 [
-#
-#                     transforms.Resize((32, 32)),
-#                     transforms.RandomHorizontalFlip(),  # FLips the image w.r.t horizontal axis
-#                     transforms.RandomRotation(10),  # Rotates the image to a specified angel
-#                     transforms.RandomAffine(0, shear=10, scale=(0.8, 1.2)),
-#                     # Performs actions like zooms, change shear angles.
-#                     transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
-#                     transforms.ToTensor(),
-#                     transforms.Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
-#                 ]
-#             ), 'test': transforms.Compose(
-#                 [
-#
-#                     transforms.Resize((32, 32)),
-#                     transforms.ToTensor(),
-#                     transforms.Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
-#                 ]
-#             )}[mode]
-#
-#         training_dataset = datasets.ImageFolder(
-#             traindir,
-#             transmforms
-#         )
-#
-#         validation_dataset = datasets.ImageFolder(
-#             traindir,
-#             transmforms
-#         )
-#
-#         np.random.seed(self.id)
-#
-#         dataset_image = []
-#         dataset_samples = []
-#         dataset_label = []
-#         dataset_samples.extend(training_dataset.samples)
-#         dataset_image.extend(training_dataset.imgs)
-#         dataset_label.extend(training_dataset.targets)
-#
-#         with open(filename_train, 'rb') as handle:
-#             idx_train = pickle.load(handle)
-#
-#         with open(filename_test, 'rb') as handle:
-#             idx_test = pickle.load(handle)
-#
-#
-#         # print("tipo: ", type(training_dataset.imgs), type(training_dataset.targets), type(training_dataset.samples))
-#         imgs = training_dataset.imgs
-#         x_train = []
-#         x_test = []
-#         y_train = []
-#         y_test = []
-#         for i in range(1):
-#             x_train += training_dataset.samples
-#             x_test += training_dataset.samples
-#             y_train += training_dataset.targets
-#             y_test += training_dataset.targets
-#
-#         x_train = np.array(x_train)
-#         y_train = np.array(y_train)
-#         x_test = np.array(x_test)
-#         y_test = np.array(y_test)
-#         x_train = x_train[idx_train]
-#         y_train = y_train[idx_train]
-#         x_test = x_test[idx_test]
-#         y_test = y_test[idx_test]
-#
-#         training_dataset.samples = list(x_train)
-#         training_dataset.targets = list(y_train)
-#         validation_dataset.samples = list(x_test)
-#         validation_dataset.targets = list(y_test)
-#
-#
-#         # validation_dataset.imgs = list(imgs_test)
-#
-#         def seed_worker(worker_id):
-#             np.random.seed(self.cid)
-#             random.seed(self.cid)
-#
-#         g = torch.Generator()
-#         g.manual_seed(self.cid)
-#
-#         unique_count = {i: 0 for i in range(self.args.num_classes[m])}
-#         unique, count = np.unique(y, return_counts=True)
-#         data_unique_count_dict = dict(zip(unique, count))
-#         for class_ in data_unique_count_dict:
-#             unique_count[class_] = data_unique_count_dict[class_]
-#         unique_count = np.array(list(unique_count.values()))
-#
-#         trainLoader = DataLoader(training_dataset, batch_size, shuffle=True, worker_init_fn=seed_worker,
-#                                  generator=g)
-#         testLoader = DataLoader(dataset=validation_dataset, batch_size=32, shuffle=False)
-#
-#         if mode == "train":
-#             return trainLoader, unique_count
-#         else:
-#             return testLoader
-#
-#     except Exception as e:
-#         print("load ImageNet")
-#         print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
 
 def load_imagenet(m, cid, args, mode="train", batch_size=32, dataset_name=None):
 
@@ -434,3 +420,191 @@ def read_client_data_Shakespeare(dataset, idx, args={}, is_train=True):
         test_data = [(x, y) for x, y in zip(X_test, y_test)]
         return test_data
 
+
+def read_cifar10(dir_path):
+    transform = {'train': transforms.Compose(
+        [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+    ), 'test': transforms.Compose(
+        [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+    )}
+
+    trainset = torchvision.datasets.CIFAR10(
+        root=dir_path + "rawdata", train=True, download=True, transform=transform["train"])
+    testset = torchvision.datasets.CIFAR10(
+        root=dir_path + "rawdata", train=False, download=True, transform=transform["test"])
+
+    # trainset.data = np.moveaxis(trainset.data, 1, 3).tolist()
+    # testset.data = np.moveaxis(testset.data, 1, 3).tolist()
+
+    return trainset, testset
+
+
+def read_emnist(dir_path):
+    transform = {'train': transforms.Compose(
+        [
+            transforms.ToTensor(), transforms.Normalize((0.5), (0.5))
+        ]
+    ), 'test': transforms.Compose(
+        [
+            transforms.ToTensor(), transforms.Normalize((0.5), (0.5))
+        ]
+    )}
+
+    trainset = torchvision.datasets.EMNIST(
+        root=dir_path + "rawdata", train=True, download=True, transform=transform["train"], split='balanced')
+    testset = torchvision.datasets.EMNIST(
+        root=dir_path + "rawdata", train=False, download=True, transform=transform["test"], split='balanced')
+
+    return trainset, testset
+
+def read_gtsrb(m, name, cid, args, t, mode="train", batch_size=32):
+    print("aqq")
+    dir_path = """../dataset/{}/clients_{}/alpha_{}/""".format(name, args.num_clients, args.alpha[m])
+    filename_train = dir_path + """train/idx_train_{}.pickle""".format(cid)
+    filename_test = dir_path + "test/idx_test_{}.pickle""".format(cid)
+    file_dir_path = "../dataset/GTSRB/rawdata/"
+
+    print(file_dir_path + "Train")
+
+    trainset = datasets.ImageFolder(
+        file_dir_path + "Train",
+        transforms.Compose(
+            [
+
+                transforms.Resize((32, 32)),
+                transforms.RandomHorizontalFlip(),  # FLips the image w.r.t horizontal axis
+                transforms.RandomRotation(10),  # Rotates the image to a specified angel
+                transforms.RandomAffine(0, shear=10, scale=(0.8, 1.2)),
+                # Performs actions like zooms, change shear angles.
+                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+                transforms.ToTensor(),
+                transforms.Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
+            ]
+        )
+    )
+
+    valset = datasets.ImageFolder(
+        file_dir_path + "Train",
+        transforms.Compose(
+            [
+
+                transforms.Resize((32, 32)),
+                transforms.ToTensor(),
+                transforms.Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
+            ]
+        )
+    )
+
+    np.random.seed(cid)
+
+    dataset_image = []
+    dataset_samples = []
+    dataset_label = []
+    dataset_samples.extend(trainset.samples)
+    dataset_image.extend(trainset.imgs)
+    dataset_label.extend(trainset.targets)
+    dataset_image = np.array(dataset_image)
+    dataset_label = np.array(dataset_label)
+
+    with open(filename_train, 'rb') as handle:
+        idx_train = pickle.load(handle)
+
+    with open(filename_test, 'rb') as handle:
+        idx_test = pickle.load(handle)
+
+    # imgs = trainset.imgs
+    # x_train = []
+    # x_test = []
+    # y_train = []
+    # y_test = []
+    # for i in range(1):
+    #     x_train += trainset.samples
+    #     x_test += valset.samples
+    #     y_train += trainset.targets
+    #     y_test += valset.targets
+
+    x_train = np.array(trainset.samples)
+    y_train = np.array(trainset.targets)
+    x_test = np.array(valset.samples)
+    y_test = np.array(valset.targets)
+    x_train = x_train[idx_train]
+    y_train = y_train[idx_train]
+    x_test = x_test[idx_test]
+    y_test = y_test[idx_test]
+
+    print("""cliente {} treino {} teste {}""".format(cid, len(y_train), len(y_test)))
+
+    trainset.samples = list(x_train)
+    trainset.targets = list(y_train)
+    valset.samples = list(x_test)
+    valset.targets = list(y_test)
+
+    g = torch.Generator()
+    g.manual_seed(cid)
+
+    unique_count = {i: 0 for i in range(args.num_classes[m])}
+    unique, count = np.unique(np.concatenate([y_test, y_test]), return_counts=True)
+    data_unique_count_dict = dict(zip(unique, count))
+    for class_ in data_unique_count_dict:
+        unique_count[class_] = data_unique_count_dict[class_]
+    unique_count = np.array(list(unique_count.values()))
+
+    np.random.seed(cid)
+
+    def seed_worker(worker_id):
+        np.random.seed(cid)
+        random.seed(cid)
+
+    g = torch.Generator()
+    g.manual_seed(cid)
+
+    trainloader = DataLoader(trainset, batch_size, shuffle=True, worker_init_fn=seed_worker,
+                             generator=g)
+    testloader = DataLoader(dataset=valset, batch_size=32, shuffle=False)
+
+    if mode == "train":
+        return trainloader, unique_count
+    else:
+        return testloader
+
+# def create_torch_dataset_from_numpy(x_train, x_test, y_train, y_test, batch_size, g, cid):
+#
+#     def seed_worker(worker_id):
+#         np.random.seed(cid)
+#         random.seed(cid)
+#
+#     tensor_x_train = torch.Tensor(x_train)  # transform to torch tensor
+#     tensor_y_train = torch.Tensor(y_train)
+#
+#
+#     train_dataset = TensorDataset(tensor_x_train, tensor_y_train)
+#     trainLoader = DataLoader(train_dataset, batch_size, shuffle=True)
+#     # , worker_init_fn=seed_worker, generator=g
+#
+#     tensor_x_test = torch.Tensor(x_test)  # transform to torch tensor
+#     tensor_y_test = torch.Tensor(y_test)
+#
+#     test_dataset = TensorDataset(tensor_x_test, tensor_y_test)
+#     testLoader = DataLoader(test_dataset, batch_size, shuffle=False)
+#
+#     return train_dataset, trainLoader, test_dataset, testLoader
+
+def create_torch_dataset_from_numpy(x_train, x_test, y_train, y_test, batch_size, g, cid):
+
+    tensor_x_train = torch.from_numpy(x_train)  # transform to torch tensor
+    tensor_y_train = torch.from_numpy(y_train)
+
+    def seed_worker(worker_id):
+        np.random.seed(cid)
+        random.seed(cid)
+
+    trainset = TensorDataset(tensor_x_train, tensor_y_train)
+    trainloader = DataLoader(trainset, batch_size, shuffle=True)
+
+    tensor_x_test = torch.from_numpy(x_test)  # transform to torch tensor
+    tensor_y_test = torch.from_numpy(y_test)
+
+    testset = TensorDataset(tensor_x_test, tensor_y_test)
+    testloader = DataLoader(testset, batch_size, shuffle=False)
+
+    return trainset, trainloader, testset, testloader

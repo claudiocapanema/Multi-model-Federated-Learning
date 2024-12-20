@@ -30,7 +30,7 @@ import os
 from torch.utils.data import DataLoader
 from sklearn.preprocessing import label_binarize
 from sklearn import metrics
-from utils.data_utils import read_client_data
+from utils.data_utils import read_client_data_v2, read_gtsrb
 
 
 class Client(object):
@@ -38,7 +38,7 @@ class Client(object):
     Base class for clients in federated learning.
     """
 
-    def __init__(self, args, id, train_samples, test_samples, **kwargs):
+    def __init__(self, args, id, **kwargs):
         g = torch.Generator()
         g.manual_seed(id)
         random.seed(id)
@@ -55,13 +55,18 @@ class Client(object):
         self.save_folder_name = args.save_folder_name
         self.current_alpha = copy.deepcopy(self.alpha)
         self.num_classes = args.num_classes
-        self.train_samples = train_samples
-        self.test_samples = test_samples
-        self.batch_size = args.batch_size
+        self.train_samples = [0] * self.M
+        self.batch_size = [0] * self.M
+        for m in range(self.M):
+            if self.dataset[m] == "EMNIST":
+                self.batch_size[m] = 64
+            else:
+                self.batch_size[m] = 32
+
         self.learning_rate = args.local_learning_rate
         self.local_epochs = args.local_epochs
-        self.testloaderfull = []
-        self.trainloader = []
+        self.testloaderfull = [0 for m in range(self.M)]
+        self.trainloader = [0 for m in range(self.M)]
         self.update_loader = [False for j in range(self.M)]
         self.train_class_count = [np.array([0 for j in range(self.num_classes[i])]) for i in range(self.M)]
         self.test_loss = [[] for m in range(self.M)]
@@ -78,23 +83,22 @@ class Client(object):
                                                                                                                                                     self.alpha[1],
                                                                                                                                                     self.alpha_end[0],
                                                                                                                                                     self.alpha_end[1]))
+        self.fraction_of_classes = [0 for m in range(self.M)]
+        self.imbalance_level = [0 for m in range(self.M)]
         # check BatchNorm
         self.has_BatchNorm = False
         for m in range(self.M):
             print(self.model)
-            self.testloaderfull.append(self.load_test_data(m, 1))
-            train, self.train_class_count[m] = self.load_train_data(m, 1)
-            self.trainloader.append(train)
-            for layer in self.model[m].children():
-                if isinstance(layer, nn.BatchNorm2d):
-                    self.has_BatchNorm = True
-                    break
-
-        # self.concept_drift_config = {m: {"concept_dirft_round": None, "alpha": None} for m in range(self.M)}
-        # self.concept_drift_config[0]["concept_drift_round"] = int(self.args.global_rounds*self.args.concept_drift_rounds_percent)
-        # self.concept_drift_config[0]["alpha"] = 1.0
-        # self.concept_drift_config[1]["concept_drift_round"] = int(self.args.global_rounds*self.args.concept_drift_rounds_percent)
-        # self.concept_drift_config[1]["alpha"] = 1.0
+            self.testloaderfull[m] = self.load_test_data(m, 1, batch_size=self.batch_size[m])
+            self.trainloader[m], self.train_class_count[m] = self.load_train_data(m, 1, batch_size=self.batch_size[m])
+            self.train_samples[m] = 0
+            for sample in self.trainloader[m]:
+                self.train_samples[m] += len(sample)
+            print("no zero: ", np.count_nonzero(self.train_class_count[m]), self.train_class_count[m])
+            self.fraction_of_classes[m] = np.count_nonzero(self.train_class_count[m]) / len(self.train_class_count[m])
+            threshold = np.sum(self.train_class_count[m]) / len(self.train_class_count[m])
+            self.imbalance_level[m] = len(np.argwhere(self.train_class_count[m] < threshold)) / len(self.train_class_count[m])
+            print("fc do cliente ", self.id, self.fraction_of_classes[m], self.imbalance_level[m])
         
 
         self.train_slow = kwargs['train_slow']
@@ -118,20 +122,22 @@ class Client(object):
             else:
                 self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=self.learning_rate))
                 # self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=self.learning_rate)) # , weight_decay=0.5
-                self.learning_rate_scheduler.append(torch.optim.lr_scheduler.ExponentialLR(
-                    optimizer=self.optimizer[m],
-                    gamma=args.learning_rate_decay_gamma
-                ))
+                # self.learning_rate_scheduler.append(torch.optim.lr_scheduler.ExponentialLR(
+                #     optimizer=self.optimizer[m],
+                #     gamma=args.learning_rate_decay_gamma
+                # ))
         self.learning_rate_decay = args.learning_rate_decay
 
         self.test_metrics_list_dict = [{} for m in range(self.M)]
         self.train_metrics_list_dict = [{} for m in range(self.M)]
 
 
-        for m in range(self.M):
-            trainloader, self.train_class_count[m] = self.load_train_data(m, 1)
+        #
+        # for m in range(self.M):
+        #     trainloader, self.train_class_count[m] = self.load_train_data(m, 1)
+        #     self.fc[m] = np.nonzero(self.train_class_count[m])/len(self.train_class_count[m])
 
-            print("Cliente: ", self.id, " modelo: ", m, " train class count: ", self.train_class_count[m])
+        print("Cliente: ", self.id, " modelo: ", m, " train class count: ", self.train_class_count[m])
 
     def load_wisdm(self, m, name, alpha, mode="train", batch_size=32, dataset_name=None):
 
@@ -190,7 +196,7 @@ class Client(object):
             for class_ in data_unique_count_dict:
                 unique_count[class_] = data_unique_count_dict[class_]
             unique_count = np.array(list(unique_count.values()))
-            # print("Tamanho original dataset: ", len(x_train))
+            print("Wisdm tamanho original dataset: ", len(x_train))
 
             training_dataset = torch.utils.data.TensorDataset(torch.from_numpy(x_train).to(dtype=torch.float32), torch.from_numpy(y_train).to(dtype=torch.int32))
             validation_dataset = torch.utils.data.TensorDataset(torch.from_numpy(x_test).to(dtype=torch.float32), torch.from_numpy(y_test).to(dtype=torch.int32))
@@ -355,7 +361,7 @@ class Client(object):
             print("load ImageNet client base")
             print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
 
-    def load_train_data(self, m, t, batch_size=None):
+    def load_train_data(self, m, t, batch_size=32):
 
         try:
             alpha = self.alpha[m]
@@ -366,11 +372,10 @@ class Client(object):
                 return self.load_wisdm(m=m, alpha=alpha, name=self.dataset[m],  mode='train')
             elif "ImageNet" in self.dataset[m]:
                 return self.load_imagenet(self.dataset[m], m=m, alpha=alpha, t=t, mode='train')
+            if self.dataset[m] == "GTSRB":
+                return read_gtsrb(name=self.dataset[m], args=self.args, m=m, cid=self.id, t=t, mode='train')
             else:
-                if batch_size == None:
-                    batch_size = self.batch_size
-                train_data, unique_count = read_client_data(m, self.id, args=self.args, is_train=True)
-                return DataLoader(train_data, batch_size, drop_last=True, shuffle=True), unique_count
+                return read_client_data_v2(m, self.dataset[m], self.id, batch_size=batch_size, args=self.args, mode="train")
         except Exception as e:
             print("load train data")
             print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
@@ -387,11 +392,10 @@ class Client(object):
                 return self.load_wisdm(m=m, name=self.dataset[m], alpha=alpha, mode='test')
             elif "ImageNet" in self.dataset[m]:
                 return self.load_imagenet(name=self.dataset[m], m=m, alpha=alpha, t=t, mode='test')
+            if self.dataset[m] == "GTSRB":
+                return read_gtsrb(name=self.dataset[m], m=m, cid=self.id, args=self.args, t=t, mode='test')
             else:
-                if batch_size == None:
-                    batch_size = self.batch_size
-                test_data = read_client_data(m, self.id, args=self.args, is_train=False)
-                return DataLoader(test_data, batch_size, drop_last=False, shuffle=True)
+                return read_client_data_v2(m, self.dataset[m], self.id, batch_size=batch_size, args=self.args, mode="test")
         except Exception as e:
             print("load test data")
             print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
@@ -416,7 +420,7 @@ class Client(object):
         for param, new_param in zip(model.parameters(), new_params):
             param.data = new_param.data.clone()
 
-    def test_metrics(self, m, model, t):
+    def test_metrics(self, m, t, T, global_model):
 
         g = torch.Generator()
         g.manual_seed(self.id)
@@ -430,8 +434,15 @@ class Client(object):
             if self.alpha[m] != alpha:
                 self.alpha[m] = alpha
                 self.update_loader[m] = True
-                self.testloaderfull[m] = self.load_test_data(m, t)
-                self.trainloader[m], self.train_class_count[m] = self.load_train_data(m, t)
+                self.testloaderfull[m] = self.load_test_data(m, t, batch_size=self.batch_size)
+                self.trainloader[m], self.train_class_count[m] = self.load_train_data(m, t, batch_size=self.batch_size[m])
+                self.train_samples[m] = 0
+                for sample in self.trainloader[m]:
+                    self.train_samples[m] += len(sample)
+                threshold = np.sum(self.train_class_count[m]) / len(self.train_class_count[m])
+                self.imbalance_level[m] = len(np.argwhere(self.train_class_count[m] < threshold)) / len(
+                    self.train_class_count[m])
+                print("fc do cliente ", self.id, self.fraction_of_classes[m], self.imbalance_level[m])
             else:
                 self.update_loader[m] = False
         testloaderfull = self.testloaderfull[m]
@@ -440,9 +451,6 @@ class Client(object):
         random.seed(self.id)
         np.random.seed(self.id)
         torch.manual_seed(self.id)
-        # self.model = self.load_model('model')
-        # self.model.to(self.device)
-        #self.set_parameters(m, model)
         self.model[m].to(self.device)
         self.model[m].eval()
 
@@ -452,7 +460,7 @@ class Client(object):
         y_prob = []
         y_true = []
         contab = 0
-        
+
         with torch.no_grad():
             for x, y in testloaderfull:
                 if type(x) == type([]):
@@ -527,8 +535,15 @@ class Client(object):
             if self.alpha[m] != alpha:
                 self.alpha[m] = alpha
                 self.update_loader[m] = True
-                self.testloaderfull[m] = self.load_test_data(m, t)
-                self.trainloader[m], self.train_class_count[m] = self.load_train_data(m, t)
+                self.testloaderfull[m] = self.load_test_data(m, t, batch_size=self.batch_size[m])
+                self.trainloader[m], self.train_class_count[m] = self.load_train_data(m, t, batch_size=self.batch_size[m])
+                self.train_samples[m] = 0
+                for sample in self.trainloader[m]:
+                    self.train_samples[m] += len(sample)
+                threshold = np.sum(self.train_class_count[m]) / len(self.train_class_count[m])
+                self.imbalance_level[m] = len(np.argwhere(self.train_class_count[m] < threshold)) / len(
+                    self.train_class_count[m])
+                print("fc do cliente ", self.id, self.fraction_of_classes[m], self.imbalance_level[m])
             else:
                 self.update_loader[m] = False
         trainloader = self.trainloader[m]

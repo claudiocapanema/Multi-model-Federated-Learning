@@ -24,15 +24,15 @@ from utils.privacy import *
 
 
 class clientAVG(Client):
-    def __init__(self, args, id, train_samples, test_samples, **kwargs):
-        super().__init__(args, id, train_samples, test_samples, **kwargs)
+    def __init__(self, args, id, **kwargs):
+        super().__init__(args, id, **kwargs)
 
-    def train(self, m, global_model, t):
+    def train(self, m, t, global_model):
         trainloader = self.trainloader[m]
         self.set_parameters(m, global_model)
         self.model[m].to(self.device)
         self.model[m].train()
-        print("Dataset: ", self.dataset[m], m)
+        print("Dataset: ", self.dataset[m], m, self.id)
 
         # differential privacy
         if self.privacy:
@@ -48,18 +48,20 @@ class clientAVG(Client):
 
         for epoch in range(max_local_epochs):
             for i, (x, y) in enumerate(trainloader):
+                # print(x.shape, y.shape)
+                # exit()
                 if type(x) == type([]):
                     x[0] = x[0].to(self.device)
                 else:
                     x = x.to(self.device)
-                if type(y) == tuple:
-                    y = torch.from_numpy(np.array(list(y), dtype=np.int32))
+                y = torch.from_numpy(np.array(y).astype(int)).to(self.device)
                 y = y.type(torch.LongTensor).to(self.device)
                 if self.train_slow:
                     time.sleep(0.1 * np.abs(np.random.rand()))
+                self.optimizer[m].zero_grad()
                 output = self.model[m](x).to(self.device)
                 loss = self.loss(output, y)
-                self.optimizer[m].zero_grad()
+
                 loss.backward()
                 self.optimizer[m].step()
 

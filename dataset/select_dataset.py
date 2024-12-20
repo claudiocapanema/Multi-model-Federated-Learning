@@ -1,6 +1,6 @@
 from xml.sax.expatreader import version
 
-import tensorflow as tf
+
 import torch
 import numpy as np
 import random
@@ -283,10 +283,49 @@ class ManageDatasets():
 
     def load_MNIST(self):
 
-        (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
-        x_train, x_test = x_train / 255.0, x_test / 255.0
+        dir_path = "data/MNIST/"
 
-        return x_train, y_train, x_test, y_test
+        if not os.path.exists(dir_path):
+            os.makedirs(dir_path)
+
+            # Setup directory for train/test data
+        config_path = dir_path + "config.json"
+        train_path = dir_path + "train/"
+        test_path = dir_path + "test/"
+
+        from six.moves import urllib
+        opener = urllib.request.build_opener()
+        opener.addheaders = [('User-agent', 'Mozilla/5.0')]
+        urllib.request.install_opener(opener)
+
+        # Get EMNIST data
+        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0.5], [0.5])])
+
+        trainset = torchvision.datasets.MNIST(
+            root=dir_path + "rawdata", train=True, download=True, transform=transform)
+        testset = torchvision.datasets.MNIST(
+            root=dir_path + "rawdata", train=False, download=True, transform=transform)
+        trainloader = torch.utils.data.DataLoader(
+            trainset, batch_size=len(trainset.data), shuffle=False)
+        testloader = torch.utils.data.DataLoader(
+            testset, batch_size=len(testset.data), shuffle=False)
+
+        for _, train_data in enumerate(trainloader, 0):
+            trainset.data, trainset.targets = train_data
+        for _, test_data in enumerate(testloader, 0):
+            testset.data, testset.targets = test_data
+
+        dataset_image = []
+        dataset_label = []
+
+        dataset_image.extend(trainset.data.cpu().detach().numpy())
+        dataset_image.extend(testset.data.cpu().detach().numpy())
+        dataset_label.extend(trainset.targets.cpu().detach().numpy())
+        dataset_label.extend(testset.targets.cpu().detach().numpy())
+        dataset_image = np.array(dataset_image)
+        dataset_label = np.array(dataset_label)
+
+        return dataset_image, dataset_label, np.array([]), np.array([])
 
     def load_CIFAR10(self):
 
@@ -309,9 +348,9 @@ class ManageDatasets():
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0.5], [0.5])])
 
         trainset = torchvision.datasets.CIFAR10(
-            root=dir_path + "raw_data", train=True, download=True, transform=transform)
+            root=dir_path + "rawdata", train=True, download=True, transform=transform)
         testset = torchvision.datasets.CIFAR10(
-            root=dir_path + "raw_data", train=False, download=True, transform=transform)
+            root=dir_path + "rawdata", train=False, download=True, transform=transform)
         trainloader = torch.utils.data.DataLoader(
             trainset, batch_size=len(trainset.data), shuffle=False)
         testloader = torch.utils.data.DataLoader(
@@ -335,10 +374,49 @@ class ManageDatasets():
         return dataset_image, dataset_label, np.array([]), np.array([])
 
     def load_CIFAR100(self):
-        (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar100.load_data()
-        x_train, x_test = x_train / 255.0, x_test / 255.0
+        dir_path = "data/CIFAR100/"
 
-        return x_train, y_train, x_test, y_test
+        if not os.path.exists(dir_path):
+            os.makedirs(dir_path)
+
+            # Setup directory for train/test data
+        config_path = dir_path + "config.json"
+        train_path = dir_path + "train/"
+        test_path = dir_path + "test/"
+
+        from six.moves import urllib
+        opener = urllib.request.build_opener()
+        opener.addheaders = [('User-agent', 'Mozilla/5.0')]
+        urllib.request.install_opener(opener)
+
+        # Get EMNIST data
+        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0.5], [0.5])])
+
+        trainset = torchvision.datasets.CIFAR100(
+            root=dir_path + "rawdata", train=True, download=True, transform=transform)
+        testset = torchvision.datasets.CIFAR100(
+            root=dir_path + "rawdata", train=False, download=True, transform=transform)
+        trainloader = torch.utils.data.DataLoader(
+            trainset, batch_size=len(trainset.data), shuffle=False)
+        testloader = torch.utils.data.DataLoader(
+            testset, batch_size=len(testset.data), shuffle=False)
+
+        for _, train_data in enumerate(trainloader, 0):
+            trainset.data, trainset.targets = train_data
+        for _, test_data in enumerate(testloader, 0):
+            testset.data, testset.targets = test_data
+
+        dataset_image = []
+        dataset_label = []
+
+        dataset_image.extend(trainset.data.cpu().detach().numpy())
+        dataset_image.extend(testset.data.cpu().detach().numpy())
+        dataset_label.extend(trainset.targets.cpu().detach().numpy())
+        dataset_label.extend(testset.targets.cpu().detach().numpy())
+        dataset_image = np.array(dataset_image)
+        dataset_label = np.array(dataset_label)
+
+        return dataset_image, dataset_label, np.array([]), np.array([])
 
     def load_imagenet(self, dataset_name):
 
@@ -441,70 +519,49 @@ class ManageDatasets():
 
     def load_gtsrb(self):
 
-        dir_path = "data/GTSRB/raw_data/"
+        file_dir_path = "../dataset/GTSRB/rawdata/"
 
-        if not os.path.exists(dir_path):
-            os.makedirs(dir_path)
+        trainset = datasets.ImageFolder(
+            file_dir_path + "Train",
+            transforms.Compose(
+                [
 
-            # Setup directory for train/test data
-        config_path = dir_path + "config.json"
-        train_path = dir_path + "train/"
-        test_path = dir_path + "test/"
+                    transforms.Resize((32, 32)),
+                    transforms.RandomHorizontalFlip(),  # FLips the image w.r.t horizontal axis
+                    transforms.RandomRotation(10),  # Rotates the image to a specified angel
+                    transforms.RandomAffine(0, shear=10, scale=(0.8, 1.2)),
+                    # Performs actions like zooms, change shear angles.
+                    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+                    transforms.ToTensor(),
+                    transforms.Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
+                ]
+            )
+        )
 
-        trainset, valset = load_data_gtsrb(dir_path)
+        valset = datasets.ImageFolder(
+            file_dir_path + "Train",
+            transforms.Compose(
+                [
+
+                    transforms.Resize((32, 32)),
+                    transforms.ToTensor(),
+                    transforms.Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
+                ]
+            )
+        )
 
         np.random.seed(0)
 
         dataset_image = []
+        dataset_samples = []
         dataset_label = []
-        for i in range(1):
-            dataset_image.extend(trainset.samples)
-            dataset_label.extend(trainset.targets)
+        dataset_samples.extend(trainset.samples)
+        dataset_image.extend(trainset.imgs)
+        dataset_label.extend(trainset.targets)
         dataset_image = np.array(dataset_image)
         dataset_label = np.array(dataset_label)
 
-        print("rotulos: ", dataset_label, dataset_label[0])
-
         return dataset_image, dataset_label, np.array([]), np.array([])
-
-        # transform = transforms.Compose(
-        #     [
-        #         transforms.RandomHorizontalFlip(),
-        #         transforms.RandomResizedCrop(224),
-        #         transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.5),
-        #         transforms.RandomRotation(degrees=60, expand=False),
-        #         transforms.ToTensor(),
-        #         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        #     ]
-        # )
-        #
-        # trainset = torchvision.datasets.GTSRB(
-        #     root=dir_path + "raw_data", split='train', download=True, transform=transform)
-        # testset = torchvision.datasets.GTSRB(
-        #     root=dir_path + "raw_data", split='test', download=True, transform=transform)
-        # trainloader = torch.utils.data.DataLoader(
-        #     trainset, batch_size=len(trainset._samples), shuffle=False)
-        # testloader = torch.utils.data.DataLoader(
-        #     testset, batch_size=len(testset._samples), shuffle=False)
-
-
-
-        # for _, train_data in enumerate(trainloader, 0):
-        #     trainset.data, trainset.targets = train_data
-        # for _, test_data in enumerate(testloader, 0):
-        #     testset.data, testset.targets = test_data
-        #
-        # dataset_image = []
-        # dataset_label = []
-        #
-        # dataset_image.extend(trainset.data.cpu().detach().numpy())
-        # dataset_image.extend(testset.data.cpu().detach().numpy())
-        # dataset_label.extend(trainset.targets.cpu().detach().numpy())
-        # dataset_label.extend(testset.targets.cpu().detach().numpy())
-        # dataset_image = np.array(dataset_image)
-        # dataset_label = np.array(dataset_label)
-        #
-        # return dataset_image, dataset_label, np.array([]), np.array([])
 
     def load_emnist(self):
 
@@ -527,9 +584,9 @@ class ManageDatasets():
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0.5], [0.5])])
 
         trainset = torchvision.datasets.EMNIST(
-            root=dir_path + "raw_data", train=True, download=True, transform=transform, split='balanced')
+            root=dir_path + "rawdata", train=True, download=True, transform=transform, split='balanced')
         testset = torchvision.datasets.EMNIST(
-            root=dir_path + "raw_data", train=False, download=True, transform=transform, split='balanced')
+            root=dir_path + "rawdata", train=False, download=True, transform=transform, split='balanced')
         trainloader = torch.utils.data.DataLoader(
             trainset, batch_size=len(trainset.data), shuffle=False)
         testloader = torch.utils.data.DataLoader(
@@ -589,9 +646,9 @@ class ManageDatasets():
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0.5], [0.5])])
 
         trainset = torchvision.datasets.EMNIST(
-            root=dir_path + "raw_data", train=True, download=True, transform=transform, split='balanced')
+            root=dir_path + "rawdata", train=True, download=True, transform=transform, split='balanced')
         testset = torchvision.datasets.EMNIST(
-            root=dir_path + "raw_data", train=False, download=True, transform=transform, split='balanced')
+            root=dir_path + "rawdata", train=False, download=True, transform=transform, split='balanced')
         trainloader = torch.utils.data.DataLoader(
             trainset, batch_size=len(trainset.data), shuffle=False)
         testloader = torch.utils.data.DataLoader(

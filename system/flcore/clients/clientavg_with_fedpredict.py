@@ -15,6 +15,7 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
+import random
 import copy
 import torch
 import numpy as np
@@ -27,8 +28,8 @@ from fedpredict import fedpredict_client_torch
 
 
 class ClientAvgWithFedPredict(clientAVG):
-    def __init__(self, args, id, train_samples, test_samples, **kwargs):
-        super().__init__(args, id, train_samples, test_samples, **kwargs)
+    def __init__(self, args, id, **kwargs):
+        super().__init__(args, id,  **kwargs)
         self.last_training_round = 0
         self.combined_model = copy.deepcopy(self.model)
 
@@ -39,22 +40,47 @@ class ClientAvgWithFedPredict(clientAVG):
         # combined_model = fedpredict_client_torch(local_model=self.model[m], global_model=global_model,
         #                                          t=t, T=100, nt=nt)
         # self.set_parameters(m, combined_model)
-        return super().train(m, global_model, t)
+        return super().train(m, t, global_model)
 
     def set_parameters_combined_model(self, m, model):
         for new_param, old_param in zip(model.parameters(), self.combined_model[m].parameters()):
             old_param.data = new_param.data.clone()
 
-    def test_metrics(self, m, global_model, t, T):
+    def test_metrics(self, m, t, T, global_model):
+        g = torch.Generator()
+        g.manual_seed(self.id)
+        random.seed(self.id)
+        np.random.seed(self.id)
+        torch.manual_seed(self.id)
+        if bool(self.args.concept_drift):
+            alpha = float(
+                self.experiment_config_df.query("""Dataset == '{}' and Round == {}""".format(self.dataset[m], t))[
+                    "Alpha"])
+            if self.alpha[m] != alpha:
+                self.alpha[m] = alpha
+                self.update_loader[m] = True
+                self.testloaderfull[m] = self.load_test_data(m, t)
+                self.trainloader[m], self.train_class_count[m] = self.load_train_data(m, t)
+                threshold = np.sum(self.train_class_count[m]) / len(self.train_class_count[m])
+                self.imbalance_level[m] = len(np.argwhere(self.train_class_count[m] < threshold)) / len(
+                    self.train_class_count[m])
+                print("fc do cliente ", self.id, self.fraction_of_classes[m], self.imbalance_level[m])
+            else:
+                self.update_loader[m] = False
+
+        g = torch.Generator()
+        g.manual_seed(self.id)
+        random.seed(self.id)
+        np.random.seed(self.id)
+        torch.manual_seed(self.id)
+        self.model[m].to(self.device)
+        self.model[m].eval()
+
         nt = t - self.last_training_round
-        print("nt: ", nt, t, self.last_training_round)
+        global_model = global_model.to(self.device)
         combined_model = fedpredict_client_torch(local_model=self.model[m], global_model=global_model,
-                                  t=t, T=100, nt=nt)
+                                  t=t, T=100, nt=nt, device=self.device, fc=self.fraction_of_classes[m], imbalance_level=self.imbalance_level[m])
         self.set_parameters_combined_model(m, combined_model)
-        testloaderfull = self.load_test_data(m, t)
-        # self.model = self.load_model('model')
-        # self.model.to(self.device)
-        # self.set_parameters(m, model)
         self.combined_model[m].to(self.device)
         self.combined_model[m].eval()
 
@@ -65,7 +91,7 @@ class ClientAvgWithFedPredict(clientAVG):
         y_true = []
 
         with torch.no_grad():
-            for x, y in testloaderfull:
+            for x, y in self.testloaderfull[m]:
                 if type(x) == type([]):
                     x[0] = x[0].to(self.device)
                 else:
@@ -74,6 +100,8 @@ class ClientAvgWithFedPredict(clientAVG):
                     y = torch.from_numpy(np.array(list(y), dtype=np.int32))
                 y = y.type(torch.LongTensor).to(self.device)
                 output = self.combined_model[m](x)
+                # print("saida: ", output.shape, output.detach().cpu().numpy())
+                # exit()
                 loss = self.loss(output, y)
                 test_loss += loss.item() * y.shape[0]
 

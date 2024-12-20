@@ -22,7 +22,7 @@ import csv
 import copy
 import time
 import random
-from utils.data_utils import read_client_data
+from utils.data_utils import read_client_data_v2
 from utils.dlg import DLG
 
 from functools import reduce
@@ -149,13 +149,8 @@ class Server(object):
         for i, train_slow, send_slow in zip(range(self.num_clients), self.train_slow_clients, self.send_slow_clients):
             train_data = []
             test_data = []
-            for m in range(self.M):
-                train_data.append(len(read_client_data(m, i, args=self.args, is_train=True)))
-                test_data.append(len(read_client_data(m, i, args=self.args, is_train=False)))
             client = clientObj(self.args,
                             id=i,
-                            train_samples=train_data,
-                            test_samples=test_data,
                             train_slow=train_slow,
                             send_slow=send_slow)
             self.clients.append(client)
@@ -501,7 +496,7 @@ class Server(object):
         for i in range(len(test_clients)):
             # if i in self.selected_clients[m] or t == 1:
             c = test_clients[i]
-            test_acc, test_loss, test_num, test_auc, test_balanced_acc, test_micro_fscore, test_macro_fscore, test_weighted_fscore, alpha = c.test_metrics(m, copy.deepcopy(self.global_model[m].to(self.device)), t=t)
+            test_acc, test_loss, test_num, test_auc, test_balanced_acc, test_micro_fscore, test_macro_fscore, test_weighted_fscore, alpha = c.test_metrics(m, t, self.global_rounds, copy.deepcopy(self.global_model[m].to(self.device)))
             self.clients_test_metrics[i]["Accuracy"][m].append(test_acc)
             self.clients_test_metrics[i]["Loss"][m].append(test_loss)
             self.clients_test_metrics[i]["Balanced accuracy"][m].append(test_balanced_acc)
@@ -670,7 +665,7 @@ class Server(object):
         self.results_test_metrics[m]['Fraction fit'].append(self.join_ratio)
         self.results_test_metrics[m]['# training clients'].append(len(self.selected_clients[m]))
         self.results_test_metrics[m]['training clients and models'].append(list(self.selected_clients[m]))
-        print("ddd: ", self.models_size, m)
+        print("Tamanho do modelo: ", self.models_size, m)
         self.results_test_metrics[m]['model size'].append(self.models_size[m])
 
         self.results_test_metrics_w[m]['Round'].append(t)
@@ -772,10 +767,10 @@ class Server(object):
 
         # self.save_item(items, f'DLG_{R}')
 
-    def set_new_clients(self, clientObj):
+    def set_new_clients(self, clientObj, m):
         for i in range(self.num_clients, self.num_clients + self.num_new_clients):
-            train_data = read_client_data(self.dataset, i, is_train=True)
-            test_data = read_client_data(self.dataset, i, is_train=False)
+            train_data = read_client_data_v2(self.dataset[m], i, mode="train")
+            test_data = read_client_data_v2(self.dataset[m], i, mode="test")
             client = clientObj(self.args, 
                             id=i, 
                             train_samples=len(train_data), 

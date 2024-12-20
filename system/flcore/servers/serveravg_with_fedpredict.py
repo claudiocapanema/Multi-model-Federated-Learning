@@ -42,17 +42,19 @@ class MultiFedAvgWithFedPredict(Server):
         self._get_models_size()
         for t in range(1, self.global_rounds + 1):
             s_t = time.time()
-            self.current_round = t
             self.selected_clients = self.select_clients(t)
             # self.send_models()
+            print(self.selected_clients)
+
             for m in range(len(self.selected_clients)):
+
+                for i in range(len(self.selected_clients[m])):
+                    self.clients[self.selected_clients[m][i]].train(m, t, self.global_model[m])
+
                 if t % self.eval_gap == 0:
                     print(f"\n-------------Round number: {t}-------------")
-                    print("\nEvaluate global model")
+                    print("\nEvaluate global model for ", self.dataset[m])
                     self.evaluate(m, t=t)
-
-                for t in range(len(self.selected_clients[m])):
-                    self.clients[self.selected_clients[m][t]].train(m, t, self.global_model[m])
 
             # threads = [Thread(target=client.train)
             #            for client in self.selected_clients]
@@ -88,114 +90,114 @@ class MultiFedAvgWithFedPredict(Server):
                 print("\nEvaluate new clients")
                 self.evaluate(m, t=t)
 
-    def test_metrics(self, m, t):
-        if self.eval_new_clients and self.num_new_clients > 0:
-            self.fine_tuning_new_clients()
-            test_clients = self.new_clients
-        else:
-            test_clients = self.clients
-
-        num_samples = []
-        accs_w = []
-        std_accs_w = []
-        loss_w = []
-        std_losses_w = []
-        auc_w = []
-        balanced_acc_w = []
-        micro_fscore_w = []
-        weighted_fscore_w = []
-        macro_fscore_w = []
-        accs = []
-        std_accs = []
-        loss = []
-        std_losses = []
-        auc = []
-        balanced_acc = []
-        micro_fscore = []
-        weighted_fscore = []
-        macro_fscore = []
-        alpha_list = []
-        for i in range(len(test_clients)):
-            # if i in self.selected_clients[m] or t == 1:
-            c = test_clients[i]
-            test_acc, test_loss, test_num, test_auc, test_balanced_acc, test_micro_fscore, test_macro_fscore, test_weighted_fscore, alpha = c.test_metrics(
-               m=m, global_model=copy.deepcopy(self.global_model[m].to(self.device)), t=t, T=self.args.global_rounds)
-            self.clients_test_metrics[i]["Accuracy"][m].append(test_acc)
-            self.clients_test_metrics[i]["Loss"][m].append(test_loss)
-            self.clients_test_metrics[i]["Balanced accuracy"][m].append(test_balanced_acc)
-            self.clients_test_metrics[i]["Micro f1-score"][m].append(test_micro_fscore)
-            self.clients_test_metrics[i]["Samples"][m].append(test_num)
-            # print("test_weighted_fscore: ", test_weighted_fscore, len(self.clients_test_metrics[i]["Weighted f1-score"][m]))
-            self.clients_test_metrics[i]["Weighted f1-score"][m].append(test_weighted_fscore)
-            self.clients_test_metrics[i]["Macro f1-score"][m].append(test_macro_fscore)
-            self.clients_test_metrics[i]["Round"][m].append(t)
-            # accs.append(test_acc*test_num)
-            # auc.append(test_auc*test_num)
-            # num_samples.append(test_num)
-            # loss.append(test_loss*test_num)
-            # balanced_acc.append(test_balanced_acc*test_num)
-            # micro_fscore.append(test_micro_fscore*test_num)
-            # weighted_fscore.append(test_weighted_fscore*test_num)
-            # macro_fscore.append(test_macro_fscore*test_num)
-            accs_w.append(test_acc * test_num)
-            std_accs_w.append(test_acc * test_num)
-            auc_w.append(test_auc * test_num)
-            num_samples.append(test_num)
-            loss_w.append(test_loss * test_num)
-            std_losses_w.append(test_loss * test_num)
-            balanced_acc_w.append(test_balanced_acc * test_num)
-            micro_fscore_w.append(test_micro_fscore * test_num)
-            weighted_fscore_w.append(test_weighted_fscore * test_num)
-            macro_fscore_w.append(test_macro_fscore * test_num)
-
-            accs.append(test_acc)
-            std_accs.append(test_acc)
-            auc.append(test_auc)
-            # num_samples.append(test_num)
-            loss.append(test_loss)
-            std_losses.append(test_loss)
-            balanced_acc.append(test_balanced_acc)
-            micro_fscore.append(test_micro_fscore)
-            weighted_fscore.append(test_weighted_fscore)
-            macro_fscore.append(test_macro_fscore)
-            alpha_list.append(alpha)
-
-            # print(test_num)
-            # exit()
-
-        ids = [c.id for c in test_clients]
-
-        decimals = 5
-        acc_w = round(sum(accs_w) / sum(num_samples), decimals)
-        std_acc_w = np.round(np.std(np.array(std_accs_w) / sum(num_samples)), decimals)
-        auc_w = round(sum(auc_w) / sum(num_samples), decimals)
-        loss_w = round(sum(loss_w) / sum(num_samples), decimals)
-        std_loss_w = np.round(np.std(np.array(std_losses_w) / sum(num_samples)), decimals)
-        balanced_acc_w = round(sum(balanced_acc_w) / sum(num_samples), decimals)
-        micro_fscore_w = round(sum(micro_fscore_w) / sum(num_samples), decimals)
-        weighted_fscore_w = round(sum(weighted_fscore_w) / sum(num_samples), decimals)
-        macro_fscore_w = round(sum(macro_fscore_w) / sum(num_samples), decimals)
-
-        acc = round(np.mean(accs), decimals)
-        std_acc = np.round(np.std(np.array(std_accs)), decimals)
-        auc = round(np.mean(auc), decimals)
-        loss = round(np.mean(loss), decimals)
-        std_loss = np.round(np.std(np.array(std_losses)), decimals)
-        balanced_acc = round(np.mean(balanced_acc), decimals)
-        micro_fscore = round(np.mean(micro_fscore), decimals)
-        weighted_fscore = round(np.mean(weighted_fscore), decimals)
-        macro_fscore = round(np.mean(macro_fscore), decimals)
-
-        server_metrics = {'ids': ids, 'num_samples': num_samples, 'Accuracy': acc, "Std Accuracy": std_acc, 'AUC': auc,
-                          "Loss": loss, "Std loss": std_loss, "Balanced accuracy": balanced_acc,
-                          "Micro f1-score": micro_fscore,
-                          "Weighted f1-score": weighted_fscore, "Macro f1-score": macro_fscore, "Alpha": alpha_list[0]}
-
-        server_metrics_weighted = {'ids': ids, 'num_samples': num_samples, 'Accuracy': acc_w, "Std Accuracy": std_acc_w,
-                                   'AUC': auc_w,
-                                   "Loss": loss_w, "Std loss": std_loss_w, "Balanced accuracy": balanced_acc_w,
-                                   "Micro f1-score": micro_fscore_w,
-                                   "Weighted f1-score": weighted_fscore_w, "Macro f1-score": macro_fscore_w,
-                                   "Alpha": alpha_list[0]}
-
-        return server_metrics, server_metrics_weighted
+    # def test_metrics(self, m, t):
+    #     if self.eval_new_clients and self.num_new_clients > 0:
+    #         self.fine_tuning_new_clients()
+    #         test_clients = self.new_clients
+    #     else:
+    #         test_clients = self.clients
+    #
+    #     num_samples = []
+    #     accs_w = []
+    #     std_accs_w = []
+    #     loss_w = []
+    #     std_losses_w = []
+    #     auc_w = []
+    #     balanced_acc_w = []
+    #     micro_fscore_w = []
+    #     weighted_fscore_w = []
+    #     macro_fscore_w = []
+    #     accs = []
+    #     std_accs = []
+    #     loss = []
+    #     std_losses = []
+    #     auc = []
+    #     balanced_acc = []
+    #     micro_fscore = []
+    #     weighted_fscore = []
+    #     macro_fscore = []
+    #     alpha_list = []
+    #     for i in range(len(test_clients)):
+    #         # if i in self.selected_clients[m] or t == 1:
+    #         c = test_clients[i]
+    #         test_acc, test_loss, test_num, test_auc, test_balanced_acc, test_micro_fscore, test_macro_fscore, test_weighted_fscore, alpha = c.test_metrics(
+    #            m=m, global_model=copy.deepcopy(self.global_model[m].to(self.device)), t=t, T=self.args.global_rounds)
+    #         self.clients_test_metrics[i]["Accuracy"][m].append(test_acc)
+    #         self.clients_test_metrics[i]["Loss"][m].append(test_loss)
+    #         self.clients_test_metrics[i]["Balanced accuracy"][m].append(test_balanced_acc)
+    #         self.clients_test_metrics[i]["Micro f1-score"][m].append(test_micro_fscore)
+    #         self.clients_test_metrics[i]["Samples"][m].append(test_num)
+    #         # print("test_weighted_fscore: ", test_weighted_fscore, len(self.clients_test_metrics[i]["Weighted f1-score"][m]))
+    #         self.clients_test_metrics[i]["Weighted f1-score"][m].append(test_weighted_fscore)
+    #         self.clients_test_metrics[i]["Macro f1-score"][m].append(test_macro_fscore)
+    #         self.clients_test_metrics[i]["Round"][m].append(t)
+    #         # accs.append(test_acc*test_num)
+    #         # auc.append(test_auc*test_num)
+    #         # num_samples.append(test_num)
+    #         # loss.append(test_loss*test_num)
+    #         # balanced_acc.append(test_balanced_acc*test_num)
+    #         # micro_fscore.append(test_micro_fscore*test_num)
+    #         # weighted_fscore.append(test_weighted_fscore*test_num)
+    #         # macro_fscore.append(test_macro_fscore*test_num)
+    #         accs_w.append(test_acc * test_num)
+    #         std_accs_w.append(test_acc * test_num)
+    #         auc_w.append(test_auc * test_num)
+    #         num_samples.append(test_num)
+    #         loss_w.append(test_loss * test_num)
+    #         std_losses_w.append(test_loss * test_num)
+    #         balanced_acc_w.append(test_balanced_acc * test_num)
+    #         micro_fscore_w.append(test_micro_fscore * test_num)
+    #         weighted_fscore_w.append(test_weighted_fscore * test_num)
+    #         macro_fscore_w.append(test_macro_fscore * test_num)
+    #
+    #         accs.append(test_acc)
+    #         std_accs.append(test_acc)
+    #         auc.append(test_auc)
+    #         # num_samples.append(test_num)
+    #         loss.append(test_loss)
+    #         std_losses.append(test_loss)
+    #         balanced_acc.append(test_balanced_acc)
+    #         micro_fscore.append(test_micro_fscore)
+    #         weighted_fscore.append(test_weighted_fscore)
+    #         macro_fscore.append(test_macro_fscore)
+    #         alpha_list.append(alpha)
+    #
+    #         # print(test_num)
+    #         # exit()
+    #
+    #     ids = [c.id for c in test_clients]
+    #
+    #     decimals = 5
+    #     acc_w = round(sum(accs_w) / sum(num_samples), decimals)
+    #     std_acc_w = np.round(np.std(np.array(std_accs_w) / sum(num_samples)), decimals)
+    #     auc_w = round(sum(auc_w) / sum(num_samples), decimals)
+    #     loss_w = round(sum(loss_w) / sum(num_samples), decimals)
+    #     std_loss_w = np.round(np.std(np.array(std_losses_w) / sum(num_samples)), decimals)
+    #     balanced_acc_w = round(sum(balanced_acc_w) / sum(num_samples), decimals)
+    #     micro_fscore_w = round(sum(micro_fscore_w) / sum(num_samples), decimals)
+    #     weighted_fscore_w = round(sum(weighted_fscore_w) / sum(num_samples), decimals)
+    #     macro_fscore_w = round(sum(macro_fscore_w) / sum(num_samples), decimals)
+    #
+    #     acc = round(np.mean(accs), decimals)
+    #     std_acc = np.round(np.std(np.array(std_accs)), decimals)
+    #     auc = round(np.mean(auc), decimals)
+    #     loss = round(np.mean(loss), decimals)
+    #     std_loss = np.round(np.std(np.array(std_losses)), decimals)
+    #     balanced_acc = round(np.mean(balanced_acc), decimals)
+    #     micro_fscore = round(np.mean(micro_fscore), decimals)
+    #     weighted_fscore = round(np.mean(weighted_fscore), decimals)
+    #     macro_fscore = round(np.mean(macro_fscore), decimals)
+    #
+    #     server_metrics = {'ids': ids, 'num_samples': num_samples, 'Accuracy': acc, "Std Accuracy": std_acc, 'AUC': auc,
+    #                       "Loss": loss, "Std loss": std_loss, "Balanced accuracy": balanced_acc,
+    #                       "Micro f1-score": micro_fscore,
+    #                       "Weighted f1-score": weighted_fscore, "Macro f1-score": macro_fscore, "Alpha": alpha_list[0]}
+    #
+    #     server_metrics_weighted = {'ids': ids, 'num_samples': num_samples, 'Accuracy': acc_w, "Std Accuracy": std_acc_w,
+    #                                'AUC': auc_w,
+    #                                "Loss": loss_w, "Std loss": std_loss_w, "Balanced accuracy": balanced_acc_w,
+    #                                "Micro f1-score": micro_fscore_w,
+    #                                "Weighted f1-score": weighted_fscore_w, "Macro f1-score": macro_fscore_w,
+    #                                "Alpha": alpha_list[0]}
+    #
+    #     return server_metrics, server_metrics_weighted

@@ -138,21 +138,21 @@ def run(args):
 
             elif "cnn_a" in model_str: # non-convex
                 if "EMNIST" == dt or "MNIST" == dt:
-                    model = FedAvgCNN(in_features=1, num_classes=num_classes_m, dim=1024).to(args.device)
+                    model = FedAvgCNN(dataset=dt, in_features=1, num_classes=num_classes_m, dim=1024).to(args.device)
                 elif "CIFAR10" == dt:
-                    model = FedAvgCNN(in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
+                    model = FedAvgCNN(dataset=dt, in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
                 elif "GTSRB" == dt:
-                    model = FedAvgCNN(in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
+                    model = FedAvgCNN(dataset=dt, in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
                 elif "Omniglot" == dt:
-                    model = FedAvgCNN(in_features=1, num_classes=num_classes_m, dim=33856).to(args.device)
+                    model = FedAvgCNN(dataset=dt, in_features=1, num_classes=num_classes_m, dim=33856).to(args.device)
                     # model = CIFARNet(num_classes=num_classes_m).to(args.device)
                 elif "Digit5" == dt:
                     model = Digit5CNN().to(args.device)
                 elif dt in ["ImageNet100", "ImageNet", "ImageNet_v2"]:
                     # model = TinyImageNetCNN().to(args.device)
-                    model = FedAvgCNN(in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
+                    model = FedAvgCNN(dataset=dt, in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
                 else:
-                    model = FedAvgCNN(in_features=3, num_classes=num_classes_m, dim=10816).to(args.device)
+                    model = FedAvgCNN(dataset=dt, in_features=3, num_classes=num_classes_m, dim=10816).to(args.device)
 
             elif model_str == "gru":
                 if dt in ["WISDM-W", "WISDM-P"]:
@@ -250,9 +250,9 @@ def run(args):
 
             # select algorithm
             if args.algorithm == "MultiFedAvg":
-                head = copy.deepcopy(model.fc)
-                model.fc = nn.Identity()
-                model = BaseHeadSplit(model, head)
+                # head = copy.deepcopy(model.fc)
+                # model.fc = nn.Identity()
+                # model = BaseHeadSplit(model, head)
                 server = MultiFedAvg
 
             elif args.algorithm == "Local":
@@ -461,20 +461,20 @@ def run(args):
                 server = MultiFedAvgWithFedPredictTrain
 
             elif args.algorithm == "MultiFedAvgWithFedPredict":
-                head = copy.deepcopy(model.fc)
-                model.fc = nn.Identity()
-                model = BaseHeadSplit(model, head)
+                # head = copy.deepcopy(model.fc)
+                # model.fc = nn.Identity()
+                # model = BaseHeadSplit(model, head)
                 server = MultiFedAvgWithFedPredict
 
             elif args.algorithm == "FedFairMMFL":
-                head = copy.deepcopy(model.fc)
-                model.fc = nn.Identity()
-                model = BaseHeadSplit(model, head)
+                # head = copy.deepcopy(model.fc)
+                # model.fc = nn.Identity()
+                # model = BaseHeadSplit(model, head)
                 server = FedFairMMFL
             elif args.algorithm == "MultiFedAvgRR":
-                head = copy.deepcopy(model.fc)
-                model.fc = nn.Identity()
-                model = BaseHeadSplit(model, head)
+                # head = copy.deepcopy(model.fc)
+                # model.fc = nn.Identity()
+                # model = BaseHeadSplit(model, head)
                 server = MultiFedAvgRR
             elif "MultiFedSpeedRelative" in args.algorithm:
                 head = copy.deepcopy(model.fc)

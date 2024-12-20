@@ -164,31 +164,29 @@ class AmazonMLP(nn.Module):
 #         return x
 
 class FedAvgCNN(nn.Module):
-    def __init__(self, in_features=1, num_classes=10, dim=1024):
+    def __init__(self, dataset, in_features=1, num_classes=10, dim=1024):
         random.seed(0)
         np.random.seed(0)
         torch.manual_seed(0)
         super().__init__()
-        random.seed(0)
-        np.random.seed(0)
-        torch.manual_seed(0)
+        self.dataset = dataset
         # self.conv1 = nn.Sequential(
         #     nn.Conv2d(in_features,
-        #                 32,
-        #                 kernel_size=5,
-        #                 padding=0,
-        #                 stride=1,
-        #                 bias=True),
+        #               32,
+        #               kernel_size=5,
+        #               padding=0,
+        #               stride=1,
+        #               bias=True),
         #     nn.ReLU(inplace=True),
         #     nn.MaxPool2d(kernel_size=(2, 2))
         # )
         # self.conv2 = nn.Sequential(
         #     nn.Conv2d(32,
-        #                 64,
-        #                 kernel_size=5,
-        #                 padding=0,
-        #                 stride=1,
-        #                 bias=True),
+        #               64,
+        #               kernel_size=5,
+        #               padding=0,
+        #               stride=1,
+        #               bias=True),
         #     nn.ReLU(inplace=True),
         #     nn.MaxPool2d(kernel_size=(2, 2))
         # )
@@ -197,6 +195,7 @@ class FedAvgCNN(nn.Module):
         #     nn.ReLU(inplace=True)
         # )
         # self.fc = nn.Linear(512, num_classes)
+
         self.conv1 = nn.Conv2d(in_features,
                       32,
                       kernel_size=5,
@@ -213,14 +212,29 @@ class FedAvgCNN(nn.Module):
         self.fc = nn.Linear(512, num_classes)
 
     def forward(self, x):
-        random.seed(0)
-        np.random.seed(0)
-        torch.manual_seed(0)
+        # random.seed(0)
+        # np.random.seed(0)
+        # torch.manual_seed(0)
+        if self.dataset == "CIFAR10":
+            x = x.permute(0, 3, 1, 2)
+        # elif self.dataset == "EMNIST":
+        #     # [1, 32, 28, 28]
+        #     # x = x.permute(0, 1, 2)
+        #     # x = torch.reshape(x, (32, 1, 28, 28))
+        #     pass
+
         out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv1(x)))
         out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv2(out)))
         out = torch.flatten(out, 1)
         out = nn.ReLU(inplace=True)(self.fc1(out))
         out = self.fc(out)
+        return out
+
+        # out = self.conv1(x)
+        # out = self.conv2(out)
+        # out = torch.flatten(out, 1)
+        # out = self.fc1(out)
+        # out = self.fc(out)
         return out
 
 class TinyImageNetCNN(nn.Module):

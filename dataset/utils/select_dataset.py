@@ -307,9 +307,9 @@ class ManageDatasets():
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0.5], [0.5])])
 
         trainset = torchvision.datasets.CIFAR10(
-            root=dir_path + "raw_data", train=True, download=True, transform=transform)
+            root=dir_path + "rawdata", train=True, download=True, transform=transform)
         testset = torchvision.datasets.CIFAR10(
-            root=dir_path + "raw_data", train=False, download=True, transform=transform)
+            root=dir_path + "rawdata", train=False, download=True, transform=transform)
         trainloader = torch.utils.data.DataLoader(
             trainset, batch_size=len(trainset.data), shuffle=False)
         testloader = torch.utils.data.DataLoader(
@@ -340,7 +340,7 @@ class ManageDatasets():
 
     def load_imagenet(self):
 
-        dir_path = "data/Tiny-ImageNet/raw_data/"
+        dir_path = "data/Tiny-ImageNet/rawdata/"
 
         if not os.path.exists(dir_path):
             os.makedirs(dir_path)
@@ -432,7 +432,7 @@ class ManageDatasets():
 
     def load_gtsrb(self):
 
-        dir_path = "data/GTSRB/raw_data/"
+        dir_path = "data/GTSRB/rawdata/"
 
         if not os.path.exists(dir_path):
             os.makedirs(dir_path)
@@ -470,9 +470,9 @@ class ManageDatasets():
         # )
         #
         # trainset = torchvision.datasets.GTSRB(
-        #     root=dir_path + "raw_data", split='train', download=True, transform=transform)
+        #     root=dir_path + "rawdata", split='train', download=True, transform=transform)
         # testset = torchvision.datasets.GTSRB(
-        #     root=dir_path + "raw_data", split='test', download=True, transform=transform)
+        #     root=dir_path + "rawdata", split='test', download=True, transform=transform)
         # trainloader = torch.utils.data.DataLoader(
         #     trainset, batch_size=len(trainset._samples), shuffle=False)
         # testloader = torch.utils.data.DataLoader(
@@ -518,9 +518,9 @@ class ManageDatasets():
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0.5], [0.5])])
 
         trainset = torchvision.datasets.EMNIST(
-            root=dir_path + "raw_data", train=True, download=True, transform=transform, split='balanced')
+            root=dir_path + "rawdata", train=True, download=True, transform=transform, split='balanced')
         testset = torchvision.datasets.EMNIST(
-            root=dir_path + "raw_data", train=False, download=True, transform=transform, split='balanced')
+            root=dir_path + "rawdata", train=False, download=True, transform=transform, split='balanced')
         trainloader = torch.utils.data.DataLoader(
             trainset, batch_size=len(trainset.data), shuffle=False)
         testloader = torch.utils.data.DataLoader(
@@ -580,9 +580,9 @@ class ManageDatasets():
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0.5], [0.5])])
 
         trainset = torchvision.datasets.EMNIST(
-            root=dir_path + "raw_data", train=True, download=True, transform=transform, split='balanced')
+            root=dir_path + "rawdata", train=True, download=True, transform=transform, split='balanced')
         testset = torchvision.datasets.EMNIST(
-            root=dir_path + "raw_data", train=False, download=True, transform=transform, split='balanced')
+            root=dir_path + "rawdata", train=False, download=True, transform=transform, split='balanced')
         trainloader = torch.utils.data.DataLoader(
             trainset, batch_size=len(trainset.data), shuffle=False)
         testloader = torch.utils.data.DataLoader(
