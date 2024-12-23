@@ -338,15 +338,15 @@ class Server(object):
             result_path = """../results/concept_drift_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(
                 cd,
                 self.num_clients,
-                self.alpha[0],
+                [self.alpha[0]],
                 self.alpha[
                     0],
                 self.alpha[
                     0],
-                self.dataset[0],
+                [self.dataset[0]],
                 0,
                 0,
-                self.models_names[0],
+                [self.models_names[0]],
                 self.args.join_ratio,
                 self.args.global_rounds,
                 self.local_epochs)
@@ -368,15 +368,6 @@ class Server(object):
                 self.args.global_rounds,
                 self.local_epochs)
 
-        # """../concept_drift_configs/rounds_{}/datasets_{}/concept_drift_rounds_{}_{}/alpha_initial_{}_{}/alpha_end_{}_{}/config.csv""".format(
-        #     self.args.global_rounds,
-        #     self.dataset,
-        #     self.rounds_concept_drift[0],
-        #     self.rounds_concept_drift[1],
-        #     self.alpha[0],
-        #     self.alpha[1],
-        #     self.alpha_end[0],
-        #     self.alpha_end[1]
         if not os.path.exists(result_path):
             os.makedirs(result_path)
 
@@ -409,20 +400,7 @@ class Server(object):
 
     def get_results_weighted(self, m):
 
-        algo = self.dataset[m] + "_" + self.algorithm + "_weighted"
-        result_path = """../results/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(self.num_clients,
-                                                                                                   self.alpha,
-                                                                                                   self.dataset,
-                                                                                                   self.models_names,
-                                                                                                   self.args.join_ratio,
-                                                                                                   self.args.global_rounds,
-                                                                                                   self.local_epochs)
-        if not os.path.exists(result_path):
-            os.makedirs(result_path)
-
         if (len(self.rs_test_acc)):
-            algo = algo + "_" + self.goal + "_" + str(self.times)
-            file_path = result_path + "{}.csv".format(algo)
             header = self.test_metrics_names
             print(self.rs_test_acc)
             print(self.rs_test_auc)
@@ -441,11 +419,10 @@ class Server(object):
 
                 data.append(row)
 
-            print("File path: " + file_path)
             print(data)
             print("me: ", self.rs_test_acc)
 
-            return file_path, header, data
+            return header, data
         
     def save_results(self, m):
 
@@ -453,7 +430,8 @@ class Server(object):
             self.clients_test_metrics_preprocess(m, file_path)
             self._write_header(file_path, header=header)
             self._write_outputs(file_path, data=data)
-            file_path, header, data = self.get_results_weighted(m)
+            header, data = self.get_results_weighted(m)
+            file_path = file_path.replace(".csv", "_weighted.csv")
             self.clients_test_metrics_preprocess(m, file_path)
             self._write_header(file_path, header=header)
             self._write_outputs(file_path, data=data)
@@ -496,7 +474,10 @@ class Server(object):
         for i in range(len(test_clients)):
             # if i in self.selected_clients[m] or t == 1:
             c = test_clients[i]
-            test_acc, test_loss, test_num, test_auc, test_balanced_acc, test_micro_fscore, test_macro_fscore, test_weighted_fscore, alpha = c.test_metrics(m, t, self.global_rounds, copy.deepcopy(self.global_model[m].to(self.device)))
+            global_model = self.global_model[m]
+            if type(global_model) != list:
+                global_model = self.global_model[m].to(self.device)
+            test_acc, test_loss, test_num, test_auc, test_balanced_acc, test_micro_fscore, test_macro_fscore, test_weighted_fscore, alpha = c.test_metrics(m, t, self.global_rounds, copy.deepcopy(global_model))
             self.clients_test_metrics[i]["Accuracy"][m].append(test_acc)
             self.clients_test_metrics[i]["Loss"][m].append(test_loss)
             self.clients_test_metrics[i]["Balanced accuracy"][m].append(test_balanced_acc)
@@ -664,7 +645,7 @@ class Server(object):
         self.results_test_metrics[m]['Round'].append(t)
         self.results_test_metrics[m]['Fraction fit'].append(self.join_ratio)
         self.results_test_metrics[m]['# training clients'].append(len(self.selected_clients[m]))
-        self.results_test_metrics[m]['training clients and models'].append(list(self.selected_clients[m]))
+        self.results_test_metrics[m]['training clients and models'].append(self.selected_clients[m].tolist())
         print("Tamanho do modelo: ", self.models_size, m)
         self.results_test_metrics[m]['model size'].append(self.models_size[m])
 

@@ -222,7 +222,6 @@ def save_dataloaders(dataset_name="CIFAR10", num_clients=40, num_classes=10, nii
 
     num_classes = {'ImageNet': 15, "ImageNet_v2": 15, 'CIFAR10': 10, 'MNIST': 10, 'EMNIST': 47, "State Farm": 10, 'GTSRB': 43}[dataset_name]
 
-    num_clients = 40
     dir_path = dataset_name + "/" + "clients_" + str(num_clients) + "/alpha_" + str(alpha) + "/"
 
     # transform = get_transform(dataset_name)
@@ -230,18 +229,10 @@ def save_dataloaders(dataset_name="CIFAR10", num_clients=40, num_classes=10, nii
 
     target = np.concatenate((y_train, y_test), axis=0).astype(int)
     df = pd.DataFrame({'label': target}).value_counts().reset_index()
-    print(df)
-    # df['count'] = df[0].to_numpy()
     df = df[['label', 'count']]
     x_order = df.sort_values(by='count')['label'].tolist()
-    # df = pd.DataFrame({'label': df.index.tolist(), 'count': df.tolist()})
     print("ordem: ", x_order)
     bar_plot(df=df, base_dir='', file_name="""{}_label_counts_original""".format(dataset_name), title='', x_column='label', y_column='count', x_order=x_order)
-    # print(df)
-    # exit()
-    if dataset_name == 'GTSRB':
-        x = np.concatenate((np.array([i[0] for i in x_train]), np.array([i[0] for i in x_test])), axis=0)
-        print(x[:2])
     print("Quantidade de amostras do ", dataset_name, ": ", len(target))
     masks, statistic = separate_data(target, num_clients, num_classes, dataset_name, niid, balance, partition, class_per_client,
                                      batch_size, train_size, alpha)
@@ -257,12 +248,6 @@ def save_dataloaders(dataset_name="CIFAR10", num_clients=40, num_classes=10, nii
         index_train = train_data[client_id]
         index_test = test_data[client_id]
         final_target += list(target[index_train]) + list(target[index_test])
-        if dataset_name == 'GTSRB':
-            x_client = np.concatenate((x[index_train], x[index_test]), axis=0)
-            df = pd.DataFrame({'x': x_client, 'index': np.concatenate((index_train, index_test), axis=0), 'type': np.concatenate((np.array(['train'] * len(index_train)), np.array(['test'] * len(index_test))), axis=0)}).drop_duplicates('x')
-            index_train = df.query("type == 'train'")['index'].to_numpy()
-            index_test = df.query("type == 'test'")['index'].to_numpy()
-        # print("""Quantidade de dados de treino para o cliente {}: {}, teste: {}""".format(client_id, len(index_train), len(index_test)))
         classes = len(pd.Series(target[index_train]).unique().tolist())
         classes_list.append(classes)
         print("Original: ", len(index_train), " Sem duplicadas: ", len(pd.Series(index_train).drop_duplicates()), " classes: ",  classes, " teste: ", len(index_test))
@@ -283,10 +268,8 @@ def save_dataloaders(dataset_name="CIFAR10", num_clients=40, num_classes=10, nii
 
     print("Media de classes: ", pd.Series(np.array(classes_list)/num_classes).describe())
     df = pd.DataFrame({'label': final_target}).value_counts().reset_index()
-    # df['count'] = df[0].to_numpy()
     df = df[['label', 'count']]
     x_order = df.sort_values(by='count')['label'].tolist()
-    # df = pd.DataFrame({'label': df.index.tolist(), 'count': df.tolist()})
     bar_plot(df=df, base_dir='', file_name="""{}_label_counts_final""".format(dataset_name), title='',
              x_column='label', y_column='count', x_order=x_order)
 

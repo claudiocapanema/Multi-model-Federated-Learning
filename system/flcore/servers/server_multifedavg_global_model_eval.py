@@ -15,20 +15,20 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-import random
 import time
-from flcore.clients.clientper import clientPer
+import numpy as np
+from flcore.clients.clientavg_global_model_eval import clientAVGGlobalModelEval
 from flcore.servers.serverbase import Server
 from threading import Thread
 
 
-class FedPer(Server):
+class MultiFedAvgGlobalModelEval(Server):
     def __init__(self, args, times):
         super().__init__(args, times)
 
         # select slow clients
         self.set_slow_clients()
-        self.set_clients(clientPer)
+        self.set_clients(clientAVGGlobalModelEval)
 
         print(f"\nJoin ratio / total clients: {self.join_ratio} / {self.num_clients}")
         print("Finished creating server and clients.")
@@ -38,18 +38,23 @@ class FedPer(Server):
 
 
     def train(self):
-        for i in range(self.global_rounds+1):
+        self._get_models_size()
+        for t in range(1, self.global_rounds+1):
             s_t = time.time()
-            self.selected_clients = self.select_clients()
-            self.send_models()
+            self.selected_clients = self.select_clients(t)
+            # self.send_models()
+            print(self.selected_clients)
 
-            if i%self.eval_gap == 0:
-                print(f"\n-------------Round number: {i}-------------")
-                print("\nEvaluate personalized models")
-                self.evaluate()
+            for m in range(len(self.selected_clients)):
 
-            for client in self.selected_clients:
-                client.train()
+
+                for i in range(len(self.selected_clients[m])):
+                    self.clients[self.selected_clients[m][i]].train(m, t, self.global_model[m])
+
+                if t%self.eval_gap == 0:
+                    print(f"\n-------------Round number: {t}-------------")
+                    print("\nEvaluate global model for ", self.dataset[m])
+                    self.evaluate(m, t=t)
 
             # threads = [Thread(target=client.train)
             #            for client in self.selected_clients]
@@ -57,8 +62,8 @@ class FedPer(Server):
             # [t.join() for t in threads]
 
             self.receive_models()
-            if self.dlg_eval and i%self.dlg_gap == 0:
-                self.call_dlg(i)
+            if self.dlg_eval and t%self.dlg_gap == 0:
+                self.call_dlg(t)
             self.aggregate_parameters()
 
             self.Budget.append(time.time() - s_t)
@@ -74,31 +79,13 @@ class FedPer(Server):
         print("\nAverage time cost per round.")
         print(sum(self.Budget[1:])/len(self.Budget[1:]))
 
-        self.save_results()
+        for m in range(self.M):
+            self.save_results(m)
+            self.save_global_model(m)
 
-        if self.num_new_clients > 0:
-            self.eval_new_clients = True
-            self.set_new_clients(clientPer)
-            print(f"\n-------------Fine tuning round-------------")
-            print("\nEvaluate new clients")
-            self.evaluate()
-
-
-    def receive_models(self):
-        assert (len(self.selected_clients) > 0)
-
-        active_clients = random.sample(
-            self.selected_clients, int((1-self.client_drop_rate) * self.current_num_join_clients))
-
-        self.uploaded_weights = []
-        self.uploaded_models = []
-        tot_samples = 0
-        for client in active_clients:
-            client_time_cost = client.train_time_cost['total_cost'] / client.train_time_cost['num_rounds'] + \
-                    client.send_time_cost['total_cost'] / client.send_time_cost['num_rounds']
-            if client_time_cost <= self.time_threthold:
-                tot_samples += client.train_samples
-                self.uploaded_weights.append(client.train_samples)
-                self.uploaded_models.append(client.model.base)
-        for i, w in enumerate(self.uploaded_weights):
-            self.uploaded_weights[i] = w / tot_samples
+            if self.num_new_clients > 0:
+                self.eval_new_clients = True
+                self.set_new_clients(clientAVGGlobalModelEval)
+                print(f"\n-------------Fine tuning round-------------")
+                print("\nEvaluate new clients")
+                self.evaluate(m, t=t)

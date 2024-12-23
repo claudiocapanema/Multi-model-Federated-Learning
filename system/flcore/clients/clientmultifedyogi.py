@@ -15,22 +15,32 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
+import copy
+import torch
 import numpy as np
 import time
 from flcore.clients.clientbase import Client
+from utils.privacy import *
 
 
-class clientPer(Client):
-    def __init__(self, args, id, train_samples, test_samples, **kwargs):
-        super().__init__(args, id, train_samples, test_samples, **kwargs)
+class clientMultiFedYogi(Client):
+    def __init__(self, args, id, **kwargs):
+        super().__init__(args, id, **kwargs)
 
-    def train(self):
-        trainloader = self.load_train_data()
+    def train(self, m, t, global_model):
+        trainloader = self.trainloader[m]
+        self.set_parameters(m, global_model)
+        self.model[m].to(self.device)
+        self.model[m].train()
+        print("Dataset: ", self.dataset[m], m, self.id)
+
+        # differential privacy
+        if self.privacy:
+            model_origin = copy.deepcopy(self.model[m])
+            self.model, self.optimizer, trainloader, privacy_engine = \
+                initialize_dp(self.model[m], self.optimizer, trainloader, self.dp_sigma)
         
         start_time = time.time()
-
-        # self.model.to(self.device)
-        self.model.train()
 
         max_local_epochs = self.local_epochs
         if self.train_slow:
@@ -38,27 +48,36 @@ class clientPer(Client):
 
         for epoch in range(max_local_epochs):
             for i, (x, y) in enumerate(trainloader):
+                # print(x.shape, y.shape)
+                # exit()
                 if type(x) == type([]):
                     x[0] = x[0].to(self.device)
                 else:
                     x = x.to(self.device)
-                y = y.to(self.device)
+                y = torch.from_numpy(np.array(y).astype(int)).to(self.device)
+                y = y.type(torch.LongTensor).to(self.device)
                 if self.train_slow:
                     time.sleep(0.1 * np.abs(np.random.rand()))
-                output = self.model(x)
+                self.optimizer[m].zero_grad()
+                output = self.model[m](x).to(self.device)
                 loss = self.loss(output, y)
-                self.optimizer.zero_grad()
+
                 loss.backward()
-                self.optimizer.step()
+                self.optimizer[m].step()
 
         # self.model.cpu()
 
         if self.learning_rate_decay:
-            self.learning_rate_scheduler.step()
+            self.learning_rate_scheduler[m].step()
 
         self.train_time_cost['num_rounds'] += 1
         self.train_time_cost['total_cost'] += time.time() - start_time
 
-    def set_parameters(self, model):
-        for new_param, old_param in zip(model.parameters(), self.model.base.parameters()):
-            old_param.data = new_param.data.clone()
+        if self.privacy:
+            eps, DELTA = get_dp_params(privacy_engine)
+            print(f"Client {self.id}", f"epsilon = {eps:.2f}, sigma = {DELTA}")
+
+            for param, param_dp in zip(model_origin.parameters(), self.model[m].parameters()):
+                param.data = param_dp.data.clone()
+            self.model[m] = model_origin
+            self.optimizer = torch.optim.SGD(self.model[m].parameters(), lr=self.learning_rate)

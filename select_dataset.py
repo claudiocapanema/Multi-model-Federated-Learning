@@ -508,7 +508,7 @@ class ManageDatasets():
 
     def load_emnist(self):
 
-        dir_path = "data/EMNIST/"
+        dir_path = "/EMNIST/"
 
         if not os.path.exists(dir_path):
             os.makedirs(dir_path)

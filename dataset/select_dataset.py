@@ -329,7 +329,7 @@ class ManageDatasets():
 
     def load_CIFAR10(self):
 
-        dir_path = "data/CIFAR10/"
+        dir_path = "CIFAR10/"
 
         if not os.path.exists(dir_path):
             os.makedirs(dir_path)
@@ -374,7 +374,7 @@ class ManageDatasets():
         return dataset_image, dataset_label, np.array([]), np.array([])
 
     def load_CIFAR100(self):
-        dir_path = "data/CIFAR100/"
+        dir_path = "CIFAR100/"
 
         if not os.path.exists(dir_path):
             os.makedirs(dir_path)
@@ -519,7 +519,7 @@ class ManageDatasets():
 
     def load_gtsrb(self):
 
-        file_dir_path = "../dataset/GTSRB/rawdata/"
+        file_dir_path = "GTSRB/rawdata/"
 
         trainset = datasets.ImageFolder(
             file_dir_path + "Train",
@@ -565,7 +565,7 @@ class ManageDatasets():
 
     def load_emnist(self):
 
-        dir_path = "data/EMNIST/"
+        dir_path = "EMNIST/"
 
         if not os.path.exists(dir_path):
             os.makedirs(dir_path)

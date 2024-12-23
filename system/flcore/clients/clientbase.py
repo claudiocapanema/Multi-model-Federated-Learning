@@ -59,9 +59,9 @@ class Client(object):
         self.batch_size = [0] * self.M
         for m in range(self.M):
             if self.dataset[m] == "EMNIST":
-                self.batch_size[m] = 64
+                self.batch_size[m] = 128
             else:
-                self.batch_size[m] = 32
+                self.batch_size[m] = 64
 
         self.learning_rate = args.local_learning_rate
         self.local_epochs = args.local_epochs
@@ -92,7 +92,8 @@ class Client(object):
             self.testloaderfull[m] = self.load_test_data(m, 1, batch_size=self.batch_size[m])
             self.trainloader[m], self.train_class_count[m] = self.load_train_data(m, 1, batch_size=self.batch_size[m])
             self.train_samples[m] = 0
-            for sample in self.trainloader[m]:
+            print(self.trainloader[m])
+            for i, sample in enumerate(self.trainloader[m]):
                 self.train_samples[m] += len(sample)
             print("no zero: ", np.count_nonzero(self.train_class_count[m]), self.train_class_count[m])
             self.fraction_of_classes[m] = np.count_nonzero(self.train_class_count[m]) / len(self.train_class_count[m])
@@ -119,13 +120,11 @@ class Client(object):
                 # self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
             elif self.dataset[m] in ["Tiny-ImageNet", "ImageNet", "ImageNet_v2"]:
                 self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=0.0005))
+            elif self.dataset[m] in ["EMNIST", "CIFAR10"]:
+                self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
             else:
                 self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=self.learning_rate))
-                # self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=self.learning_rate)) # , weight_decay=0.5
-                # self.learning_rate_scheduler.append(torch.optim.lr_scheduler.ExponentialLR(
-                #     optimizer=self.optimizer[m],
-                #     gamma=args.learning_rate_decay_gamma
-                # ))
+
         self.learning_rate_decay = args.learning_rate_decay
 
         self.test_metrics_list_dict = [{} for m in range(self.M)]
