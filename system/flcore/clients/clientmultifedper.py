@@ -32,7 +32,6 @@ class clientMultiFedPer(Client):
             self.set_parameters(m, global_model)
         self.model[m].to(self.device)
         self.model[m].train()
-        print("Dataset: ", self.dataset[m], m, self.id)
 
         # differential privacy
         if self.privacy:
@@ -85,15 +84,23 @@ class clientMultiFedPer(Client):
     def set_parameters(self, m, model):
 
         local_parameters = [i for i in self.model[m].parameters()]
+
+        # for i in range(len(local_parameters)):
+        #     print("""camada {}""".format(i))
+        #     print(local_parameters[i].data.clone().shape)
+        #
+        # exit()
+
         for i in range(len(model)):
             new_param = model[i]
             old_param = model[i]
-            local_parameters[i] = new_param.data.clone()
+            local_parameters[i] = new_param
 
         for old_param, new_param in zip(self.model[m].parameters(), local_parameters):
-            old_param.data = old_param.data.clone()
+            old_param.data = Parameter(torch.Tensor(new_param))
 
     def get_model_m(self, m):
 
-        param = [i for i in self.model[m].parameters()][:-2]
+        param = [i.detach().cpu().numpy() for i in self.model[m].parameters()][:-2]
+
         return param

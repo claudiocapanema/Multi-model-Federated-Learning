@@ -25,6 +25,7 @@ import warnings
 import numpy as np
 import torchvision
 import logging
+from torchsummary import summary
 
 from flcore.servers.server_multifedavg_separated import MultiFedAvg_Separated
 from flcore.servers.server_multifedavg import MultiFedAvg
@@ -35,7 +36,7 @@ from flcore.servers.serverfomo import FedFomo
 from flcore.servers.serveramp import FedAMP
 from flcore.servers.servermtl import FedMTL
 from flcore.servers.serverlocal import Local
-from flcore.servers.serverper import FedPer
+from flcore.servers.servermultifedper import MultiFedPer
 from flcore.servers.serverapfl import APFL
 from flcore.servers.serverditto import Ditto
 from flcore.servers.serverrep import FedRep
@@ -76,7 +77,11 @@ from flcore.servers.server_multifedfifo_deterministic import MultiFedCP_determin
 from flcore.servers.server_multifedrebalance import MultiFedRebalance
 from flcore.servers.server_multifedspeed_deterministic_selection import MultiFedSpeed_Deterministic_Selection
 from flcore.servers.server_multifedavg_with_fedpredict_train import MultiFedAvgWithFedPredictTrain
+from flcore.servers.server_multifedavg_global_model_eval import MultiFedAvgGlobalModelEval
 from flcore.servers.serveravg_rr import MultiFedAvgRR
+from flcore.servers.server_multifedyogi import MultiFedYogi
+from flcore.servers.server_multifedyogi_with_fedpredict import MultiFedYogiWithFedPredict
+from flcore.servers.server_multifedefficiency import MultiFedEfficiency
 
 from flcore.trainmodel.models import *
 
@@ -141,6 +146,7 @@ def run(args):
                     model = FedAvgCNN(dataset=dt, in_features=1, num_classes=num_classes_m, dim=1024).to(args.device)
                 elif "CIFAR10" == dt:
                     model = FedAvgCNN(dataset=dt, in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
+                    print("Sumario: \n", summary(model, (3, 32, 32)))
                 elif "GTSRB" == dt:
                     model = FedAvgCNN(dataset=dt, in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
                 elif "Omniglot" == dt:
@@ -250,10 +256,9 @@ def run(args):
 
             # select algorithm
             if args.algorithm == "MultiFedAvg":
-                # head = copy.deepcopy(model.fc)
-                # model.fc = nn.Identity()
-                # model = BaseHeadSplit(model, head)
                 server = MultiFedAvg
+            elif args.algorithm == "MultiFedAvgGlobalModelEval":
+                server = MultiFedAvgGlobalModelEval
 
             elif args.algorithm == "Local":
                 server = Local
@@ -279,11 +284,8 @@ def run(args):
             elif args.algorithm == "APFL":
                 server = APFL
 
-            elif args.algorithm == "FedPer":
-                head = copy.deepcopy(model.fc)
-                model.fc = nn.Identity()
-                model = BaseHeadSplit(model, head)
-                server = FedPer
+            elif args.algorithm == "MultiFedPer":
+                server = MultiFedPer
 
             elif args.algorithm == "Ditto":
                 server = Ditto
@@ -406,6 +408,9 @@ def run(args):
                 model = BaseHeadSplit(model, head)
                 server = FedAvgDBE
 
+            elif args.algorithm == "MultiFedEfficiency":
+                server = MultiFedEfficiency
+
             elif args.algorithm == "MultiFedPriority":
                 head = copy.deepcopy(model.fc)
                 model.fc = nn.Identity()
@@ -424,6 +429,12 @@ def run(args):
                 model = BaseHeadSplit(model, head)
                 server = MultiFedPriority_deterministic
 
+            elif args.algorithm == "MultiFedYogi":
+                server = MultiFedYogi
+
+            elif args.algorithm == "MultiFedYogiWithFedPredict":
+                server = MultiFedYogiWithFedPredict
+
             elif args.algorithm == "MultiFedFIFO":
                 head = copy.deepcopy(model.fc)
                 model.fc = nn.Identity()
@@ -431,65 +442,32 @@ def run(args):
                 server = MultiFedCP_ec
 
             elif args.algorithm == "MultiFedFIFO_ec":
-                head = copy.deepcopy(model.fc)
-                model.fc = nn.Identity()
-                model = BaseHeadSplit(model, head)
                 server = MultiFedCP_ec
 
             elif args.algorithm == "MultiFedFIFO_deterministic":
-                head = copy.deepcopy(model.fc)
-                model.fc = nn.Identity()
-                model = BaseHeadSplit(model, head)
                 server = MultiFedCP_deterministic
 
             elif args.algorithm == "MultiFedBalance":
-                head = copy.deepcopy(model.fc)
-                model.fc = nn.Identity()
-                model = BaseHeadSplit(model, head)
                 server = MultiFedRebalance
 
             elif args.algorithm == "MultiFedAvg_Separated":
-                head = copy.deepcopy(model.fc)
-                model.fc = nn.Identity()
-                model = BaseHeadSplit(model, head)
                 server = MultiFedAvg_Separated
 
             elif args.algorithm == "MultiFedAvg_with_FedPredict_Train":
-                head = copy.deepcopy(model.fc)
-                model.fc = nn.Identity()
-                model = BaseHeadSplit(model, head)
                 server = MultiFedAvgWithFedPredictTrain
 
             elif args.algorithm == "MultiFedAvgWithFedPredict":
-                # head = copy.deepcopy(model.fc)
-                # model.fc = nn.Identity()
-                # model = BaseHeadSplit(model, head)
                 server = MultiFedAvgWithFedPredict
 
             elif args.algorithm == "FedFairMMFL":
-                # head = copy.deepcopy(model.fc)
-                # model.fc = nn.Identity()
-                # model = BaseHeadSplit(model, head)
                 server = FedFairMMFL
             elif args.algorithm == "MultiFedAvgRR":
-                # head = copy.deepcopy(model.fc)
-                # model.fc = nn.Identity()
-                # model = BaseHeadSplit(model, head)
                 server = MultiFedAvgRR
             elif "MultiFedSpeedRelative" in args.algorithm:
-                head = copy.deepcopy(model.fc)
-                model.fc = nn.Identity()
-                model = BaseHeadSplit(model, head)
                 server = MultiFedSpeedRelative
             elif "MultiFedSpeedDynamic" in args.algorithm:
-                head = copy.deepcopy(model.fc)
-                model.fc = nn.Identity()
-                model = BaseHeadSplit(model, head)
                 server = MultiFedSpeedDynamic
             elif "MultiFedSpeed_D" in args.algorithm:
-                head = copy.deepcopy(model.fc)
-                model.fc = nn.Identity()
-                model = BaseHeadSplit(model, head)
                 server = MultiFedSpeed_Deterministic_Selection
 
             elif "MultiFedSpeed" in args.algorithm:
@@ -570,7 +548,8 @@ if __name__ == "__main__":
     parser.add_argument('-dlg', "--dlg_eval", type=bool, default=False)
     parser.add_argument('-dlgg', "--dlg_gap", type=int, default=100)
     parser.add_argument('-bnpc', "--batch_num_per_client", type=int, default=2)
-    parser.add_argument('-nnc', "--num_new_clients", type=int, default=0)
+    parser.add_argument('-fnc', "--fraction_new_clients", type=float, default=0)
+    parser.add_argument('-rnc', "--round_new_clients", type=int, default=0)
     parser.add_argument('-ften', "--fine_tuning_epoch_new", type=int, default=0)
     # practical
     parser.add_argument('-cdr', "--client_drop_rate", type=float, default=0.0,
@@ -678,7 +657,7 @@ if __name__ == "__main__":
     print("DLG attack: {}".format(args.dlg_eval))
     if args.dlg_eval:
         print("DLG attack round gap: {}".format(args.dlg_gap))
-    print("Total number of new clients: {}".format(args.num_new_clients))
+    # print("Total number of new clients: {}".format(args.num_new_clients))
     print("Fine tuning epoches on new clients: {}".format(args.fine_tuning_epoch_new))
     print("=" * 50)
 
@@ -692,42 +671,48 @@ if __name__ == "__main__":
     # with torch.autograd.profiler.profile(profile_memory=True) as prof:
 
     if bool(args.concept_drift):
-        result_path = """../results/concept_drift_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/log_{}.txt""".format(bool(args.concept_drift),
-                                                                                                                              args.num_clients,
-                                                                                                                               args.alpha,
-                                                                                                                                                                         args.alpha_end[
-                                                                                                                                                                             0],
-                                                                                                                                                                         args.alpha_end[
-                                                                                                                                                                             1],
-                                                                                                                             args.dataset,
-                                                                                                                                                                         args.rounds_concept_drift[
-                                                                                                                                                                             0],
-                                                                                                                                                                         args.rounds_concept_drift[
-                                                                                                                                                                             1],
-                                                                                                                               args.model,
-                                                                                                                               args.join_ratio,
-                                                                                                                               args.global_rounds,
-                                                                                                                               args.local_epochs,
-                                                                                                                                args.algorithm)
+        result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/log_{}.txt""".format(bool(args.concept_drift),
+                                                                                                                                                                                                    args.fraction_new_clients,
+                                                                                                                                                                                                    args.round_new_clients,
+                                                                                                                                                                                                    args.num_clients,
+                                                                                                                                                                                                    args.alpha,
+                                                                                                                                                                                                    args.alpha_end[
+                                                                                                                                                                                                    0],
+                                                                                                                                                                                                    args.alpha_end[
+                                                                                                                                                                                                    1],
+                                                                                                                                                                                                    args.dataset,
+                                                                                                                                                                                                    args.rounds_concept_drift[
+                                                                                                                                                                                                    0],
+                                                                                                                                                                                                    args.rounds_concept_drift[
+                                                                                                                                                                                                    1],
+                                                                                                                                                                                                    args.model,
+                                                                                                                                                                                                    args.join_ratio,
+                                                                                                                                                                                                    args.global_rounds,
+                                                                                                                                                                                                    args.local_epochs,
+                                                                                                                                                                                                    args.algorithm)
     elif len(args.alpha) == 1:
         # run singe model
-        result_path = """../results/concept_drift_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/log_{}.txt""".format(
+        result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/log_{}.txt""".format(
             bool(args.concept_drift),
+            args.fraction_new_clients,
+            args.round_new_clients,
             args.num_clients,
+            [args.alpha[0]],
             args.alpha[0],
             args.alpha[0],
-            args.alpha[0],
-            args.dataset[0],
+            [args.dataset[0]],
             0,
             0,
-            args.model[0],
+            [args.model[0]],
             args.join_ratio,
             args.global_rounds,
             args.local_epochs,
             args.algorithm)
     else:
-        result_path = """../results/concept_drift_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/log_{}.txt""".format(
+        result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/log_{}.txt""".format(
             bool(args.concept_drift),
+            args.fraction_new_clients,
+            args.round_new_clients,
             args.num_clients,
             args.alpha,
             args.alpha[

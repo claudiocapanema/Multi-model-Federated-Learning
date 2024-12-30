@@ -215,8 +215,8 @@ class FedAvgCNN(nn.Module):
         # random.seed(0)
         # np.random.seed(0)
         # torch.manual_seed(0)
-        if self.dataset == "CIFAR10":
-            x = x.permute(0, 3, 1, 2)
+        # if self.dataset == "CIFAR10":
+        #     x = x.permute(0, 3, 1, 2)
         # elif self.dataset == "EMNIST":
         #     # [1, 32, 28, 28]
         #     # x = x.permute(0, 1, 2)
@@ -228,7 +228,6 @@ class FedAvgCNN(nn.Module):
         out = torch.flatten(out, 1)
         out = nn.ReLU(inplace=True)(self.fc1(out))
         out = self.fc(out)
-        return out
 
         # out = self.conv1(x)
         # out = self.conv2(out)
@@ -236,6 +235,31 @@ class FedAvgCNN(nn.Module):
         # out = self.fc1(out)
         # out = self.fc(out)
         return out
+
+    def forward_kd(self, x):
+        # random.seed(0)
+        # np.random.seed(0)
+        # torch.manual_seed(0)
+        # if self.dataset == "CIFAR10":
+        #     x = x.permute(0, 3, 1, 2)
+        # elif self.dataset == "EMNIST":
+        #     # [1, 32, 28, 28]
+        #     # x = x.permute(0, 1, 2)
+        #     # x = torch.reshape(x, (32, 1, 28, 28))
+        #     pass
+
+        out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv1(x)))
+        out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv2(out)))
+        rep = torch.flatten(out, 1)
+        out = nn.ReLU(inplace=True)(self.fc1(rep))
+        out = self.fc(out)
+
+        # out = self.conv1(x)
+        # out = self.conv2(out)
+        # out = torch.flatten(out, 1)
+        # out = self.fc1(out)
+        # out = self.fc(out)
+        return out, rep
 
 class TinyImageNetCNN(nn.Module):
     # def __init__(self):

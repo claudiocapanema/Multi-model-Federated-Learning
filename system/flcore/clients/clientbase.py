@@ -92,7 +92,6 @@ class Client(object):
             self.testloaderfull[m] = self.load_test_data(m, 1, batch_size=self.batch_size[m])
             self.trainloader[m], self.train_class_count[m] = self.load_train_data(m, 1, batch_size=self.batch_size[m])
             self.train_samples[m] = 0
-            print(self.trainloader[m])
             for i, sample in enumerate(self.trainloader[m]):
                 self.train_samples[m] += len(sample)
             print("no zero: ", np.count_nonzero(self.train_class_count[m]), self.train_class_count[m])

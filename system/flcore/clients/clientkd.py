@@ -52,10 +52,10 @@ class clientKD(Client):
         self.energy = None
 
 
-    def train(self):
-        trainloader = self.load_train_data()
+    def train(self, m, t, global_model):
+        trainloader = self.trainloader[m]
         # self.model.to(self.device)
-        self.model.train()
+        self.model[m].train()
 
         start_time = time.time()
 
@@ -72,10 +72,8 @@ class clientKD(Client):
                 y = y.to(self.device)
                 if self.train_slow:
                     time.sleep(0.1 * np.abs(np.random.rand()))
-                rep = self.model.base(x)
-                rep_g = self.global_model.base(x)
-                output = self.model.head(rep)
-                output_g = self.global_model.head(rep_g)
+                output, rep = self.model[m].forward_kd(x)
+                output_g , rep_g= self.global_model[m].forward_kd(x)
 
                 CE_loss = self.loss(output, y)
                 CE_loss_g = self.loss(output_g, y)
@@ -87,18 +85,18 @@ class clientKD(Client):
                 loss = CE_loss + L_d + L_h
                 loss_g = CE_loss_g + L_d_g + L_h_g
 
-                self.optimizer.zero_grad()
-                self.optimizer_g.zero_grad()
-                self.optimizer_W.zero_grad()
+                self.optimizer[m].zero_grad()
+                self.optimizer_g[m].zero_grad()
+                self.optimizer_W[m].zero_grad()
                 loss.backward(retain_graph=True)
                 loss_g.backward()
                 # prevent divergency on specifical tasks
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 10)
                 torch.nn.utils.clip_grad_norm_(self.global_model.parameters(), 10)
                 torch.nn.utils.clip_grad_norm_(self.W_h.parameters(), 10)
-                self.optimizer.step()
-                self.optimizer_g.step()
-                self.optimizer_W.step()
+                self.optimizer[m].step()
+                self.optimizer_g[m].step()
+                self.optimizer_W[m].step()
 
         # self.model.cpu()
 

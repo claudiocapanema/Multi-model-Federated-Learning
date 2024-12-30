@@ -42,7 +42,6 @@ class clientAVGWithFedPredictTrain(Client):
         self.last_training_round = t
         self.model[m].to(self.device)
         self.model[m].train()
-        print("Dataset: ", self.dataset[m], m)
 
         # differential privacy
         if self.privacy:

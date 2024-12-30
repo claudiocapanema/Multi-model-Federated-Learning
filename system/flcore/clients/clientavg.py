@@ -32,7 +32,6 @@ class clientAVG(Client):
         self.set_parameters(m, global_model)
         self.model[m].to(self.device)
         self.model[m].train()
-        print("Dataset: ", self.dataset[m], m, self.id)
 
         # differential privacy
         if self.privacy:
