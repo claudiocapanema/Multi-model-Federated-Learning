@@ -56,100 +56,170 @@ def read_data(dataset, idx, args, alpha, is_train=True):
         return test_data
 
 def read_client_data_v2(m, name, cid, args, mode="train", batch_size=32):
-    dir_path = """../dataset/{}/clients_{}/alpha_{}/""".format(name, args.num_clients, args.alpha[m])
-    filename_train = dir_path + """train/idx_train_{}.pickle""".format(cid)
-    filename_test = dir_path + "test/idx_test_{}.pickle""".format(cid)
 
-    if name == "CIFAR10":
-        trainset, testset = read_cifar10(dir_path)
-    elif name == "EMNIST":
-        trainset, testset = read_emnist(dir_path)
+    try:
+        dir_path = """../dataset/{}/clients_{}/alpha_{}/""".format(name, args.num_clients, args.alpha[m])
+        filename_train = dir_path + """train/idx_train_{}.pickle""".format(cid)
+        filename_test = dir_path + "test/idx_test_{}.pickle""".format(cid)
+        dataset_dir_path = """../dataset/{}/""".format(name)
 
-    with open(filename_train, 'rb') as handle:
-        idx_train = pickle.load(handle)
+        with open(filename_train, 'rb') as handle:
+            idx_train = pickle.load(handle)
 
-    with open(filename_test, 'rb') as handle:
-        idx_test = pickle.load(handle)
+        with open(filename_test, 'rb') as handle:
+            idx_test = pickle.load(handle)
 
-    dataset_image = []
-    dataset_label = []
-    # print(type(trainset.data), type(testset.data[0]), trainset.data)
-    # exit()
+        if name == "CIFAR10":
+            trainset, testset = read_cifar10(dir_path)
 
-    # x = np.array(trainset.data)
-    # x = np.concatenate([x, testset.data], axis=0)
-    # y = np.array(trainset.targets)
-    # y = np.concatenate([y, testset.targets], axis=0)
+            x = trainset.data
+            x = np.concatenate((x, testset.data))
+            y = trainset.targets
+            y = np.concatenate((y, testset.targets))
+            x_train = x[idx_train]
+            x_test = x[idx_test]
+            y_train = y[idx_train]
+            y_test = y[idx_test]
 
-    dataset_image.extend(trainset.data)
-    dataset_image.extend(testset.data)
-    dataset_label.extend(trainset.targets)
-    dataset_label.extend(testset.targets)
-    x = np.array(dataset_image)
-    y = np.array(dataset_label)
+            trainset.data = x_train
+            trainset.targets = y_train
+            testset.data = x_test
+            testset.targets = y_test
 
-    x_train = x[idx_train]
-    y_train = y[idx_train]
-    x_test = x[idx_test]
-    y_test = y[idx_test]
+            print("""Cliente {} dados treino {} dados teste {}""".format(cid, x_train.shape, x_test.shape))
+            print("""Quantidade de cada classe\nTreino {} \nTeste {}""".format(np.unique_counts(y_train),
+                                                                               np.unique_counts(y_test)))
+            # exit()
 
-    y = np.array(list(y_train))
+            # trainset = torch.utils.data.TensorDataset(torch.from_numpy(x_train).to(dtype=torch.float32),
+            #                                                   torch.from_numpy(y_train))
+            # testset = torch.utils.data.TensorDataset(torch.from_numpy(x_test).to(dtype=torch.float32),
+            #                                                     torch.from_numpy(y_test))
 
-    print("""Cliente {} dados treino {} dados teste {}""".format(cid, x_train.shape, x_test.shape))
-    # exit()
+        elif name == "EMNIST":
+            trainset, testset = read_emnist(dataset_dir_path)
+            # data = torch.concatenate([trainset.data, testset.data])
+            # # data = trainset.data
+            # labels = torch.concatenate([trainset.targets, testset.targets])
+            # # data_train = torch.index_select(data, 0, torch.tensor(idx_train))
+            # # data_test = torch.index_select(data, 0, torch.tensor(idx_test))
+            # data_train = data[idx_train]
+            # data_test = data[idx_test]
+            # labels_train = labels[idx_train]
+            # labels_test = labels[idx_test]
+            # # labels_train = torch.index_select(labels, 0, torch.tensor(idx_train))
+            # # labels_test = torch.index_select(labels, 0, torch.tensor(idx_test))
+            # print("""Cliente {} dados treino {} dados teste {}""".format(cid, data_train.shape, data_test.shape))
+            #
+            # y_train = np.concatenate([labels_train.numpy(), labels_test.numpy()])
+            #
+            # trainset.data = data_train
+            # testset.data = data_test
+            # trainset.labels = labels_train
+            # testset.labels = labels_test
 
-    trainset = torch.utils.data.TensorDataset(torch.from_numpy(x_train).to(dtype=torch.float32),
-                                                      torch.from_numpy(y_train))
-    testset = torch.utils.data.TensorDataset(torch.from_numpy(x_test).to(dtype=torch.float32),
-                                                        torch.from_numpy(y_test))
+            trainset.data = torch.concatenate((trainset.data, testset.data), axis=0)
 
-    trainset.data = np.array(x_train)
-    trainset.target = np.array(y_train)
-    testset.data = np.array(x_test)
-    testset.target = np.array(y_test)
+            trainset.targets = torch.concatenate((trainset.targets, testset.targets), axis=0)
+            testset.data = trainset.data[idx_test]
+            testset.targets = trainset.targets[idx_test]
+            trainset.data = trainset.data[idx_train]
+            trainset.targets = trainset.targets[idx_train]
+            y = trainset.targets
+            y_train = y
 
-    g = torch.Generator()
-    g.manual_seed(cid)
+            print("""Cliente {} dados treino {} dados teste {}""".format(cid, trainset.data.shape, testset.data.shape))
+            print("""Quantidade de cada classe\nTreino {} \nTeste {}""".format(np.unique_counts(trainset.targets), np.unique_counts(testset.targets)))
+            print(type(trainset.data), type(testset.data), type(trainset.targets), type(testset.targets))
 
-    unique_count = {i: 0 for i in range(args.num_classes[m])}
-    unique, count = np.unique(y, return_counts=True)
-    data_unique_count_dict = dict(zip(unique, count))
-    for class_ in data_unique_count_dict:
-        unique_count[class_] = data_unique_count_dict[class_]
-    unique_count = np.array(list(unique_count.values()))
+        # print(type(trainset.data), type(testset.data[0]), trainset.data)
+        # exit()
 
-    np.random.seed(cid)
+        # x = np.array(trainset.data)
+        # x = np.concatenate([x, testset.data], axis=0)
+        # y = np.array(trainset.targets)
+        # y = np.concatenate([y, testset.targets], axis=0)
 
-    def seed_worker(worker_id):
+        # trainset.data = trainset.data[:100]
+        # trainset.target = trainset.targets[:100]
+        # print(trainset.data.numpy().shape)
+        # print(trainset.data)
+        # exit()
+
+
+        # dataset_image.extend(testset.data.numpy().tolist())
+        # dataset_label.extend(trainset.targets.numpy().tolist())
+        # dataset_label.extend(testset.targets.numpy().tolist())
+        # x = np.array(dataset_image)
+        # y = np.array(dataset_label)
+
+        # x_train = x[idx_train]
+        # y_train = y[idx_train]
+        # x_test = x[idx_test]
+        # y_test = y[idx_test]
+
+        y = np.array(list(y_train))
+
+        # print("""Cliente {} dados treino {} dados teste {}""".format(cid, x_train.shape, x_test.shape))
+        # exit()
+
+        # trainset = torch.utils.data.TensorDataset(torch.from_numpy(x_train).to(dtype=torch.float32),
+        #                                                   torch.from_numpy(y_train))
+        # testset = torch.utils.data.TensorDataset(torch.from_numpy(x_test).to(dtype=torch.float32),
+        #                                                     torch.from_numpy(y_test))
+
+        # trainset.data = torch.from_numpy(np.array(x_train)).to(torch.float32)
+        # trainset.target = np.array(y_train)
+        # testset.data = torch.from_numpy(np.array(x_test)).to(torch.float32)
+        # testset.target = np.array(y_test)
+
+
+        g = torch.Generator()
+        g.manual_seed(cid)
+
+        unique_count = {i: 0 for i in range(args.num_classes[m])}
+        unique, count = np.unique(y, return_counts=True)
+        data_unique_count_dict = dict(zip(unique, count))
+        for class_ in data_unique_count_dict:
+            unique_count[class_] = data_unique_count_dict[class_]
+        unique_count = np.array(list(unique_count.values()))
+
         np.random.seed(cid)
-        random.seed(cid)
 
-    trainloader = DataLoader(dataset=trainset, batch_size=batch_size, shuffle=True, worker_init_fn=seed_worker,
-                             generator=g)
-    testloader = DataLoader(dataset=testset, batch_size=batch_size, shuffle=False, worker_init_fn=seed_worker,
-                             generator=g)
-    # if name == "EMNIST":
-    #     x_train = np.expand_dims(x_train, axis=1)
-    #     x_test = np.expand_dims(x_test, axis=1)
-    print("x train: ", x_train.shape, y_train.shape)
+        def seed_worker(worker_id):
+            np.random.seed(cid)
+            random.seed(cid)
 
-
-    # for i, (x, y) in enumerate(trainloader):
-    #     if i == 0:
-    #         print("aaaa_oi: ", x.shape, y.shape)
-    #         exit()
-    # trainset, trainloader, testset, testloader = create_torch_dataset_from_numpy(x_train, x_test, y_train, y_test, batch_size=batch_size, g=g, cid=cid)
-
-    # print("test loader")
-    # for x, y in testloader:
-    #     print(x.shape, y.shape)
-    #     exit()
+        trainloader = DataLoader(dataset=trainset, batch_size=batch_size, shuffle=True, worker_init_fn=seed_worker,
+                                 generator=g)
+        testloader = DataLoader(dataset=testset, batch_size=batch_size, shuffle=False, worker_init_fn=seed_worker,
+                                 generator=g)
+        # if name == "EMNIST":
+        #     x_train = np.expand_dims(x_train, axis=1)
+        #     x_test = np.expand_dims(x_test, axis=1)
+        # print("x train: ", x_train.shape, y_train.shape)
 
 
-    if mode == "train":
-        return trainloader, unique_count
-    else:
-        return testloader
+        # for i, (x, y) in enumerate(trainloader):
+        #     if i == 0:
+        #         print("aaaa_oi: ", x.shape, y.shape)
+        #         exit()
+        # trainset, trainloader, testset, testloader = create_torch_dataset_from_numpy(x_train, x_test, y_train, y_test, batch_size=batch_size, g=g, cid=cid)
+
+        # print("test loader")
+        # for x, y in testloader:
+        #     print(x.shape, y.shape)
+        #     exit()
+
+
+        if mode == "train":
+            return trainloader, unique_count
+        else:
+            return testloader
+
+    except Exception as e:
+        print("ead_client_data_v2")
+        print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
 
 def load_wisdm(m, name, cid, args, mode="train", batch_size=32, dataset_name=None):
 
@@ -423,9 +493,18 @@ def read_client_data_Shakespeare(dataset, idx, args={}, is_train=True):
 
 def read_cifar10(dir_path):
     transform = {'train': transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
-    ), 'test': transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+        [transforms.Resize((32, 32)),  # resises the image so it can be perfect for our model.
+         transforms.RandomHorizontalFlip(),  # FLips the image w.r.t horizontal axis
+         transforms.RandomRotation(10),  # Rotates the image to a specified angel
+         transforms.RandomAffine(0, shear=10, scale=(0.8, 1.2)),
+         # Performs actions like zooms, change shear angles.
+         transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),  # Set the color params
+         transforms.ToTensor(),  # comvert the image to tensor so that it can work with torch
+         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))] # Normalize all the images
+    ), 'test': transforms.Compose([
+                                transforms.Resize((32, 32)),
+                                 transforms.ToTensor(),
+                                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
     )}
 
     trainset = torchvision.datasets.CIFAR10(
@@ -442,11 +521,12 @@ def read_cifar10(dir_path):
 def read_emnist(dir_path):
     transform = {'train': transforms.Compose(
         [
-            transforms.ToTensor(), transforms.Normalize((0.5), (0.5))
+            transforms.ToTensor(), transforms.RandomRotation(10),
+             transforms.Normalize([0.5], [0.5])
         ]
     ), 'test': transforms.Compose(
         [
-            transforms.ToTensor(), transforms.Normalize((0.5), (0.5))
+            transforms.ToTensor(), transforms.Normalize([0.5], [0.5])
         ]
     )}
 
@@ -458,7 +538,7 @@ def read_emnist(dir_path):
     return trainset, testset
 
 def read_gtsrb(m, name, cid, args, t, mode="train", batch_size=32):
-    print("aqq")
+
     dir_path = """../dataset/{}/clients_{}/alpha_{}/""".format(name, args.num_clients, args.alpha[m])
     filename_train = dir_path + """train/idx_train_{}.pickle""".format(cid)
     filename_test = dir_path + "test/idx_test_{}.pickle""".format(cid)
