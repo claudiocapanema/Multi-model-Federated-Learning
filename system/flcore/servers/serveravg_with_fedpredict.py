@@ -83,12 +83,12 @@ class MultiFedAvgWithFedPredict(Server):
             self.save_results(m)
             self.save_global_model(m)
 
-            if self.num_new_clients > 0:
-                self.eval_new_clients = True
-                self.set_new_clients(ClientAvgWithFedPredict)
-                print(f"\n-------------Fine tuning round-------------")
-                print("\nEvaluate new clients")
-                self.evaluate(m, t=t)
+            # if self.num_new_clients > 0:
+            #     self.eval_new_clients = True
+            #     self.set_new_clients(ClientAvgWithFedPredict)
+            #     print(f"\n-------------Fine tuning round-------------")
+            #     print("\nEvaluate new clients")
+            #     self.evaluate(m, t=t)
 
     # def test_metrics(self, m, t):
     #     if self.eval_new_clients and self.num_new_clients > 0:

@@ -47,7 +47,7 @@ NDArray = npt.NDArray[Any]
 NDArrays = List[NDArray]
 
 
-class MultiFedSpeed(Server):
+class MultiFedEfficiency(Server):
     def __init__(self, args, times):
         super().__init__(args, times)
 
@@ -250,400 +250,141 @@ class MultiFedSpeed(Server):
 
     def select_clients(self, t):
         try:
-            # np.random.seed(t)
-            # if self.random_join_ratio:
-            #     self.current_num_join_clients = np.random.choice(range(self.num_join_clients, self.num_clients+1), 1, replace=False)[0]
-            # else:
-            #     self.current_num_join_clients = self.num_join_clients
-            # np.random.seed(t)
-            # selected_clients_m = [[] for i in range(self.M)]
-            # selected_clients = []
-            # n_clients_m = [0] * self.M
-            # n_clients_selected = 0
-            # remaining_clients = int(self.num_clients * self.join_ratio)
-            # uniform_selection_m = self.uniform_selection(t)
-            # # data_quality_selection_m = self.data_quality_selection()
-            # data_quality_selection_m = self.clients_cosine_similarities
-            # prob_cold_start_m, use_cold_start_m = self.cold_start_selection()
-            # cold_start_clients_m = [np.array([]) for i in range(self.M)]
-            # print(self.client_selection_model_weight)
-            # print(self.cold_start_training_level)
-            # print(use_cold_start_m)
-            # clients_cumulative_prob_m = np.zeros((self.M, self.num_clients))
-            # total = 0
-            # for client in range(self.num_clients):
-            #     for m in range(self.M):
-            #         clients_cumulative_prob_m[m][client] = uniform_selection_m[m][client] + data_quality_selection_m[m][client]
-            #         total += clients_cumulative_prob_m[m][client]
-            #
-            # m_order = np.argwhere(use_cold_start_m == True)
-            # m_order = m_order.flatten()
-            # print("prim: ", m_order)
-            # for i in range(self.M):
-            #     if i not in m_order:
-            #         m_order = np.append(m_order, [i])
-            # print("m order: ", m_order)
-            # for i in range(len(m_order)):
-            #     m = m_order[i]
-            #     if use_cold_start_m[m]:
-            #         n_selected_clients_m = math.ceil(self.num_clients*self.join_ratio*self.cold_start_training_level[m])
-            #         if n_selected_clients_m > remaining_clients:
-            #             n_selected_clients_m = remaining_clients
-            #         print("co: ", self.num_clients, self.join_ratio, self.cold_start_training_level[m])
-            #         p = prob_cold_start_m[m]
-            #         p = np.array([p[i] if i not in selected_clients else 0 for i in range(len(p))])
-            #         p = np.argwhere(p == 1).flatten()[:n_selected_clients_m]
-            #         # cold_start_clients_m[m] = np.argwhere(prob_cold_start_m[m][prob_cold_start_m[m] == 1]).flatten()[:n_selected_clients_m]
-            #         remaining_clients = n_selected_clients_m - len(p)
-            #         print("faltantes: ", n_selected_clients_m - len(p))
-            #         if n_selected_clients_m - len(p) > 0:
-            #             # prob_m = uniform_selection_m[m] * (1 - self.client_selection_model_weight[m]) + data_quality_selection_m[m] * self.client_selection_model_weight[m]
-            #             prob_m = clients_cumulative_prob_m[m]
-            #             prob_m[p] = 0
-            #             prob_m = np.array([prob_m[i] if i not in selected_clients else 0 for i in range(len(prob_m))])
-            #             prob_m = np.argsort(prob_m)[-(n_selected_clients_m - len(p)):]
-            #             print("f adicionados: ", len(prob_m))
-            #             # prob_m = np.array([i if i not in prob_m else 0 for i in prob_m])
-            #             # prob_m = np.argwhere(prob_m > 0).flatten()[]
-            #         else:
-            #             prob_m = np.array([])
-            #         if len(p) > 0 and len(prob_m) == 0:
-            #             selected_clients_m[m] = p
-            #         else:
-            #             selected_clients_m[m] = np.array(list(p) + list(prob_m))
-            #
-            #     else:
-            #         # print("f", self.num_clients * self.join_ratio - n_clients_selected)
-            #         if True not in use_cold_start_m:
-            #             n_clients = math.ceil(self.num_clients * self.join_ratio * self.client_selection_model_weight[m])
-            #         else:
-            #             n_clients = min(math.ceil(self.num_clients * self.join_ratio - n_clients_selected), math.ceil(self.num_clients * self.join_ratio * self.client_selection_model_weight[m]))
-            #         if n_clients > remaining_clients or (n_clients < remaining_clients and i == self.M - 1):
-            #             print("ent", remaining_clients)
-            #             n_clients = remaining_clients
-            #         prob_m = clients_cumulative_prob_m[m]
-            #
-            #         print(prob_m)
-            #         prob_m = np.array([prob_m[i] if i not in selected_clients else 0 for i in range(len(prob_m))])
-            #         prob_m = prob_m / np.sum(prob_m)
-            #         print("ee: ", prob_m)
-            #         prob_m = list(np.random.choice([i for i in range(len(self.clients))], n_clients, replace=False, p=prob_m))
-            #         selected_clients_m[m] = prob_m
-            #
-            #         # np.random.seed(t)
-            #         # if self.random_join_ratio:
-            #         #     self.current_num_join_clients = \
-            #         #     np.random.choice(range(self.num_join_clients, self.num_clients + 1), 1, replace=False)[0]
-            #         # else:
-            #         #     self.current_num_join_clients = self.num_join_clients
-            #         # np.random.seed(t)
-            #         # selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
-            #         # selected_clients = [i.id for i in selected_clients]
-            #         #
-            #         # n = len(selected_clients) // self.M
-            #         # sc = np.array_split(selected_clients, self.M)
-            #         # # sc = [np.array(selected_clients[0:12])]
-            #         # # sc.append(np.array(selected_clients[12:]))
-            #         # selected_clients_m[m] = sc[m]
-            #
-            #     selected_clients += list(selected_clients_m[m])
-            #     n_clients_selected += len(selected_clients_m[m])
-            #     remaining_clients = int(self.num_clients * self.join_ratio) - n_clients_selected
-            #     print("m: ", m, " remaining: ", remaining_clients)
 
             g = torch.Generator()
             g.manual_seed(t)
             np.random.seed(t)
             random.seed(t)
-            if t == 1:
-                self.previous_selected_clients = super().select_clients(t)
-                n_clients_m = {m: 0 for m in range(self.M)}
-                for m in range(self.M):
-                    n_clients_m[m] = len(self.previous_selected_clients[m])
-                    self.training_clients_per_model_per_round[m].append(n_clients_m[m])
-                    for c_id in self.previous_selected_clients[m]:
-                        self.clients_training_round_per_model[c_id][m].append(t)
+            # if t == 1:
+            #     self.previous_selected_clients = super().select_clients(t)
+            #     n_clients_m = {m: 0 for m in range(self.M)}
+            #     for m in range(self.M):
+            #         n_clients_m[m] = len(self.previous_selected_clients[m])
+            #         self.training_clients_per_model_per_round[m].append(n_clients_m[m])
+            #         for c_id in self.previous_selected_clients[m]:
+            #             self.clients_training_round_per_model[c_id][m].append(t)
+            #
+            #         self.rounds_since_last_semi_convergence[m] += 1
+            #
+            #     return self.previous_selected_clients
+            # else:
+            #     if self.random_join_ratio:
+            #         self.current_num_join_clients = \
+            #         np.random.choice(range(self.num_join_clients, self.num_clients + 1), 1, replace=False)[0]
+            #     else:
+            #         self.current_num_join_clients = self.num_join_clients
+            #     np.random.seed(t)
+            #     selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
+            #     selected_clients_m = [[] for i in range(self.M)]
+            #
+            #     self.calculate_accuracy_gain_models()
+            #
+            #     prob_cold_start_m, use_cold_start_m = self.cold_start_selection()
+            #
+            #     clients_losses = []
+            #
+            #     for client in self.clients:
+            #         cid = client.id
+            #         client_losses = []
+            #         improvements = []
+            #         for m in range(len(client.train_metrics_list_dict)):
+            #             rounds = self.clients_training_round_per_model[cid][m][-2:]
+            #             rounds = np.array(rounds) - 1
+            #             print("r tre", rounds)
+            #             metrics_m = client.train_metrics_list_dict[m]
+            #             local_acc = np.array(self.clients_train_metrics[client.id]["Accuracy"][m])
+            #             local_loss = np.array(self.clients_train_metrics[client.id]["Loss"][m])
+            #             global_acc = self.results_train_metrics[m]["Accuracy"]
+            #
+            #
+            #
+            #     print("Modelos clientes: ", selected_clients_m)
 
+            """semi-convergence detection"""
+            min_clients = np.min(list(self.models_semi_convergence_min_n_training_clients.values()))
+            flag = True
+            for m in range(self.M):
+                if not self.stop_cpd[m]:
                     self.rounds_since_last_semi_convergence[m] += 1
 
-                return self.previous_selected_clients
-            else:
-                if self.random_join_ratio:
-                    self.current_num_join_clients = \
-                    np.random.choice(range(self.num_join_clients, self.num_clients + 1), 1, replace=False)[0]
-                else:
-                    self.current_num_join_clients = self.num_join_clients
-                np.random.seed(t)
-                selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
-                selected_clients_m = [[] for i in range(self.M)]
+                    """Stop CPD"""
+                    print("tw: ", self.tw[m], self.results_test_metrics[m]["Loss"])
+                    losses = self.results_test_metrics[m]["Loss"][-self.tw[m]:]
+                    losses = np.array([losses[i] - losses[i+1] for i in range(len(losses)-1)])
+                    print("Modelo ", m, " losses: ", losses)
+                    idxs = np.argwhere(losses < 0)
+                    if len(idxs) <= int(self.tw[m] * 0.75) and len(idxs) >= int(self.tw[m] * 0.25) and self.rounds_since_last_semi_convergence[m] >= 4:
+                        self.rounds_since_last_semi_convergence[m] = 0
+                        idxs_rounds = np.array(idxs, dtype=np.int32).flatten()
+                        print("indices: ", idxs_rounds, idxs_rounds[-1])
+                        print("a, remaining_clients_per_model, total_clientsb: ", self.training_clients_per_model_per_round[m])
+                        self.models_semi_convergence_rounds_n_clients[m].append({'round': t - 2, 'n_training_clients':
+                            self.training_clients_per_model_per_round[m][t - 2]})
+                        # more clients are trained for the semi converged model
+                        print("treinados na rodada passada: ", m, self.training_clients_per_model_per_round[m][t - 2])
 
-                self.calculate_accuracy_gain_models()
+                        if flag:
+                            self.models_semi_convergence_flag[m] = True
+                            self.models_semi_convergence_count[m] += 1
+                            flag = False
 
-                clients_losses = []
-                metric = "Accuracy"
-                # losses_m = {m: [] for m in range(self.M)}
-                # samples_m = {m: [] for m in range(self.M)}
-                # for client in self.clients:
-                #     for m in range(len(client.train_metrics_list_dict)):
-                #         local_loss = self.clients_train_metrics[client.id]["Loss"][m]
-                #         losses_m[m].append(local_loss)
-                #         samples = self.clients_train_metrics[client.id]["Samples"][m]
-                #         samples_m[m].append(samples)
-                # for m in range(self.M):
-                #     print(losses_m[m])
-                #     losses_m[m] = np.max(losses_m[m])
-                #     samples_m[m] = np.max(samples_m[m])
-
-                for client in self.clients:
-                    cid = client.id
-                    client_losses = []
-                    improvements = []
-                    for m in range(len(client.train_metrics_list_dict)):
-                        rounds = self.clients_training_round_per_model[cid][m][-2:]
-                        rounds = np.array(rounds) - 1
-                        print("r tre", rounds)
-                        metrics_m = client.train_metrics_list_dict[m]
-                        local_acc = np.array(self.clients_train_metrics[client.id][metric][m])
-                        local_loss = np.array(self.clients_train_metrics[client.id]["Loss"][m])
-                        global_acc = self.results_train_metrics[m][metric]
-
-                        if len(local_acc) >= 2 and len(self.clients_training_round_per_model[cid][m]) >= 2:
-                            local_acc = local_acc[rounds]
-                            local_loss = local_loss[rounds]
-                            # tr = self.clients_training_round_per_model[cid][m]
-                            local_acc_diff = (local_acc[-1] - local_acc[-2])
-                            local_loss_diff = (local_loss[-2] - local_loss[-1])
-
-                            if local_loss_diff == 0 or local_loss[-2] == 0:
-                                local_loss_relative_diff = 0
-                            else:
-                                local_loss_relative_diff = local_loss[-1]/local_loss[-2]
-                            # else:
-                            #     local_diff = (local_acc[-1] - local_acc[-2]) / q
-                            if local_acc_diff > 0:
-                                improvement = local_acc_diff
-                                improvements.append(improvement)
-                            else:
-                                local_acc_diff = 0.1 # 0.1 ou 0.01
-                            if local_acc[-1] == 0:
-                                relative_diff = 0.001
-                            else:
-                                relative_diff = local_acc_diff / local_acc[-1]
-                            local_acc_diff = relative_diff * relative_diff + local_acc_diff
-                        elif len(local_acc) == 1:
-                            local_acc_diff = local_acc[-1]
-                            local_loss_diff = local_loss[-1]
-                            local_loss_relative_diff = 1
-                        else:
-                            local_acc_diff = 1
-                            local_loss_diff = 1
-                            local_loss_relative_diff = 1
-                        local_acc_diff = max(local_acc_diff, 0.01)
-                        local_loss_diff = max(local_loss_diff, 0.01)
-                        if local_loss_relative_diff <= 0:
-                            local_loss_relative_diff = 0
-                        local_loss_relative_diff = min(local_loss_relative_diff, 1)
-                        print("ant:1: ", metrics_m['Samples'],local_acc_diff, (metrics_m['Samples']) * local_loss_relative_diff)
-                        client_losses.append((metrics_m['Samples'] ) * local_loss_diff)
-                    client_losses = np.array(client_losses)
-                    # client_losses = (client_losses / np.sum(client_losses))
-                    if np.isnan(client_losses).any():
-                        client_losses = np.ones(len(client_losses))
-                    clients_losses.append(client_losses)
-
-                clients_losses = np.array(clients_losses)
-                print("fo: ", clients_losses.shape)
-                print("Valor das losses: ", clients_losses)
-
-                prob_cold_start_m, use_cold_start_m = self.cold_start_selection()
-                print("cold: ", t, use_cold_start_m)
-                print(prob_cold_start_m)
-                total_clients = 0
-                remaining_clients_per_model = np.array([1/self.M for i in range(self.M)])
-                print("Clientes restantes (%): ", remaining_clients_per_model)
-                remaining_clients_per_model[np.where(remaining_clients_per_model < self.minimum_training_clients_per_model_percentage)] = self.minimum_training_clients_per_model_percentage
-                print("inter: ", remaining_clients_per_model)
-                num_join_clients = self.num_join_clients
-                remaining_clients_per_model = np.array(remaining_clients_per_model * num_join_clients, dtype=int)
-                index = 1
-                while np.sum(remaining_clients_per_model) < num_join_clients:
-                    remaining_clients_per_model[index] += 1
-                    index += 1
-                    if index == len(remaining_clients_per_model):
-                        index = 0
-                print("num joint clients antes: ", num_join_clients, self.models_semi_convergence_count)
-                for m in range(self.M):
-                    if self.models_semi_convergence_flag[m]:
-                        num_join_clients -= min(self.models_semi_convergence_count[m], self.re_per_model)
-                        remaining_clients_per_model[m] -= min(self.models_semi_convergence_count[m], self.re_per_model)
-                # if all(self.models_semi_convergence_flag) == True:
-                #     num_join_clients -= min(min(self.models_semi_convergence_count), 5)
-                print("num join clients: ", t, num_join_clients)
-                # remaining_clients_per_model = np.array(remaining_clients_per_model * num_join_clients, dtype=int)
-
-                print("Clientes resta", remaining_clients_per_model)
-
-
-                loops = 0
-                # include missing clients
-                if np.sum(remaining_clients_per_model) < num_join_clients:
-                    print("me")
-                    diff = num_join_clients - np.sum(remaining_clients_per_model)
-                    i = 0
-                    while np.sum(remaining_clients_per_model) < num_join_clients and diff > 0 and loops < 20:
-                        if remaining_clients_per_model[i] != 3:
-                            remaining_clients_per_model[i] += 1
-                            diff -= 1
-                        i += 1
-                        if i >= self.M:
-                            i = 0
-                        loops += 1
-                elif np.sum(remaining_clients_per_model) > num_join_clients:
-                    print("mais clientes")
-                    diff = np.sum(remaining_clients_per_model) - num_join_clients
-                    i = 0
-                    while np.sum(remaining_clients_per_model) > num_join_clients and diff > 0 and loops < 20:
-                        if remaining_clients_per_model[i] > self.models_semi_convergence_min_n_training_clients[i]:
-                            remaining_clients_per_model[i] -= 1
-                            print("redu")
-                            diff -= 1
-                        i += 1
-                        if i >= self.M:
-                            i = 0
-                        loops += 1
-
-                print("r", t)
-                print("Clientes res: ", remaining_clients_per_model)
-
-                """Concept-drift detection"""
-                min_clients = np.min(list(self.models_semi_convergence_min_n_training_clients.values()))
-                flag = True
-                for m in range(self.M):
-                    if not self.stop_cpd[m]:
+                    elif len(idxs) > int(self.tw[m] * 0.75):
                         self.rounds_since_last_semi_convergence[m] += 1
-                        global_acc = np.array(self.relative_accuracy_gain_models[m][-self.tw[m]:])
+                        self.models_semi_convergence_count[m] -= 1
+                        self.models_semi_convergence_count[m] = max(0, self.models_semi_convergence_count[m])
 
-                        """Get losses"""
-                        losses = self.results_test_metrics[m]["Loss"][-self.tw[m]:]
+            """Selection"""
+            if t < self.round_new_clients:
+                self.num_available_clients = int(self.num_clients * (1 - self.fraction_new_clients))
+                self.available_clients = self.clients[:self.num_available_clients]
+                self.num_join_clients = int(self.num_available_clients * self.join_ratio)
+            else:
+                self.num_available_clients = int(self.num_clients)
+                self.available_clients = self.clients
+                self.num_join_clients = int(self.num_available_clients * self.join_ratio)
 
-                print("semi convergen: ", self.models_semi_convergence_flag, self.models_semi_convergence_count, t)
-                print("semi conver prob: ", self.models_semi_convergence_training_probability)
-                print("min training: ", self.models_semi_convergence_min_n_training_clients)
-                print("rem: ", remaining_clients_per_model)
+            if self.random_join_ratio:
+                self.current_num_join_clients = \
+                np.random.choice(range(self.num_join_clients, self.num_available_clients + 1), 1, replace=False)[0]
+            else:
+                self.current_num_join_clients = self.num_available_clients
+            selected_clients = list(
+                np.random.choice(self.available_clients, self.current_num_join_clients, replace=False))
+            selected_clients = [i.id for i in selected_clients]
 
-                """Number of models to train"""
-                models_semi_convergence_min_n_training_client = copy.deepcopy(
-                    list(self.models_semi_convergence_min_n_training_clients.values()))
-                n_models_to_train = self.M
-                print("mi train", models_semi_convergence_min_n_training_client, num_join_clients, self.models_semi_convergence_flag)
-                if np.sum(models_semi_convergence_min_n_training_client) > num_join_clients and True in self.models_semi_convergence_flag:
-                    excedent = np.sum(models_semi_convergence_min_n_training_client) - num_join_clients
-                    ordered = np.random.choice(a=[i for i in range(self.M)], size=1)
-                    print("ord: ", ordered)
-                    n_models_to_train -= 1
-                    models_semi_convergence_min_n_training_client[ordered[0]] = 0
+            n = len(selected_clients) // self.M
 
-                for m in range(self.M):
-                    if models_semi_convergence_min_n_training_client[m] == 0:
-                        remaining_clients_per_model[m] = 0
-                    elif remaining_clients_per_model[m] < models_semi_convergence_min_n_training_client[m]:
-                        remaining_clients_per_model[m] = models_semi_convergence_min_n_training_client[m]
+            # selected_clients_m = np.array_split(selected_clients, self.M)
+            n_selected_clients_m = [self.num_join_clients / self.M] * self.M
+            for m in range(self.M):
+                n_selected_clients_m[m] = max(self.minimum_training_clients_per_model, n_selected_clients_m[m] - self.models_semi_convergence_count[m])
 
-                print("treinar d: ", n_models_to_train)
+            n_selected_clients_m = np.array(n_selected_clients_m).astype(int)
 
-
-                # if t>= 20:
-                #     if t % 2 == 0:
-                #         remaining_clients_per_model = [6, 3]
-                #     else:
-                #         remaining_clients_per_model = [0, 7]
-                print("remaining: ", remaining_clients_per_model)
-                print("join clients: ", num_join_clients)
-                sc = []
-                available_clients = {i: clients_losses[i] for i in range(self.num_clients)}
-                l = 0
-                iteracoes = 0
-                while total_clients < num_join_clients and iteracoes < 20:
-                    print("inicio disponiveis: ", len(available_clients))
-                    for m in range(self.M):
-                        print("m: ", m)
-                        iteracoes += 1
-                        print("Inicio iteracao: ", iteracoes)
-                        if total_clients < num_join_clients and remaining_clients_per_model[m] > 0:
-                            print("Primeiro if")
-                            if use_cold_start_m[m]:
-                                print("Segundo if (cold start)")
-                                n_selected_clients_m = remaining_clients_per_model[m]
-                                p = np.argwhere(prob_cold_start_m[m] == 1)
-                                cid = -1
-                                for e in p:
-                                    if e[0] in available_clients:
-                                        cid = e[0]
-                                        break
-                                print("cid: ", cid)
-                                if cid == -1:
-                                    use_cold_start_m[m] = False
-                                    continue
-                                available_clients.pop(cid)
-                                selected_clients_m[m].append(cid)
-                                total_clients += 1
-                                remaining_clients_per_model[m] -= 1
-                                print("n disponiveis: ", len(available_clients))
-
-                            else:
-                                print("sem cold start")
-                                # print("tudo: ", remaining_clients, remaining_clients.shape, clients_losses.shape)
-                                m_clients_losses = np.array([available_clients[i][m] for i in available_clients])
-                                # m_clients_losses = m_clients_losses[available_clients]
-                                cid = np.random.choice(list(available_clients.keys()), p=(m_clients_losses / np.sum(m_clients_losses)))
-                                available_clients.pop(cid)
-                                selected_clients_m[m].append(cid)
-                                # available_clients.remove(cid)
-                                sc.append(cid)
-                                remaining_clients_per_model[m] -= 1
-                                total_clients += 1
-                                print("n disponiveis: ", len(available_clients))
-                        else:
-
-                            print("Nao adicionou ao modelo: ", m, """ restantes para o modelo {}: {}""".format(m, remaining_clients_per_model[m]))
-
-                            print("n disponiveis: ", len(available_clients), selected_clients_m)
-                            print(total_clients)
-                            if l > 20 or np.sum(remaining_clients_per_model) == 0:
-                                break
-                            else:
-                                print("faltantes por modelo: ", remaining_clients_per_model)
-                                # exit()
-                            l = l + 1
-
-                        print("""Fim iteracao {} \nclientes totais {} clientes restantes {} \nclientes disponíveis {}""".format(iteracoes, total_clients, remaining_clients_per_model, available_clients))
-
-                print("Modelos clientes: ", selected_clients_m)
+            selected_clients_m = []
+            i = 0
+            for m in range(self.M):
+                j = i + n_selected_clients_m[m]
+                print("sec: ", m, " i ", i, " j ", j, "\n n sele: ", n_selected_clients_m, n_selected_clients_m[m], self.models_semi_convergence_count[m], self.num_join_clients)
+                selected_clients_m.append(selected_clients[i: j])
+                i = j
 
 
-                print("Selecionados: ", t, sum([len(i) for i in selected_clients_m]), selected_clients_m)
-                # print("Quantidade: ", n_clients_selected)
-                # exit()
-                self.previous_selected_clients = selected_clients_m
-                for m in range(self.M):
-                    n = len(self.previous_selected_clients[m])
-                    self.training_clients_per_model_per_round[m].append(n)
+            print("Selecionados: ", t, sum([len(i) for i in selected_clients_m]), selected_clients_m)
+            # print("Quantidade: ", n_clients_selected)
+            # exit()
+            self.previous_selected_clients = selected_clients_m
+            for m in range(self.M):
+                n = len(self.previous_selected_clients[m])
+                self.training_clients_per_model_per_round[m].append(n)
 
-                for m in range(self.M):
-                    self.clients_rounds_since_last_training[m] += 1
-                    for c_id in self.previous_selected_clients[m]:
-                        self.clients_training_round_per_model[c_id][m].append(t)
-                        self.clients_rounds_since_last_training[m][c_id] = 0
+            selected_clients_m = [np.array(i) for i in selected_clients_m]
 
-                    self.clients_rounds_since_last_training_probability[m] = self.clients_rounds_since_last_training[m] / np.max(self.clients_rounds_since_last_training[m])
-                    self.clients_rounds_since_last_training_probability[m] = self.clients_rounds_since_last_training_probability[m] / np.sum(self.clients_rounds_since_last_training_probability[m])
-
-
-                return selected_clients_m
+            return selected_clients_m
 
         except Exception as e:
             print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
-            print("""{} \n{} \n{} \n{} \n{}""".format(len(available_clients), selected_clients_m, clients_losses, remaining_clients_per_model, total_clients))
+            print("""{} \n{} \n{} \n{} \n{}""".format(len(self.available_clients), selected_clients_m, losses))
 
     def train(self):
 

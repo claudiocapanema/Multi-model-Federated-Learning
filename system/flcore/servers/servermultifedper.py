@@ -62,6 +62,9 @@ class MultiFedPer(Server):
         # self.load_model()
         self.Budget = []
 
+        for m in range(self.M):
+            self.global_model[m] = [i.detach().cpu().numpy() for i in self.global_model[m].parameters()]
+
     def train(self):
         self._get_models_size()
         for t in range(1, self.global_rounds + 1):
@@ -106,13 +109,6 @@ class MultiFedPer(Server):
         for m in range(self.M):
             self.save_results(m)
             self.save_global_model(m)
-
-            if self.num_new_clients > 0:
-                self.eval_new_clients = True
-                self.set_new_clients(clientMultiFedPer)
-                print(f"\n-------------Fine tuning round-------------")
-                print("\nEvaluate new clients")
-                self.evaluate(m, t=t)
 
     def receive_models(self):
         assert (len(self.selected_clients) > 0)
@@ -167,15 +163,14 @@ class MultiFedPer(Server):
             agg_parameters = self.aggregate(parameters_tuple, m)
 
             length = len(agg_parameters)
-            if type(self.global_model[m]) == list:
-                global_model_parameters = [i for i in self.global_model[m]]
-            else:
-                global_model_parameters = [i for i in self.global_model[m].parameters()]
+            # if type(self.global_model[m]) == list:
+            #     global_model_parameters = [i for i in self.global_model[m]]
+            # else:
+            #     global_model_parameters = [i for i in self.global_model[m].parameters()]
             for i in range(length):
                 client_param = agg_parameters[i]
-                global_model_parameters[i] = client_param.data.clone()
-
-            self.global_model[m] = global_model_parameters
+                # global_model_parameters[i] = client_param.data.clone()
+                self.global_model[m][i] = client_param
 
     def aggregate(self, results: List[Tuple[NDArrays, float]], m: int) -> NDArrays:
         """Compute weighted average."""
@@ -184,7 +179,7 @@ class MultiFedPer(Server):
 
         # Create a list of weights, each multiplied by the related number of examples
         weighted_weights = [
-            [layer.detach().cpu().numpy() * num_examples for layer in weights] for weights, num_examples, cid in results
+            [layer * num_examples for layer in weights] for weights, num_examples, cid in results
         ]
 
         # Compute average weights of each layer
@@ -193,6 +188,19 @@ class MultiFedPer(Server):
             for layer_updates in zip(*weighted_weights)
         ]
 
-        weights_prime = [Parameter(torch.Tensor(i.tolist())) for i in weights_prime]
+        #weights_prime = [Parameter(torch.Tensor(i.tolist())) for i in weights_prime]
+        # weights_prime = np.array([i.tolist() for i in weights_prime])
 
         return weights_prime
+
+    def _get_models_size(self):
+
+        models_size = []
+        for model in self.global_model:
+            parameters = model
+            size = 0
+            for i in range(len(parameters)):
+                size += parameters[i].nbytes
+            models_size.append(size)
+        print("models size: ", models_size)
+        self.models_size = models_size

@@ -88,10 +88,6 @@ class Server(object):
         self.num_clients = args.num_clients
         self.num_classes = args.num_classes
         self.alpha = args.alpha
-        self.join_ratio = args.join_ratio
-        self.random_join_ratio = args.random_join_ratio
-        self.num_join_clients = int(self.num_clients * self.join_ratio)
-        self.current_num_join_clients = self.num_join_clients
         self.algorithm = args.algorithm
         self.time_select = args.time_select
         self.goal = args.goal
@@ -130,10 +126,14 @@ class Server(object):
         self.dlg_gap = args.dlg_gap
         self.batch_num_per_client = args.batch_num_per_client
 
-        self.num_new_clients = args.num_new_clients
-        self.new_clients = []
-        self.eval_new_clients = False
-        self.fine_tuning_epoch_new = args.fine_tuning_epoch_new
+        self.fraction_new_clients = args.fraction_new_clients
+        self.round_new_clients = args.round_new_clients
+        self.join_ratio = args.join_ratio
+        self.random_join_ratio = args.random_join_ratio
+        self.num_available_clients = int(self.num_clients * (1 - self.fraction_new_clients))
+        self.available_clients = self.clients[:self.num_available_clients]
+        self.num_join_clients = int(self.num_clients * self.join_ratio)
+        self.current_num_join_clients = self.num_join_clients
 
         self.clients_test_metrics = {i: {metric: {m: [] for m in range(self.M)} for metric in ["Accuracy", "Loss", "Samples", "Balanced accuracy", "Micro f1-score", "Macro f1-score", "Weighted f1-score", "Round"]} for i in range(self.num_clients)}
         self.clients_train_metrics = {i: {metric: {m: [] for m in range(self.M)} for metric in ["Accuracy", "Loss", "Samples", "Balanced accuracy", "Micro f1-score", "Macro f1-score", "Weighted f1-score"]} for
@@ -171,17 +171,40 @@ class Server(object):
         self.send_slow_clients = self.select_slow_clients(
             self.send_slow_rate)
 
+    def get_available_clients(self, t, m):
+
+        if t < self.round_new_clients:
+            self.num_available_clients = int(self.num_clients * (1 - self.fraction_new_clients))
+            self.available_clients = self.clients[:self.num_available_clients]
+            self.num_join_clients = int(self.num_available_clients * self.join_ratio)
+        else:
+            self.num_available_clients = int(self.num_clients )
+            self.available_clients = self.clients
+            self.num_join_clients = int(self.num_available_clients * self.join_ratio)
+
+        return self.available_clients
+
     def select_clients(self, t):
         g = torch.Generator()
         g.manual_seed(t)
         np.random.seed(t)
         random.seed(t)
-        if self.random_join_ratio:
-            self.current_num_join_clients = np.random.choice(range(self.num_join_clients, self.num_clients+1), 1, replace=False)[0]
+
+        if t < self.round_new_clients:
+            self.num_available_clients = int(self.num_clients * (1 - self.fraction_new_clients))
+            self.available_clients = self.clients[:self.num_available_clients]
+            self.num_join_clients = int(self.num_available_clients * self.join_ratio)
         else:
-            self.current_num_join_clients = self.num_join_clients
+            self.num_available_clients = int(self.num_clients )
+            self.available_clients = self.clients
+            self.num_join_clients = int(self.num_available_clients * self.join_ratio)
+
+        if self.random_join_ratio:
+            self.current_num_join_clients = np.random.choice(range(self.num_join_clients, self.num_available_clients+1), 1, replace=False)[0]
+        else:
+            self.current_num_join_clients = self.num_available_clients
         np.random.seed(t)
-        selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
+        selected_clients = list(np.random.choice(self.available_clients, self.current_num_join_clients, replace=False))
         selected_clients = [i.id for i in selected_clients]
 
         n = len(selected_clients) // self.M
@@ -318,7 +341,9 @@ class Server(object):
         algo = self.dataset[m] + "_" + self.algorithm
         cd = bool(self.args.concept_drift)
         if cd:
-            result_path = """../results/concept_drift_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(cd,
+            result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(cd,
+                                                                                                                        self.fraction_new_clients,
+                                                                                                                        self.round_new_clients,
                                                                                                                         self.num_clients,
                                                                                                                        self.alpha,
                                                                                                                         self.alpha_end[
@@ -335,8 +360,10 @@ class Server(object):
                                                                                                                        self.args.global_rounds,
                                                                                                                        self.local_epochs)
         elif len(self.alpha) == 1:
-            result_path = """../results/concept_drift_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(
+            result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(
                 cd,
+                self.fraction_new_clients,
+                self.round_new_clients,
                 self.num_clients,
                 [self.alpha[0]],
                 self.alpha[
@@ -352,8 +379,10 @@ class Server(object):
                 self.local_epochs)
         else:
 
-            result_path = """../results/concept_drift_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(
+            result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(
                 cd,
+                self.fraction_new_clients,
+                self.round_new_clients,
                 self.num_clients,
                 self.alpha,
                 self.alpha[
@@ -445,11 +474,7 @@ class Server(object):
         return torch.load(os.path.join(self.save_folder_name, "server_" + item_name + ".pt"))
 
     def test_metrics(self, m, t):
-        if self.eval_new_clients and self.num_new_clients > 0:
-            self.fine_tuning_new_clients()
-            test_clients = self.new_clients
-        else:
-            test_clients = self.clients
+        test_clients = self.get_available_clients(t, m)
 
         num_samples = []
         accs_w = []
@@ -555,8 +580,6 @@ class Server(object):
         return server_metrics, server_metrics_weighted
 
     def train_metrics(self, m, t):
-        if self.eval_new_clients and self.num_new_clients > 0:
-            return [0], [1], [0]
 
         accs = []
         losses = []
@@ -565,8 +588,9 @@ class Server(object):
         micro_fscores = []
         macro_fscores = []
         weighted_fscores = []
-        for i in range(len(self.clients)):
-            c = self.clients[i]
+        available_clients = self.get_available_clients(t, m)
+        for i in range(len(available_clients)):
+            c = available_clients[i]
             if i in self.selected_clients[m] or t == 1:
                 train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore, alpha = c.train_metrics(m, t)
                 accs.append(train_acc * train_num)
@@ -583,7 +607,7 @@ class Server(object):
                 self.clients_train_metrics[c.id]["Macro f1-score"][m].append(train_macro_fscore)
                 self.clients_train_metrics[c.id]["Weighted f1-score"][m].append(train_weighted_fscore)
 
-        ids = [c.id for c in self.clients]
+        ids = [c.id for c in available_clients]
 
         decimals = 5
         print("amostras: ", num_samples, accs, self.selected_clients)
@@ -713,6 +737,7 @@ class Server(object):
         # items = []
         cnt = 0
         psnr_val = 0
+        available_clients = self.get_available_clients(t, m)
         for cid, client_model in zip(self.uploaded_ids, self.uploaded_models):
             client_model.eval()
             origin_grad = []
@@ -720,7 +745,7 @@ class Server(object):
                 origin_grad.append(gp.data - pp.data)
 
             target_inputs = []
-            trainloader = self.clients[cid].load_train_data()
+            trainloader = available_clients[cid].load_train_data()
             with torch.no_grad():
                 for i, (x, y) in enumerate(trainloader):
                     if i >= self.batch_num_per_client:
@@ -747,54 +772,6 @@ class Server(object):
             print('PSNR error')
 
         # self.save_item(items, f'DLG_{R}')
-
-    def set_new_clients(self, clientObj, m):
-        for i in range(self.num_clients, self.num_clients + self.num_new_clients):
-            train_data = read_client_data_v2(self.dataset[m], i, mode="train")
-            test_data = read_client_data_v2(self.dataset[m], i, mode="test")
-            client = clientObj(self.args, 
-                            id=i, 
-                            train_samples=len(train_data), 
-                            test_samples=len(test_data), 
-                            train_slow=False, 
-                            send_slow=False)
-            self.new_clients.append(client)
-
-    # fine-tuning on new clients
-    def fine_tuning_new_clients(self):
-        for client in self.new_clients:
-            client.set_parameters(self.global_model)
-            opt = torch.optim.SGD(client.model.parameters(), lr=self.learning_rate)
-            CEloss = torch.nn.CrossEntropyLoss()
-            trainloader = client.load_train_data()
-            client.model.train()
-            for e in range(self.fine_tuning_epoch_new):
-                for i, (x, y) in enumerate(trainloader):
-                    if type(x) == type([]):
-                        x[0] = x[0].to(client.device)
-                    else:
-                        x = x.to(client.device)
-                    y = y.to(client.device)
-                    output = client.model(x)
-                    loss = CEloss(output, y)
-                    opt.zero_grad()
-                    loss.backward()
-                    opt.step()
-
-    # evaluating on new clients
-    # def test_metrics_new_clients(self, m):
-    #     num_samples = []
-    #     tot_correct = []
-    #     tot_auc = []
-    #     for c in self.new_clients:
-    #         ct, ns, auc = c.test_metrics(m)
-    #         tot_correct.append(ct*1.0)
-    #         tot_auc.append(auc*ns)
-    #         num_samples.append(ns)
-    #
-    #     ids = [c.id for c in self.new_clients]
-    #
-    #     return ids, num_samples, tot_correct, tot_auc
 
     def clients_test_metrics_preprocess(self, m, path):
 
