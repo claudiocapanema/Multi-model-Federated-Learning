@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 def read_data(read_solutions, read_dataset_order):
 
     df_concat = None
+    solution_strategy_version = {"MultiFedAvgWithFedPredict": {"Strategy": "MultiFedAvg", "Version": "FP"}, "MultiFedAvg": {"Strategy": "MultiFedAvg", "Version": "Original"}, "MultiFedAvgGlobalModelEval": {"Strategy": "MultiFedAvgGlobalModelEval", "Version": "Original"}, "MultiFedPer": {"Strategy": "MultiFedPer", "Version": "Original"},
+                 "MultiFedYogi": {"Strategy": "MultiFedYogi", "Version": "Original"}, "MultiFedYogiWithFedPredict": {"Strategy": "MultiFedYogi", "Version": "FP"}}
     for solution in read_solutions:
 
         paths = read_solutions[solution]
@@ -20,6 +22,8 @@ def read_data(read_solutions, read_dataset_order):
             df["Balanced accuracy (%)"] = df["Balanced accuracy"] * 100
             df["Round (t)"] = df["Round"]
             df["Dataset"] = np.array([dataset] * len(df))
+            df["Strategy"] = np.array([solution_strategy_version[solution]["Strategy"]] * len(df))
+            df["Version"] = np.array([solution_strategy_version[solution]["Version"]] * len(df))
 
             if df_concat is None:
                 df_concat = df
@@ -31,7 +35,7 @@ def read_data(read_solutions, read_dataset_order):
     return df_concat
 
 
-def line(df, base_dir, x, y, z, ci=None):
+def line(df, base_dir, x, y, z, style=None, ci=None):
 
     datasets = df["Dataset"].unique().tolist()
     # datasets = ["ImageNet", "ImageNet"]
@@ -44,16 +48,16 @@ def line(df, base_dir, x, y, z, ci=None):
 
             df_plot = df[df["Dataset"] == datasets[j]]
             df_plot = df_plot[df_plot["Alpha"] == alphas[i]]
-            print(df_plot["Solution"].unique().tolist(), datasets[i], alphas[i])
+            print(df_plot["Solution"].unique().tolist(), datasets[j], alphas[i])
 
             line_plot(df=df_plot, base_dir=base_dir, ax=axs[i, j],
                       file_name="""solutions_{}""".format(datasets), x_column=x, y_column=y,
-                      hue=z, ci=ci, title="", tipo=None, y_lim=True, y_max=100)
+                      hue=z, style=style, ci=ci, title="", tipo=None, y_lim=True, y_max=100)
             axs[i, j].set_title(r"""Dataset: {}; $\alpha$={}""".format(datasets[j], alphas[i]), fontweight="bold", size=7)
-            if [i, j] != [0, 0]:
-                axs[i, j].get_legend().remove()
-            else:
-                axs[i, j].legend(fontsize=7)
+            # if [i, j] != [0, 0]:
+            #     axs[i, j].get_legend().remove()
+            # else:
+            axs[i, j].legend(fontsize=7)
 
     # fig.suptitle("", fontsize=16)
 
@@ -76,14 +80,14 @@ if __name__ == "__main__":
     cd = "False"
     num_clients = 20
     alphas = [0.1, 1.0, 10.0]
-    dataset = ["EMNIST", "CIFAR10"]
+    dataset = ["EMNIST", "CIFAR10", "GTSRB"]
     models_names = ["cnn_a"]
     join_ratio = 0.3
     global_rounds = 100
     local_epochs = 1
-    fraction_new_clients = 0.3
-    round_new_clients = 70
-    solutions = ["MultiFedAvgWithFedPredict", "MultiFedAvg", "MultiFedAvgGlobalModelEval", "MultiFedPer"]
+    fraction_new_clients = 0
+    round_new_clients = 0
+    solutions = ["MultiFedAvgWithFedPredict", "MultiFedAvg", "MultiFedAvgGlobalModelEval", "MultiFedPer", "MultiFedYogi", "MultiFedYogiWithFedPredict"]
 
     read_solutions = {solution: [] for solution in solutions}
     read_dataset_order = []
@@ -126,5 +130,5 @@ if __name__ == "__main__":
         local_epochs)
 
     df = read_data(read_solutions, read_dataset_order)
-    line(df, write_path, x="Round (t)", y="Balanced accuracy (%)", z="Solution")
-    line(df, write_path, x="Round (t)", y="Balanced accuracy (%)", z="Solution")
+    line(df, write_path, x="Round (t)", y="Balanced accuracy (%)", z="Strategy", style="Version")
+    line(df, write_path, x="Round (t)", y="Balanced accuracy (%)", z="Strategy", style="Version")

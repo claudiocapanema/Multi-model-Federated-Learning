@@ -53,26 +53,26 @@ class MultiFedYogiWithFedPredict(Server):
 
         print(f"\nJoin ratio / total clients: {self.join_ratio} / {self.num_clients}")
         print("Finished creating server and clients.")
-        eta: float = 1e-1,
-        eta_l: float = 1e-1,
-        beta_1: float = 0.0,
-        beta_2: float = 0.0,
-        tau: float = 1e-9,
+        eta = 1e-2
+        eta_l = 0.0316
+        beta_1 = 0.9
+        beta_2 = 0.99
+        tau = 1e-3
         # self.load_model()
         self.Budget = []
         self.current_weights = None
         self.eta = eta
         self.eta_l = eta_l
         self.tau = tau
-        self.beta_1 = 0
-        self.beta_2 = 0
+        self.beta_1 = beta_1
+        self.beta_2 = beta_2
         self.m_t: Optional[NDArrays] = None
         self.v_t: Optional[NDArrays] = None
 
 
     def train(self):
         self._get_models_size()
-        for t in range(1, self.global_rounds+1):
+        for t in range(1, self.global_rounds + 1):
             s_t = time.time()
             self.selected_clients = self.select_clients(t)
             # self.send_models()
@@ -80,11 +80,10 @@ class MultiFedYogiWithFedPredict(Server):
 
             for m in range(len(self.selected_clients)):
 
-
                 for i in range(len(self.selected_clients[m])):
                     self.clients[self.selected_clients[m][i]].train(m, t, self.global_model[m])
 
-                if t%self.eval_gap == 0:
+                if t % self.eval_gap == 0:
                     print(f"\n-------------Round number: {t}-------------")
                     print("\nEvaluate global model for ", self.dataset[m])
                     self.evaluate(m, t=t)
@@ -95,12 +94,12 @@ class MultiFedYogiWithFedPredict(Server):
             # [t.join() for t in threads]
 
             self.receive_models()
-            if self.dlg_eval and t%self.dlg_gap == 0:
+            if self.dlg_eval and t % self.dlg_gap == 0:
                 self.call_dlg(t)
             self.aggregate_parameters()
 
             self.Budget.append(time.time() - s_t)
-            print('-'*25, 'time cost', '-'*25, self.Budget[-1])
+            print('-' * 25, 'time cost', '-' * 25, self.Budget[-1])
 
             if self.auto_break and self.check_done(acc_lss=[self.rs_test_acc], top_cnt=self.top_cnt):
                 break
@@ -110,18 +109,12 @@ class MultiFedYogiWithFedPredict(Server):
         #     self.rs_train_acc), min(self.rs_train_loss))
         print(max(self.rs_test_acc))
         print("\nAverage time cost per round.")
-        print(sum(self.Budget[1:])/len(self.Budget[1:]))
+        print(sum(self.Budget[1:]) / len(self.Budget[1:]))
 
         for m in range(self.M):
             self.save_results(m)
             self.save_global_model(m)
 
-            if self.num_new_clients > 0:
-                self.eval_new_clients = True
-                self.set_new_clients(clientMultiFedYogiWithFedPredict)
-                print(f"\n-------------Fine tuning round-------------")
-                print("\nEvaluate new clients")
-                self.evaluate(m, t=t)
 
     def aggregate(self, results: List[Tuple[NDArrays, float]], m: int) -> NDArrays:
         """Compute weighted average."""
@@ -130,7 +123,8 @@ class MultiFedYogiWithFedPredict(Server):
 
         # Create a list of weights, each multiplied by the related number of examples
         weighted_weights = [
-            [layer.detach().cpu().numpy() * num_examples for layer in weights.parameters()] for weights, num_examples, cid in results
+            [layer.detach().cpu().numpy() * num_examples for layer in weights.parameters()] for weights, num_examples, cid
+            in results
         ]
 
         # Compute average weights of each layer
@@ -173,6 +167,7 @@ class MultiFedYogiWithFedPredict(Server):
 
         return weights_prime
 
+
     def aggregate_parameters(self):
         assert (len(self.uploaded_models) > 0)
 
@@ -190,3 +185,5 @@ class MultiFedYogiWithFedPredict(Server):
             for server_param, client_param in zip(self.global_model[m].parameters(), agg_parameters):
                 # print(": ", server_param.data.shape, client_param.data.clone().shape)
                 server_param.data = client_param.data.clone()
+
+

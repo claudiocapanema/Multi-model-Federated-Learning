@@ -72,7 +72,7 @@ class MultiFedEfficiency(Server):
         self.clients_rounds_since_last_training = {m: np.array([0 for i in range(self.num_clients)]) for m in range(self.M)}
         self.clients_rounds_since_last_training_probability = {m: np.array([0 for i in range(self.num_clients)]) for m in range(self.M)}
         self.rounds_client_trained_model = {cid: {m: [] for m in range(self.M)} for cid in range(self.num_clients)}
-        self.minimum_training_clients_per_model = {0.1: 1, 0.2: 2, 0.3: 2}[self.join_ratio]
+        self.minimum_training_clients_per_model = {0.1: 1, 0.2: 2, 0.3: 3}[self.join_ratio]
         self.minimum_training_clients_per_model_percentage = self.minimum_training_clients_per_model / self.num_join_clients
         self.use_cold_start_m = np.array([True for m in range(self.M)])
         self.cold_start_max_non_iid_level = 1
@@ -83,7 +83,7 @@ class MultiFedEfficiency(Server):
         # Semi convergence detection window of rounds
         self.tw = []
         for d in self.dataset:
-            self.tw.append({"WISDM-W": 4, "WISDM-P": 4, "ImageNet": 4, "CIFAR10": 4, "ImageNet_v2": 4}[d])
+            self.tw.append({"WISDM-W": 5, "WISDM-P": 5, "ImageNet": 5, "CIFAR10": 5, "ImageNet_v2": 5}[d])
         self.models_semi_convergence_min_n_training_clients = {m: self.minimum_training_clients_per_model for m in range(self.M)}
         self.models_semi_convergence_min_n_training_clients_percentage = {m: self.minimum_training_clients_per_model/self.num_join_clients for m in
                                                                range(self.M)}
@@ -313,7 +313,7 @@ class MultiFedEfficiency(Server):
                     losses = np.array([losses[i] - losses[i+1] for i in range(len(losses)-1)])
                     print("Modelo ", m, " losses: ", losses)
                     idxs = np.argwhere(losses < 0)
-                    if len(idxs) <= int(self.tw[m] * 0.75) and len(idxs) >= int(self.tw[m] * 0.25) and self.rounds_since_last_semi_convergence[m] >= 4:
+                    if len(idxs) <= int(self.tw[m] * 0.5) and len(idxs) >= int(self.tw[m] * 0.25) and self.rounds_since_last_semi_convergence[m] >= 4:
                         self.rounds_since_last_semi_convergence[m] = 0
                         idxs_rounds = np.array(idxs, dtype=np.int32).flatten()
                         print("indices: ", idxs_rounds, idxs_rounds[-1])
@@ -328,7 +328,7 @@ class MultiFedEfficiency(Server):
                             self.models_semi_convergence_count[m] += 1
                             flag = False
 
-                    elif len(idxs) > int(self.tw[m] * 0.75):
+                    elif len(idxs) > int(self.tw[m] * 0.5):
                         self.rounds_since_last_semi_convergence[m] += 1
                         self.models_semi_convergence_count[m] -= 1
                         self.models_semi_convergence_count[m] = max(0, self.models_semi_convergence_count[m])
@@ -337,17 +337,18 @@ class MultiFedEfficiency(Server):
             if t < self.round_new_clients:
                 self.num_available_clients = int(self.num_clients * (1 - self.fraction_new_clients))
                 self.available_clients = self.clients[:self.num_available_clients]
-                self.num_join_clients = int(self.num_available_clients * self.join_ratio)
+                self.num_join_clients = int(self.num_clients * self.join_ratio)
             else:
-                self.num_available_clients = int(self.num_clients)
+                self.num_available_clients = len(self.clients)
                 self.available_clients = self.clients
-                self.num_join_clients = int(self.num_available_clients * self.join_ratio)
+                self.num_join_clients = int(self.num_clients * self.join_ratio)
 
             if self.random_join_ratio:
                 self.current_num_join_clients = \
                 np.random.choice(range(self.num_join_clients, self.num_available_clients + 1), 1, replace=False)[0]
             else:
                 self.current_num_join_clients = self.num_available_clients
+
             selected_clients = list(
                 np.random.choice(self.available_clients, self.current_num_join_clients, replace=False))
             selected_clients = [i.id for i in selected_clients]
@@ -370,7 +371,7 @@ class MultiFedEfficiency(Server):
                 i = j
 
 
-            print("Selecionados: ", t, sum([len(i) for i in selected_clients_m]), selected_clients_m)
+            print("Selecionados: ", t, sum([len(i) for i in selected_clients_m]), [len(i) for i in selected_clients_m], selected_clients_m)
             # print("Quantidade: ", n_clients_selected)
             # exit()
             self.previous_selected_clients = selected_clients_m

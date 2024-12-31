@@ -20,7 +20,6 @@ import torch
 import numpy as np
 import time
 from flcore.clients.clientbase import Client
-from utils.privacy import *
 
 
 class clientAVG(Client):
@@ -32,12 +31,6 @@ class clientAVG(Client):
         self.set_parameters(m, global_model)
         self.model[m].to(self.device)
         self.model[m].train()
-
-        # differential privacy
-        if self.privacy:
-            model_origin = copy.deepcopy(self.model[m])
-            self.model, self.optimizer, trainloader, privacy_engine = \
-                initialize_dp(self.model[m], self.optimizer, trainloader, self.dp_sigma)
         
         start_time = time.time()
 
@@ -71,12 +64,3 @@ class clientAVG(Client):
 
         self.train_time_cost['num_rounds'] += 1
         self.train_time_cost['total_cost'] += time.time() - start_time
-
-        if self.privacy:
-            eps, DELTA = get_dp_params(privacy_engine)
-            print(f"Client {self.id}", f"epsilon = {eps:.2f}, sigma = {DELTA}")
-
-            for param, param_dp in zip(model_origin.parameters(), self.model[m].parameters()):
-                param.data = param_dp.data.clone()
-            self.model[m] = model_origin
-            self.optimizer = torch.optim.SGD(self.model[m].parameters(), lr=self.learning_rate)

@@ -193,18 +193,18 @@ class Server(object):
         if t < self.round_new_clients:
             self.num_available_clients = int(self.num_clients * (1 - self.fraction_new_clients))
             self.available_clients = self.clients[:self.num_available_clients]
-            self.num_join_clients = int(self.num_available_clients * self.join_ratio)
+            self.num_join_clients = int(self.num_clients * self.join_ratio)
         else:
-            self.num_available_clients = int(self.num_clients )
+            self.num_available_clients = len(self.clients)
             self.available_clients = self.clients
-            self.num_join_clients = int(self.num_available_clients * self.join_ratio)
+            self.num_join_clients = int(self.num_clients * self.join_ratio)
 
         if self.random_join_ratio:
             self.current_num_join_clients = np.random.choice(range(self.num_join_clients, self.num_available_clients+1), 1, replace=False)[0]
         else:
             self.current_num_join_clients = self.num_available_clients
         np.random.seed(t)
-        selected_clients = list(np.random.choice(self.available_clients, self.current_num_join_clients, replace=False))
+        selected_clients = list(np.random.choice(self.available_clients, self.num_join_clients, replace=False))
         selected_clients = [i.id for i in selected_clients]
 
         n = len(selected_clients) // self.M
@@ -212,7 +212,7 @@ class Server(object):
         # sc = [np.array(selected_clients[0:6])]
         # sc.append(np.array(selected_clients[6:]))
 
-        print("Selecionados: ", sc)
+        print("Selecionados: ", sc, [len(i) for i in sc], self.available_clients)
 
         return sc
 

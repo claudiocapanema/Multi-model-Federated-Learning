@@ -87,8 +87,8 @@ def read_client_data_v2(m, name, cid, args, mode="train", batch_size=32):
             testset.targets = y_test
 
             print("""Cliente {} dados treino {} dados teste {}""".format(cid, x_train.shape, x_test.shape))
-            print("""Quantidade de cada classe\nTreino {} \nTeste {}""".format(np.unique_counts(y_train),
-                                                                               np.unique_counts(y_test)))
+            print("""Quantidade de cada classe\nTreino {} \nTeste {}""".format(pd.Series(y_train).value_counts(),
+                                                                               pd.Series(y_test).value_counts()))
             # exit()
 
             # trainset = torch.utils.data.TensorDataset(torch.from_numpy(x_train).to(dtype=torch.float32),
@@ -129,7 +129,7 @@ def read_client_data_v2(m, name, cid, args, mode="train", batch_size=32):
             y_train = y
 
             print("""Cliente {} dados treino {} dados teste {}""".format(cid, trainset.data.shape, testset.data.shape))
-            print("""Quantidade de cada classe\nTreino {} \nTeste {}""".format(np.unique_counts(trainset.targets), np.unique_counts(testset.targets)))
+            print("""Quantidade de cada classe\nTreino {} \nTeste {}""".format(pd.Series(trainset.targets).value_counts(), pd.Series(testset.targets).value_counts()))
             print(type(trainset.data), type(testset.data), type(trainset.targets), type(testset.targets))
 
         # print(type(trainset.data), type(testset.data[0]), trainset.data)

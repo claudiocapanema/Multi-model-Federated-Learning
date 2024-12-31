@@ -53,19 +53,19 @@ class MultiFedYogi(Server):
 
         print(f"\nJoin ratio / total clients: {self.join_ratio} / {self.num_clients}")
         print("Finished creating server and clients.")
-        eta: float = 1e-1,
-        eta_l: float = 1e-1,
-        beta_1: float = 0.0,
-        beta_2: float = 0.0,
-        tau: float = 1e-9,
+        eta = 1e-2
+        eta_l = 0.0316
+        beta_1 = 0.9
+        beta_2 = 0.99
+        tau = 1e-3
         # self.load_model()
         self.Budget = []
         self.current_weights = None
         self.eta = eta
         self.eta_l = eta_l
         self.tau = tau
-        self.beta_1 = 0
-        self.beta_2 = 0
+        self.beta_1 = beta_1
+        self.beta_2 = beta_2
         self.m_t: Optional[NDArrays] = None
         self.v_t: Optional[NDArrays] = None
 
@@ -115,13 +115,6 @@ class MultiFedYogi(Server):
         for m in range(self.M):
             self.save_results(m)
             self.save_global_model(m)
-
-            if self.num_new_clients > 0:
-                self.eval_new_clients = True
-                self.set_new_clients(clientMultiFedYogi)
-                print(f"\n-------------Fine tuning round-------------")
-                print("\nEvaluate new clients")
-                self.evaluate(m, t=t)
 
     def aggregate(self, results: List[Tuple[NDArrays, float]], m: int) -> NDArrays:
         """Compute weighted average."""
