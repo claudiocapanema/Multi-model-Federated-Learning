@@ -66,8 +66,12 @@ class clientMultiFedYogiWithFedPredict(clientAVG):
             if self.alpha[m] != alpha:
                 self.alpha[m] = alpha
                 self.update_loader[m] = True
-                self.testloaderfull[m] = self.load_test_data(m, t)
-                self.trainloader[m], self.train_class_count[m] = self.load_train_data(m, t)
+                self.testloaderfull[m] = self.load_test_data(m, t, batch_size=self.batch_size)
+                self.trainloader[m], self.train_class_count[m] = self.load_train_data(m, t,
+                                                                                      batch_size=self.batch_size[m])
+                self.train_samples[m] = 0
+                for sample in self.trainloader[m]:
+                    self.train_samples[m] += len(sample)
                 threshold = np.sum(self.train_class_count[m]) / len(self.train_class_count[m])
                 self.imbalance_level[m] = len(np.argwhere(self.train_class_count[m] < threshold)) / len(
                     self.train_class_count[m])

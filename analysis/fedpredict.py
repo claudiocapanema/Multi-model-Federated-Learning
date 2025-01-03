@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 def read_data(read_solutions, read_dataset_order):
 
     df_concat = None
-    solution_strategy_version = {"MultiFedAvgWithFedPredict": {"Strategy": "MultiFedAvg", "Version": "FP"}, "MultiFedAvg": {"Strategy": "MultiFedAvg", "Version": "Original"}, "MultiFedAvgGlobalModelEval": {"Strategy": "MultiFedAvgGlobalModelEval", "Version": "Original"}, "MultiFedPer": {"Strategy": "MultiFedPer", "Version": "Original"},
+    solution_strategy_version = {"MultiFedAvgWithFedPredict": {"Strategy": "MultiFedAvg", "Version": "FP"}, "MultiFedAvg": {"Strategy": "MultiFedAvg", "Version": "Original"}, "MultiFedAvgGlobalModelEval": {"Strategy": "MultiFedAvgGlobalModelEval", "Version": "Original"}, "MultiFedAvgGlobalModelEvalWithFedPredict": {"Strategy": "MultiFedAvgGlobalModelEval", "Version": "FP"}, "MultiFedPer": {"Strategy": "MultiFedPer", "Version": "Original"},
                  "MultiFedYogi": {"Strategy": "MultiFedYogi", "Version": "Original"}, "MultiFedYogiWithFedPredict": {"Strategy": "MultiFedYogi", "Version": "FP"}}
     for solution in read_solutions:
 
@@ -35,7 +35,7 @@ def read_data(read_solutions, read_dataset_order):
     return df_concat
 
 
-def line(df, base_dir, x, y, z, style=None, ci=None):
+def line(df, base_dir, x, y, hue=None, style=None, ci=None):
 
     datasets = df["Dataset"].unique().tolist()
     # datasets = ["ImageNet", "ImageNet"]
@@ -52,7 +52,7 @@ def line(df, base_dir, x, y, z, style=None, ci=None):
 
             line_plot(df=df_plot, base_dir=base_dir, ax=axs[i, j],
                       file_name="""solutions_{}""".format(datasets), x_column=x, y_column=y,
-                      hue=z, style=style, ci=ci, title="", tipo=None, y_lim=True, y_max=100)
+                      hue=hue, style=style, ci=ci, title="", tipo=None, y_lim=True, y_max=100)
             axs[i, j].set_title(r"""Dataset: {}; $\alpha$={}""".format(datasets[j], alphas[i]), fontweight="bold", size=7)
             # if [i, j] != [0, 0]:
             #     axs[i, j].get_legend().remove()
@@ -85,9 +85,9 @@ if __name__ == "__main__":
     join_ratio = 0.3
     global_rounds = 100
     local_epochs = 1
-    fraction_new_clients = 0
-    round_new_clients = 0
-    solutions = ["MultiFedAvgWithFedPredict", "MultiFedAvg", "MultiFedAvgGlobalModelEval", "MultiFedPer", "MultiFedYogi", "MultiFedYogiWithFedPredict"]
+    fraction_new_clients = 0.3
+    round_new_clients = 70
+    solutions = ["MultiFedAvgWithFedPredict", "MultiFedAvg", "MultiFedAvgGlobalModelEval", "MultiFedAvgGlobalModelEvalWithFedPredict", "MultiFedPer", "MultiFedYogi", "MultiFedYogiWithFedPredict"]
 
     read_solutions = {solution: [] for solution in solutions}
     read_dataset_order = []
@@ -130,5 +130,5 @@ if __name__ == "__main__":
         local_epochs)
 
     df = read_data(read_solutions, read_dataset_order)
-    line(df, write_path, x="Round (t)", y="Balanced accuracy (%)", z="Strategy", style="Version")
-    line(df, write_path, x="Round (t)", y="Balanced accuracy (%)", z="Strategy", style="Version")
+    line(df, write_path, x="Round (t)", y="Balanced accuracy (%)", hue="Strategy", style="Version")
+    line(df, write_path, x="Round (t)", y="Balanced accuracy (%)", hue="Strategy", style="Version")

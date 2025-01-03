@@ -82,6 +82,7 @@ from flcore.servers.serveravg_rr import MultiFedAvgRR
 from flcore.servers.server_multifedyogi import MultiFedYogi
 from flcore.servers.server_multifedyogi_with_fedpredict import MultiFedYogiWithFedPredict
 from flcore.servers.server_multifedefficiency import MultiFedEfficiency
+from flcore.servers.server_multifedavg_global_model_eval_with_fedpredict import MultiFedAvgGlobalModelEvalWithFedPredict
 
 from flcore.trainmodel.models import *
 
@@ -410,6 +411,9 @@ def run(args):
 
             elif args.algorithm == "MultiFedEfficiency":
                 server = MultiFedEfficiency
+
+            elif args.algorithm == "MultiFedAvgGlobalModelEvalWithFedPredict":
+                server = MultiFedAvgGlobalModelEvalWithFedPredict
 
             elif args.algorithm == "MultiFedPriority":
                 head = copy.deepcopy(model.fc)

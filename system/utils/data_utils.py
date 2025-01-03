@@ -62,6 +62,7 @@ def read_client_data_v2(m, name, cid, args, mode="train", batch_size=32):
         filename_train = dir_path + """train/idx_train_{}.pickle""".format(cid)
         filename_test = dir_path + "test/idx_test_{}.pickle""".format(cid)
         dataset_dir_path = """../dataset/{}/""".format(name)
+        print("pasta: ", dir_path)
 
         with open(filename_train, 'rb') as handle:
             idx_train = pickle.load(handle)
