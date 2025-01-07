@@ -81,6 +81,7 @@ if __name__ == "__main__":
     num_clients = 20
     alphas = [0.1, 1.0, 10.0]
     dataset = ["EMNIST", "CIFAR10", "GTSRB"]
+    # dataset = ["EMNIST", "CIFAR10"]
     models_names = ["cnn_a"]
     join_ratio = 0.3
     global_rounds = 100
@@ -88,6 +89,8 @@ if __name__ == "__main__":
     fraction_new_clients = 0.3
     round_new_clients = 70
     solutions = ["MultiFedAvgWithFedPredict", "MultiFedAvg", "MultiFedAvgGlobalModelEval", "MultiFedAvgGlobalModelEvalWithFedPredict", "MultiFedPer", "MultiFedYogi", "MultiFedYogiWithFedPredict"]
+    # solutions = ["MultiFedAvgWithFedPredict", "MultiFedAvg", "MultiFedAvgGlobalModelEval",
+    #              "MultiFedAvgGlobalModelEvalWithFedPredict", "MultiFedPer"]
 
     read_solutions = {solution: [] for solution in solutions}
     read_dataset_order = []

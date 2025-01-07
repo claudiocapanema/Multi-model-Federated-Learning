@@ -69,20 +69,14 @@ class clientMultiFedPer(Client):
     def set_parameters(self, m, model):
 
         local_parameters = [i for i in self.model[m].parameters()]
+        lenght = len(local_parameters) - 2
 
-        # for i in range(len(local_parameters)):
-        #     print("""camada {}""".format(i))
-        #     print(local_parameters[i].data.clone().shape)
-        #
-        # exit()
-
-        for i in range(len(model)):
-            new_param = model[i]
-            old_param = model[i]
-            local_parameters[i] = new_param
-
-        for old_param, new_param in zip(self.model[m].parameters(), local_parameters):
-            old_param.data = Parameter(torch.Tensor(new_param))
+        count = 0
+        for new_param, old_param in zip(model.parameters(), self.model[m].parameters()):
+            old_param.data = new_param.data.clone()
+            count += 1
+            if count == lenght:
+                break
 
     def get_model_m(self, m):
 

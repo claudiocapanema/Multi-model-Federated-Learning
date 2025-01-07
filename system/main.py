@@ -36,7 +36,7 @@ from flcore.servers.serverfomo import FedFomo
 from flcore.servers.serveramp import FedAMP
 from flcore.servers.servermtl import FedMTL
 from flcore.servers.serverlocal import Local
-from flcore.servers.servermultifedper import MultiFedPer
+from flcore.servers.server_multifedper import MultiFedPer
 from flcore.servers.serverapfl import APFL
 from flcore.servers.serverditto import Ditto
 from flcore.servers.serverrep import FedRep
@@ -83,6 +83,7 @@ from flcore.servers.server_multifedyogi import MultiFedYogi
 from flcore.servers.server_multifedyogi_with_fedpredict import MultiFedYogiWithFedPredict
 from flcore.servers.server_multifedefficiency import MultiFedEfficiency
 from flcore.servers.server_multifedavg_global_model_eval_with_fedpredict import MultiFedAvgGlobalModelEvalWithFedPredict
+from flcore.servers.server_multifedkd import MultiFedKD
 
 from flcore.trainmodel.models import *
 
@@ -145,11 +146,21 @@ def run(args):
             elif "cnn_a" in model_str: # non-convex
                 if "EMNIST" == dt or "MNIST" == dt:
                     model = FedAvgCNN(dataset=dt, in_features=1, num_classes=num_classes_m, dim=1024).to(args.device)
+                    if args.algorithm == "MultiFedKD":
+                        model = FedAvgCNNKD(dataset=dt, in_features=1, num_classes=num_classes_m, dim=1024).to(
+                            args.device)
                 elif "CIFAR10" == dt:
                     model = FedAvgCNN(dataset=dt, in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
                     print("Sumario: \n", summary(model, (3, 32, 32)))
+                    if args.algorithm == "MultiFedKD":
+                        model = FedAvgCNNKD(dataset=dt, in_features=3, num_classes=num_classes_m, dim=1600).to(
+                            args.device)
+                        print("Sumario: \n", summary(model, (3, 32, 32)))
                 elif "GTSRB" == dt:
                     model = FedAvgCNN(dataset=dt, in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
+                    if args.algorithm == "MultiFedKD":
+                        model = FedAvgCNNKD(dataset=dt, in_features=3, num_classes=num_classes_m, dim=1600).to(
+                            args.device)
                 elif "Omniglot" == dt:
                     model = FedAvgCNN(dataset=dt, in_features=1, num_classes=num_classes_m, dim=33856).to(args.device)
                     # model = CIFARNet(num_classes=num_classes_m).to(args.device)
@@ -411,6 +422,9 @@ def run(args):
 
             elif args.algorithm == "MultiFedEfficiency":
                 server = MultiFedEfficiency
+
+            elif args.algorithm == "MultiFedKD":
+                server = MultiFedKD
 
             elif args.algorithm == "MultiFedAvgGlobalModelEvalWithFedPredict":
                 server = MultiFedAvgGlobalModelEvalWithFedPredict

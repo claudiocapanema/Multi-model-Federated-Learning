@@ -66,7 +66,7 @@ class clientMultiFedYogiWithFedPredict(clientAVG):
             if self.alpha[m] != alpha:
                 self.alpha[m] = alpha
                 self.update_loader[m] = True
-                self.testloaderfull[m] = self.load_test_data(m, t, batch_size=self.batch_size)
+                self.atestloaderfull[m] = self.load_test_data(m, t, batch_size=self.batch_size)
                 self.trainloader[m], self.train_class_count[m] = self.load_train_data(m, t,
                                                                                       batch_size=self.batch_size[m])
                 self.train_samples[m] = 0

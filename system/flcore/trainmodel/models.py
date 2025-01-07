@@ -250,9 +250,9 @@ class FedAvgCNN(nn.Module):
 
         out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv1(x)))
         out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv2(out)))
-        rep = torch.flatten(out, 1)
-        out = nn.ReLU(inplace=True)(self.fc1(rep))
-        out = self.fc(out)
+        out = torch.flatten(out, 1)
+        rep = nn.ReLU(inplace=True)(self.fc1(out))
+        out = self.fc(rep)
 
         # out = self.conv1(x)
         # out = self.conv2(out)
@@ -260,6 +260,65 @@ class FedAvgCNN(nn.Module):
         # out = self.fc1(out)
         # out = self.fc(out)
         return out, rep
+
+class FedAvgCNNStudent(nn.Module):
+    def __init__(self, dataset, in_features=1, num_classes=10, dim=1024):
+        random.seed(0)
+        np.random.seed(0)
+        torch.manual_seed(0)
+        super().__init__()
+        self.dataset = dataset
+
+        self.conv2 = nn.Conv2d(in_features,
+                      32,
+                      kernel_size=10,
+                      padding=0,
+                      stride=1,
+                      bias=True)
+        self.fc1 = nn.Linear(3872, 512)
+        self.fc = nn.Linear(512, num_classes)
+
+    def forward(self, x):
+
+        out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv2(x)))
+        out = torch.flatten(out, 1)
+        out = nn.ReLU(inplace=True)(self.fc1(out))
+        out = self.fc(out)
+
+        return out
+
+    def forward_kd(self, x):
+        print("foo: ", x.shape)
+        out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv2(x)))
+        out = torch.flatten(out, 1)
+        rep = nn.ReLU(inplace=True)(self.fc1(out))
+        out = self.fc(rep)
+
+        return out, rep
+
+class FedAvgCNNKD(nn.Module):
+    def __init__(self, dataset, in_features=1, num_classes=10, dim=1024):
+        random.seed(0)
+        np.random.seed(0)
+        torch.manual_seed(0)
+        super().__init__()
+        self.dataset = dataset
+
+        self.teacher = FedAvgCNN(dataset, in_features=in_features, num_classes=num_classes, dim=dim)
+        self.student = FedAvgCNNStudent(dataset, in_features=in_features, num_classes=num_classes, dim=dim)
+
+    def forward(self, x):
+
+        out, rep = self.teacher.forward_kd(x)
+
+        return out
+
+    def forward_kd(self, x):
+
+        out_teacher, rep_teacher = self.teacher.forward_kd(x)
+        out_student, rep_student = self.student.forward_kd(x)
+
+        return out_student, rep_student, out_teacher, rep_teacher
 
 class TinyImageNetCNN(nn.Module):
     # def __init__(self):

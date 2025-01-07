@@ -15,20 +15,21 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
+import copy
 import time
 import numpy as np
-from flcore.clients.clientavg import clientAVG
+from flcore.clients.clientkd import clientKD
 from flcore.servers.serverbase import Server
 from threading import Thread
 
 
-class MultiFedAvg(Server):
+class MultiFedKD(Server):
     def __init__(self, args, times):
         super().__init__(args, times)
 
         # select slow clients
         self.set_slow_clients()
-        self.set_clients(clientAVG)
+        self.set_clients(clientKD)
 
         print(f"\nJoin ratio / total clients: {self.join_ratio} / {self.num_clients}")
         print("Finished creating server and clients.")
@@ -36,6 +37,44 @@ class MultiFedAvg(Server):
         # self.load_model()
         self.Budget = []
 
+
+    def receive_models(self):
+        assert (len(self.selected_clients) > 0)
+        print("aa: ", len(self.selected_clients), int((1-self.client_drop_rate) * self.current_num_join_clients))
+        # active_clients_m = random.sample(
+        #     self.selected_clients, int((1-self.client_drop_rate) * self.current_num_join_clients))
+
+        self.uploaded_ids = []
+        self.uploaded_weights = []
+        self.uploaded_models = []
+
+        for m in range(len(self.selected_clients)):
+            tot_samples = 0
+            active_clients_m = self.selected_clients[m]
+            print("m: ", m, " ativos: ", len(active_clients_m))
+            m_uploaded_ids = []
+            m_uploaded_weights = []
+            m_uploaded_models = []
+            for client_id in active_clients_m:
+                client = self.clients[client_id]
+                try:
+                    client_time_cost = client.train_time_cost['total_cost'] / client.train_time_cost['num_rounds'] + \
+                            client.send_time_cost['total_cost'] / client.send_time_cost['num_rounds']
+                except ZeroDivisionError:
+                    client_time_cost = 0
+                if client_time_cost <= self.time_threthold:
+                    tot_samples += client.train_samples[m]
+                    m_uploaded_ids.append(client.id)
+                    m_uploaded_weights.append(client.train_samples[m])
+                    m_uploaded_models.append(client.model[m].student)
+            for i, w in enumerate(m_uploaded_weights):
+                m_uploaded_weights[i] = w / tot_samples
+
+            print("modelo: ", m, " tam: ", len(m_uploaded_models))
+
+            self.uploaded_ids.append(copy.deepcopy(m_uploaded_ids))
+            self.uploaded_weights.append(copy.deepcopy(m_uploaded_weights))
+            self.uploaded_models.append(copy.deepcopy(m_uploaded_models))
 
     def train(self):
         self._get_models_size()
@@ -82,3 +121,4 @@ class MultiFedAvg(Server):
         for m in range(self.M):
             self.save_results(m)
             self.save_global_model(m)
+
