@@ -15,7 +15,7 @@ def read_data(read_solutions, read_dataset_order):
                                  "MultiFedAvgGlobalModelEval": {"Strategy_separated": "MultiFedAvgGlobalModelEval", "Version": "Original", "Strategy": "MultiFedAvgGlobalModelEval"},
                                  "MultiFedAvgGlobalModelEvalWithFedPredict": {"Strategy_separated": "MultiFedAvgGlobalModelEval", "Version": "FP", "Strategy": "MultiFedAvgGlobalModelEval+FP"},
                                  "MultiFedPer": {"Strategy_separated": "MultiFedPer", "Version": "Original", "Strategy": "MultiFedPer"},
-                                 "MultiFedYogi": {"Strategy_separated": "MultiFedYogi", "Version": "Original", "Strategy": "MultiFedYogi"}, "MultiFedYogiWithFedPredict": {"Strategy_separated": "MultiFedYogi", "Version": "FP", "Strategy": "MultiFedYogiWithFedPredict"}}
+                                 "MultiFedYogi": {"Strategy_separated": "MultiFedYogi", "Version": "Original", "Strategy": "MultiFedYogi"}, "MultiFedYogiWithFedPredict": {"Strategy_separated": "MultiFedYogi", "Version": "FP", "Strategy": "MultiFedYogi+FP"}}
     for solution in read_solutions:
 
         paths = read_solutions[solution]
@@ -48,6 +48,7 @@ def table(df, write_path, t=None):
     datasets = df["Dataset"].unique().tolist()
     alphas = df["Alpha"].unique().tolist()
     columns = df["Strategy"].unique().tolist()
+    n_strategies = str(len(columns))
 
 
     model_report = {i: {} for i in alphas}
@@ -149,7 +150,7 @@ def table(df, write_path, t=None):
                                                                                                          "\\hline\n\\midrule").replace(
         "\\toprule", "\\hline\n\\toprule").replace("textbf", r"\textbf").replace("\}", "}").replace("\{", "{").replace(
         "\\begin{tabular", "\\resizebox{\columnwidth}{!}{\\begin{tabular}").replace("\$", "$").replace("\&", "&").replace("&  &", "& - &").replace("\_", "_").replace(
-        "&  \\", "& - \\").replace(" - " + r"\textbf", " " + r"\textbf").replace("_{dc}", r"_{\text{dc}}").replace("\multirow[t]{5}{*}{EMNIST}", "EMNIST").replace("\multirow[t]{5}{*}{CIFAR10}", "CIFAR10").replace("\multirow[t]{5}{*}{GTSRB}", "GTSRB").replace("\cline{1-5}", "\hline")
+        "&  \\", "& - \\").replace(" - " + r"\textbf", " " + r"\textbf").replace("_{dc}", r"_{\text{dc}}").replace("\multirow[t]{"+n_strategies+"}{*}{EMNIST}", "EMNIST").replace("\multirow[t]{"+n_strategies+"}{*}{CIFAR10}", "CIFAR10").replace("\multirow[t]{"+n_strategies+"}{*}{GTSRB}", "GTSRB").replace("\cline{1-5}", "\hline")
 
     if t is not None:
         filename = """{}latex_round_{}.txt""".format(write_path, t)
@@ -163,8 +164,8 @@ def table(df, write_path, t=None):
 
 
 def improvements(df, datasets):
-    # strategies = {r"MultiFedAvg+FP": "MultiFedAvg", r"MultiFedYogi+FP": "MultiFedYogi"}
-    strategies = {r"MultiFedAvg+FP": "MultiFedAvg"}
+    strategies = {"MultiFedAvg+FP": "MultiFedAvg", "MultiFedYogi+FP": "MultiFedYogi"}
+    # strategies = {r"MultiFedAvg+FP": "MultiFedAvg"}
     columns = df.columns.tolist()
     improvements_dict = {'Dataset': [], 'Strategy': [], 'Original strategy': [], 'Alpha': [], 'Balanced accuracy (%)': []}
     df_improvements = pd.DataFrame(improvements_dict)
@@ -238,8 +239,8 @@ def accuracy_improvement(df, datasets):
     columns = df.columns.tolist()
     indexes = df.index.tolist()
     solutions = pd.Series([i[1] for i in indexes]).unique().tolist()
-    # reference_solutions = {"MultiFedAvg+FP": "MultiFedAvg", "MultiFedYogi+FP": "MultiFedYogi", "MultiFedAvgGlobalModelEval+FP": "MultiFedAvgGlobalModelEval"}
-    reference_solutions = {"MultiFedAvg+FP": "MultiFedAvg", "MultiFedAvgGlobalModelEval+FP": "MultiFedAvgGlobalModelEval"}
+    reference_solutions = {"MultiFedAvg+FP": "MultiFedAvg", "MultiFedYogi+FP": "MultiFedYogi", "MultiFedAvgGlobalModelEval+FP": "MultiFedAvgGlobalModelEval"}
+    # reference_solutions = {"MultiFedAvg+FP": "MultiFedAvg", "MultiFedAvgGlobalModelEval+FP": "MultiFedAvgGlobalModelEval"}
 
 
     for dataset in datasets:
@@ -319,11 +320,11 @@ if __name__ == "__main__":
     join_ratio = 0.3
     global_rounds = 100
     local_epochs = 1
-    fraction_new_clients = 0
-    round_new_clients = 0
-    # solutions = ["MultiFedAvgWithFedPredict", "MultiFedAvg", "MultiFedAvgGlobalModelEval", "MultiFedAvgGlobalModelEvalWithFedPredict", "MultiFedPer", "MultiFedYogi", "MultiFedYogiWithFedPredict"]
-    solutions = ["MultiFedAvgWithFedPredict", "MultiFedAvg", "MultiFedAvgGlobalModelEvalWithFedPredict", "MultiFedAvgGlobalModelEval",
-                 "MultiFedPer"]
+    fraction_new_clients = 0.3
+    round_new_clients = 70
+    solutions = ["MultiFedAvgWithFedPredict", "MultiFedAvg", "MultiFedAvgGlobalModelEvalWithFedPredict", "MultiFedAvgGlobalModelEval",  "MultiFedYogiWithFedPredict", "MultiFedYogi", "MultiFedPer"]
+    # solutions = ["MultiFedAvgWithFedPredict", "MultiFedAvg", "MultiFedAvgGlobalModelEvalWithFedPredict", "MultiFedAvgGlobalModelEval",
+    #              "MultiFedPer"]
 
     read_solutions = {solution: [] for solution in solutions}
     read_dataset_order = []

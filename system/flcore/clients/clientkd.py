@@ -61,7 +61,9 @@ class clientKD(Client):
 
     def train(self, m, t, global_model):
         trainloader = self.trainloader[m]
-        # self.model.to(self.device)
+        self.model[m].to(self.device)
+        global_model.to(self.device)
+        self.set_parameters(m, global_model)
         self.model[m].train()
 
         start_time = time.time()
@@ -210,7 +212,7 @@ class clientKD(Client):
 
     def set_parameters(self, m, global_model):
         try:
-            for new_param, old_param in zip(global_model, self.model[m].student.parameters()):
+            for new_param, old_param in zip(global_model.parameters(), self.model[m].student.parameters()):
                 old_param.data = new_param.data.clone()
         except Exception as e:
             print("set parameters to model")

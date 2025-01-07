@@ -53,7 +53,7 @@ def line(df, base_dir, x, y, hue=None, style=None, ci=None):
             line_plot(df=df_plot, base_dir=base_dir, ax=axs[i, j],
                       file_name="""solutions_{}""".format(datasets), x_column=x, y_column=y,
                       hue=hue, style=style, ci=ci, title="", tipo=None, y_lim=True, y_max=100)
-            axs[i, j].set_title(r"""Dataset: {}; $\alpha$={}""".format(datasets[j], alphas[i]), fontweight="bold", size=7)
+            axs[i, j].set_title(r"""Dataset: {}; $\alpha$={}""".format(datasets[j], alphas[i]), fontweight="bold", size=9)
             # if [i, j] != [0, 0]:
             #     axs[i, j].get_legend().remove()
             # else:
@@ -88,7 +88,7 @@ if __name__ == "__main__":
     local_epochs = 1
     fraction_new_clients = 0.3
     round_new_clients = 70
-    solutions = ["MultiFedAvgWithFedPredict", "MultiFedAvg", "MultiFedAvgGlobalModelEval", "MultiFedAvgGlobalModelEvalWithFedPredict", "MultiFedPer", "MultiFedYogi", "MultiFedYogiWithFedPredict"]
+    solutions = ["MultiFedAvgWithFedPredict", "MultiFedAvg", "MultiFedAvgGlobalModelEvalWithFedPredict", "MultiFedAvgGlobalModelEval",  "MultiFedYogiWithFedPredict", "MultiFedYogi", "MultiFedPer"]
     # solutions = ["MultiFedAvgWithFedPredict", "MultiFedAvg", "MultiFedAvgGlobalModelEval",
     #              "MultiFedAvgGlobalModelEvalWithFedPredict", "MultiFedPer"]
 

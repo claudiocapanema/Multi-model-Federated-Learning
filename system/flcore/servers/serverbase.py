@@ -84,7 +84,7 @@ class Server(object):
         self.batch_size = args.batch_size
         self.learning_rate = args.local_learning_rate
         self.M = len(self.dataset)
-        self.global_model = copy.deepcopy(args.model)
+        self.global_model = [copy.deepcopy(args.model[m].student) for m in range(self.M)]
         self.num_clients = args.num_clients
         self.num_classes = args.num_classes
         self.alpha = args.alpha

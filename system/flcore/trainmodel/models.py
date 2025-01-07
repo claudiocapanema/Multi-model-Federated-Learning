@@ -275,7 +275,8 @@ class FedAvgCNNStudent(nn.Module):
                       padding=0,
                       stride=1,
                       bias=True)
-        self.fc1 = nn.Linear(3872, 512)
+        dim = {"EMNIST": 2592, "CIFAR10": 3872, "GTSRB": 3872}[dataset]
+        self.fc1 = nn.Linear(dim, 512)
         self.fc = nn.Linear(512, num_classes)
 
     def forward(self, x):
@@ -288,7 +289,6 @@ class FedAvgCNNStudent(nn.Module):
         return out
 
     def forward_kd(self, x):
-        print("foo: ", x.shape)
         out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv2(x)))
         out = torch.flatten(out, 1)
         rep = nn.ReLU(inplace=True)(self.fc1(out))
