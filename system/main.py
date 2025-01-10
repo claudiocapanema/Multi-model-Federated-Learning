@@ -84,6 +84,9 @@ from flcore.servers.server_multifedyogi_with_fedpredict import MultiFedYogiWithF
 from flcore.servers.server_multifedefficiency import MultiFedEfficiency
 from flcore.servers.server_multifedavg_global_model_eval_with_fedpredict import MultiFedAvgGlobalModelEvalWithFedPredict
 from flcore.servers.server_multifedkd import MultiFedKD
+from flcore.servers.server_multifedyogi_global_model_eval import MultiFedYogiGlobalModelEval
+from flcore.servers.server_multifedyogi_global_model_eval_with_fedpredict import MultiFedYogiGlobalModelEvalWithFedPredict
+from flcore.servers.server_multifedkd_with_fedpredict import MultiFedKDWithFedPredict
 
 from flcore.trainmodel.models import *
 
@@ -146,19 +149,19 @@ def run(args):
             elif "cnn_a" in model_str: # non-convex
                 if "EMNIST" == dt or "MNIST" == dt:
                     model = FedAvgCNN(dataset=dt, in_features=1, num_classes=num_classes_m, dim=1024).to(args.device)
-                    if args.algorithm == "MultiFedKD":
+                    if "MultiFedKD" in args.algorithm:
                         model = FedAvgCNNKD(dataset=dt, in_features=1, num_classes=num_classes_m, dim=1024).to(
                             args.device)
                 elif "CIFAR10" == dt:
                     model = FedAvgCNN(dataset=dt, in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
                     print("Sumario: \n", summary(model, (3, 32, 32)))
-                    if args.algorithm == "MultiFedKD":
+                    if "MultiFedKD" in args.algorithm:
                         model = FedAvgCNNKD(dataset=dt, in_features=3, num_classes=num_classes_m, dim=1600).to(
                             args.device)
                         print("Sumario: \n", summary(model, (3, 32, 32)))
                 elif "GTSRB" == dt:
                     model = FedAvgCNN(dataset=dt, in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
-                    if args.algorithm == "MultiFedKD":
+                    if "MultiFedKD" in args.algorithm:
                         model = FedAvgCNNKD(dataset=dt, in_features=3, num_classes=num_classes_m, dim=1600).to(
                             args.device)
                 elif "Omniglot" == dt:
@@ -172,6 +175,29 @@ def run(args):
                 else:
                     model = FedAvgCNN(dataset=dt, in_features=3, num_classes=num_classes_m, dim=10816).to(args.device)
 
+            elif "cnn_b" in model_str:
+                if "GTSRB" == dt:
+                    model = CNN_2(3, mid_dim=64, num_classes=num_classes_m).to(args.device)
+
+            elif "cnn_c" in model_str: # non-convex
+                if "EMNIST" == dt or "MNIST" == dt:
+                    model = CNN_3(dataset=dt, in_features=1, num_classes=num_classes_m, dim=4).to(args.device)
+                    if args.algorithm == "MultiFedKD":
+                        model = FedAvgCNNKD(dataset=dt, in_features=1, num_classes=num_classes_m, dim=1024).to(
+                            args.device)
+                elif "CIFAR10" == dt:
+                    model = CNN_3(dataset=dt, in_features=3, num_classes=num_classes_m, dim=16).to(args.device)
+                    print("Sumario: \n", summary(model, (3, 32, 32)))
+                    if args.algorithm == "MultiFedKD":
+                        model = FedAvgCNNKD(dataset=dt, in_features=3, num_classes=num_classes_m, dim=16).to(
+                            args.device)
+                        print("Sumario: \n", summary(model, (3, 32, 32)))
+                elif "GTSRB" == dt:
+                    model = CNN_3(dataset=dt, in_features=3, num_classes=num_classes_m, dim=16).to(args.device)
+                    if args.algorithm == "MultiFedKD":
+                        model = FedAvgCNNKD(dataset=dt, in_features=3, num_classes=num_classes_m, dim=16).to(
+                            args.device)
+
             elif model_str == "gru":
                 if dt in ["WISDM-W", "WISDM-P"]:
                     model = GRU(6, num_layers=1, hidden_size=4, sequence_length=200, num_classes=num_classes_m).to(args.device)
@@ -180,9 +206,7 @@ def run(args):
                 if dt in ["WISDM-W", "WISDM-P"]:
                     model = LSTM_NET(6, hidden_dim=6, num_classes=num_classes_m).to(args.device)
 
-            elif "cnn_b" in model_str:
-                if "GTSRB" == dt:
-                    model = CNN_2(3, mid_dim=64, num_classes=num_classes_m).to(args.device)
+
 
             elif "dnn" in model_str: # non-convex
                 if dt in ["MNIST", "EMNIST"]:
@@ -324,10 +348,7 @@ def run(args):
                 server = FedROD
 
             elif args.algorithm == "FedProto":
-                head = copy.deepcopy(model.fc)
-                model.fc = nn.Identity()
-                model = BaseHeadSplit(model, head)
-                server = FedProto(args, i)
+                server = FedProto
 
             elif args.algorithm == "FedDyn":
                 server = FedDyn(args, i)
@@ -426,8 +447,17 @@ def run(args):
             elif args.algorithm == "MultiFedKD":
                 server = MultiFedKD
 
+            elif args.algorithm == "MultiFedKDWithFedPredict":
+                server = MultiFedKDWithFedPredict
+
             elif args.algorithm == "MultiFedAvgGlobalModelEvalWithFedPredict":
                 server = MultiFedAvgGlobalModelEvalWithFedPredict
+
+            elif args.algorithm == "MultiFedYogiGlobalModelEval":
+                server = MultiFedYogiGlobalModelEval
+
+            elif args.algorithm == "MultiFedYogiGlobalModelEvalWithFedPredict":
+                server = MultiFedYogiGlobalModelEvalWithFedPredict
 
             elif args.algorithm == "MultiFedPriority":
                 head = copy.deepcopy(model.fc)

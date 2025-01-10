@@ -522,7 +522,8 @@ def read_cifar10(dir_path):
 def read_emnist(dir_path):
     transform = {'train': transforms.Compose(
         [
-            transforms.ToTensor(), transforms.RandomRotation(10),
+            transforms.ToTensor()
+            , transforms.RandomRotation(10),
              transforms.Normalize([0.5], [0.5])
         ]
     ), 'test': transforms.Compose(

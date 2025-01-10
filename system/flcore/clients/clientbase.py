@@ -101,8 +101,8 @@ class Client(object):
             print("fc do cliente ", self.id, self.fraction_of_classes[m], self.imbalance_level[m])
         
 
-        self.train_slow = kwargs['train_slow']
-        self.send_slow = kwargs['send_slow']
+        self.train_slow = 0
+        self.send_slow = 0
         self.train_time_cost = {'num_rounds': 0, 'total_cost': 0.0}
         self.send_time_cost = {'num_rounds': 0, 'total_cost': 0.0}
 
@@ -574,7 +574,6 @@ class Client(object):
                 train_loss += loss.item() * y.shape[0]
 
                 train_acc += (torch.sum(torch.argmax(output, dim=1) == y)).item()
-                train_num += y.shape[0]
 
                 y_prob.append(output.detach().cpu().numpy())
                 nc = self.num_classes[m]

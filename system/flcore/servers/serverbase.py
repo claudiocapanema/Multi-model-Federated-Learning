@@ -84,7 +84,7 @@ class Server(object):
         self.batch_size = args.batch_size
         self.learning_rate = args.local_learning_rate
         self.M = len(self.dataset)
-        self.global_model = [copy.deepcopy(args.model[m].student) for m in range(self.M)]
+        self.global_model = [copy.deepcopy(args.model[m]) for m in range(self.M)]
         self.num_clients = args.num_clients
         self.num_classes = args.num_classes
         self.alpha = args.alpha
@@ -150,9 +150,7 @@ class Server(object):
             train_data = []
             test_data = []
             client = clientObj(self.args,
-                            id=i,
-                            train_slow=train_slow,
-                            send_slow=send_slow)
+                            id=i)
             self.clients.append(client)
 
     # random select slow clients
@@ -627,6 +625,7 @@ class Server(object):
     def evaluate(self, m, t, acc=None, loss=None):
         test_metrics, test_metrics_w = self.test_metrics(m, t)
         test_acc = test_metrics['Accuracy']
+        test_balanced_acc = test_metrics['Balanced accuracy']
         test_std_acc = test_metrics["Std Accuracy"]
         test_std_loss = test_metrics["Std loss"]
         test_loss = test_metrics['Loss']
@@ -694,6 +693,7 @@ class Server(object):
         print("Evaluate model {}".format(m))
         print("Averaged Train Loss: {:.4f}".format(train_loss))
         print("Averaged Test Accuracy: {:.4f}".format(test_acc))
+        print("Averaged Test Balanced Accuracy: {:.4f}".format(test_balanced_acc))
         print("Averaged Test Accuracy w: {:.4f}".format(test_acc_w))
         print("Averaged Test Loss: {:.4f}".format(test_loss))
         print("Averaged Test Loss w: {:.4f}".format(test_loss_w))

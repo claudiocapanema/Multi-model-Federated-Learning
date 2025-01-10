@@ -37,44 +37,48 @@ class FedProto(Server):
         # self.load_model()
         self.Budget = []
         self.num_classes = args.num_classes
-        self.global_protos = [None for _ in range(args.num_classes)]
+        self.global_protos = [[None for _ in range(args.num_classes[m])] for m in range(self.M)]
 
 
     def train(self):
-        for i in range(self.global_rounds+1):
+        self._get_models_size()
+        for t in range(self.global_rounds+1):
             s_t = time.time()
-            self.selected_clients = self.select_clients()
+            self.selected_clients = self.select_clients(t)
 
-            if i%self.eval_gap == 0:
-                print(f"\n-------------Round number: {i}-------------")
-                print("\nEvaluate personalized models")
-                self.evaluate()
+            for m in range(len(self.selected_clients)):
 
-            for client in self.selected_clients:
-                client.train()
+                for i in range(len(self.selected_clients[m])):
+                    self.clients[self.selected_clients[m][i]].train(m, t, self.global_protos[m])
 
-            # threads = [Thread(target=client.train)
-            #            for client in self.selected_clients]
-            # [t.start() for t in threads]
-            # [t.join() for t in threads]
+                # threads = [Thread(target=client.train)
+                #            for client in self.selected_clients]
+                # [t.start() for t in threads]
+                # [t.join() for t in threads]
 
-            self.receive_protos()
-            self.global_protos = proto_aggregation(self.uploaded_protos)
-            self.send_protos()
+                self.receive_protos()
+                self.global_protos[m] = proto_aggregation(self.uploaded_protos)
+                # self.send_protos()
 
-            self.Budget.append(time.time() - s_t)
-            print('-'*50, self.Budget[-1])
+                self.Budget.append(time.time() - s_t)
+                print('-'*50, self.Budget[-1])
 
-            if self.auto_break and self.check_done(acc_lss=[self.rs_test_acc], top_cnt=self.top_cnt):
-                break
+                if self.auto_break and self.check_done(acc_lss=[self.rs_test_acc], top_cnt=self.top_cnt):
+                    break
 
-        print("\nBest accuracy.")
-        # self.print_(max(self.rs_test_acc), max(
-        #     self.rs_train_acc), min(self.rs_train_loss))
-        print(max(self.rs_test_acc))
-        print(sum(self.Budget[1:])/len(self.Budget[1:]))
+                if t%self.eval_gap == 0:
+                    print(f"\n-------------Round number: {t}-------------")
+                    print("\nEvaluate personalized models")
+                    self.evaluate(m, t)
+            print("\nBest accuracy.")
+            # self.print_(max(self.rs_test_acc), max(
+            #     self.rs_train_acc), min(self.rs_train_loss))
+            print(max(self.rs_test_acc))
+            # print(sum(self.Budget[1:])/len(self.Budget[1:]))
 
-        self.save_results()
+            for m in range(self.M):
+                self.save_results(m)
+                self.save_global_model(m)
         
 
     def send_protos(self):
@@ -93,32 +97,33 @@ class FedProto(Server):
 
         self.uploaded_ids = []
         self.uploaded_protos = []
-        for client in self.selected_clients:
-            self.uploaded_ids.append(client.id)
-            self.uploaded_protos.append(client.protos)
+        for m in range(self.M):
+            for i in self.selected_clients[m]:
+                self.uploaded_ids.append(i)
+                self.uploaded_protos.append(self.clients[i].protos[m])
 
-    def evaluate(self, acc=None, loss=None):
-        stats = self.test_metrics()
-        stats_train = self.train_metrics()
-
-        test_acc = sum(stats[2])*1.0 / sum(stats[1])
-        train_loss = sum(stats_train[2])*1.0 / sum(stats_train[1])
-        accs = [a / n for a, n in zip(stats[2], stats[1])]
-        
-        if acc == None:
-            self.rs_test_acc.append(test_acc)
-        else:
-            acc.append(test_acc)
-        
-        if loss == None:
-            self.rs_train_loss.append(train_loss)
-        else:
-            loss.append(train_loss)
-
-        print("Averaged Train Loss: {:.4f}".format(train_loss))
-        print("Averaged Test Accurancy: {:.4f}".format(test_acc))
-        # self.print_(test_acc, train_acc, train_loss)
-        print("Std Test Accurancy: {:.4f}".format(np.std(accs)))
+    # def evaluate(self, acc=None, loss=None):
+    #     stats = self.test_metrics()
+    #     stats_train = self.train_metrics()
+    #
+    #     test_acc = sum(stats[2])*1.0 / sum(stats[1])
+    #     train_loss = sum(stats_train[2])*1.0 / sum(stats_train[1])
+    #     accs = [a / n for a, n in zip(stats[2], stats[1])]
+    #
+    #     if acc == None:
+    #         self.rs_test_acc.append(test_acc)
+    #     else:
+    #         acc.append(test_acc)
+    #
+    #     if loss == None:
+    #         self.rs_train_loss.append(train_loss)
+    #     else:
+    #         loss.append(train_loss)
+    #
+    #     print("Averaged Train Loss: {:.4f}".format(train_loss))
+    #     print("Averaged Test Accurancy: {:.4f}".format(test_acc))
+    #     # self.print_(test_acc, train_acc, train_loss)
+    #     print("Std Test Accurancy: {:.4f}".format(np.std(accs)))
             
 
 # https://github.com/yuetan031/fedproto/blob/main/lib/utils.py#L221

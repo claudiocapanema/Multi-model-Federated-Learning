@@ -186,13 +186,12 @@ def line_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, log_
 
     x = df[x_column].tolist()
     # plt.xticks(np.arange(0, max(x) + 1, 2.0))
-    print("titulo: ", title)
     if tipo is not None:
         palette = sns.color_palette()
         figure = sns.lineplot(x=x_column, y=y_column, data=df, hue=hue, ax=ax, palette=palette, hue_order=hue_order, style=style, style_order=style_order, markers=markers, size=size, sizes=sizes, linewidth=0.8, errorbar=ci).set_title(title)
     else:
         figure = sns.lineplot(x=x_column, y=y_column, data=df, hue=hue, ax=ax, hue_order=hue_order, style=style, style_order=style_order, markers=markers, size=size, sizes=sizes, linewidth=0.8, errorbar=ci).set_title(title)
-    print("nof")
+
 
     # plt.xticks(np.arange(min(x), max(x) + 1, max(x)//10))
     if tipo == 2:
@@ -205,7 +204,6 @@ def line_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, log_
         # plt.legend([3, 2, 1], label='Line 1', loc='upper left', ncol=3, bbox_to_anchor=(0.2, 1))
 
     if y_lim:
-        print("limite")
         plt.ylim([y_min, y_max])
         if ax is not None:
             ax.set_ylim(y_min, y_max)

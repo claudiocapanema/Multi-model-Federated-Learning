@@ -271,17 +271,24 @@ class FedAvgCNNStudent(nn.Module):
 
         self.conv2 = nn.Conv2d(in_features,
                       32,
-                      kernel_size=10,
+                      kernel_size=5,
                       padding=0,
                       stride=1,
                       bias=True)
-        dim = {"EMNIST": 2592, "CIFAR10": 3872, "GTSRB": 3872}[dataset]
+        self.conv3 = nn.Conv2d(32,
+                               32,
+                               kernel_size=5,
+                               padding=0,
+                               stride=1,
+                               bias=True)
+        dim = {"EMNIST": 512, "CIFAR10": 800, "GTSRB": 800}[dataset]
         self.fc1 = nn.Linear(dim, 512)
         self.fc = nn.Linear(512, num_classes)
 
     def forward(self, x):
 
         out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv2(x)))
+        out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv3(out)))
         out = torch.flatten(out, 1)
         out = nn.ReLU(inplace=True)(self.fc1(out))
         out = self.fc(out)
@@ -290,6 +297,7 @@ class FedAvgCNNStudent(nn.Module):
 
     def forward_kd(self, x):
         out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv2(x)))
+        out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv3(out)))
         out = torch.flatten(out, 1)
         rep = nn.ReLU(inplace=True)(self.fc1(out))
         out = self.fc(rep)
@@ -800,12 +808,84 @@ class TextCNN(nn.Module):
 
 # ====================================================================================================================
 
+class CNN_3(torch.nn.Module):
+    def __init__(self, dataset, in_features, dim=64, num_classes=10):
+        super().__init__()
+        self.model = torch.nn.Sequential(
 
-# class linear(Function):
-#   @staticmethod
-#   def forward(ctx, input):
-#     return input
-  
-#   @staticmethod
-#   def backward(ctx, grad_output):
-#     return grad_output
+            torch.nn.Conv2d(in_channels=in_features, out_channels=32, kernel_size=3, padding=1),
+            torch.nn.ReLU(),
+            # Input = 32 x 32 x 32, Output = 32 x 16 x 16
+            torch.nn.MaxPool2d(kernel_size=2),
+
+            # Input = 32 x 16 x 16, Output = 64 x 16 x 16
+            torch.nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1),
+            torch.nn.ReLU(),
+            # Input = 64 x 16 x 16, Output = 64 x 8 x 8
+            torch.nn.MaxPool2d(kernel_size=2),
+
+            # Input = 64 x 8 x 8, Output = 64 x 8 x 8
+            torch.nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, padding=1),
+            torch.nn.ReLU(),
+            # Input = 64 x 8 x 8, Output = 64 x 4 x 4
+            torch.nn.MaxPool2d(kernel_size=2),
+            torch.nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, padding=1),
+            torch.nn.ReLU(),
+            # Input = 64 x 8 x 8, Output = 64 x 4 x 4
+            torch.nn.MaxPool2d(kernel_size=2),
+
+            torch.nn.Flatten(),
+            torch.nn.Linear(dim * 4 * 4, 512),
+            torch.nn.ReLU(),
+            torch.nn.Linear(512, num_classes)
+        )
+
+
+    def forward(self, x):
+        return self.model(x)
+
+class CNN_3_proto(torch.nn.Module):
+    def __init__(self, input_shape, mid_dim=64, num_classes=10):
+
+        try:
+            super(CNN_3_proto, self).__init__()
+
+            self.conv1 = torch.nn.Sequential(
+                torch.nn.Conv2d(in_channels=input_shape, out_channels=32, kernel_size=3, padding=1),
+                torch.nn.ReLU(),
+                # Input = 32 x 32 x 32, Output = 32 x 16 x 16
+                torch.nn.MaxPool2d(kernel_size=2),
+
+                # Input = 32 x 16 x 16, Output = 64 x 16 x 16
+                torch.nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1),
+                torch.nn.ReLU(),
+                # Input = 64 x 16 x 16, Output = 64 x 8 x 8
+                torch.nn.MaxPool2d(kernel_size=2),
+
+                # Input = 64 x 8 x 8, Output = 64 x 8 x 8
+                torch.nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, padding=1),
+                torch.nn.ReLU(),
+                # Input = 64 x 8 x 8, Output = 64 x 4 x 4
+                torch.nn.MaxPool2d(kernel_size=2),
+                torch.nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, padding=1),
+
+                torch.nn.ReLU(),
+                # Input = 64 x 8 x 8, Output = 64 x 4 x 4
+                torch.nn.MaxPool2d(kernel_size=2),
+                torch.nn.Flatten(),
+                torch.nn.Linear(mid_dim * 4 * 4, 512))
+
+            self.fc = torch.nn.Linear(512, num_classes)
+
+        except Exception as e:
+            print("CNN_3_proto")
+            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
+
+    def forward(self, x):
+        try:
+            proto = self.conv1(x)
+            out = self.fc(proto)
+            return out, proto
+        except Exception as e:
+            print("CNN_3_proto")
+            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
