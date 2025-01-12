@@ -50,11 +50,25 @@ class clientKD(Client):
                 self.optimizer_g.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
                 self.optimizer_w.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
             else:
-                self.optimizer_g.append(torch.optim.SGD(self.model[m].parameters(), lr=self.learning_rate))
-                self.optimizer_w.append(torch.optim.SGD(self.model[m].parameters(), lr=self.learning_rate))
+                self.optimizer_g.append(torch.optim.SGD(self.model[m].parameters(), lr=0.004))
+                self.optimizer_w.append(torch.optim.SGD(self.model[m].parameters(), lr=0.004))
 
             self.feature_dim = list(args.model[m].parameters())[-2].shape[1]
             self.W_h[m] = nn.Linear(self.feature_dim, self.feature_dim, bias=False).to(self.device)
+
+        self.optimizer = []
+        self.learning_rate_scheduler = []
+        for m in range(self.M):
+            if self.dataset[m] in ['ExtraSensory', 'WISDM-W', 'WISDM-P']:
+                self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.001))
+                # self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.0001)) # loss constante não aprende
+                # self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
+            elif self.dataset[m] in ["Tiny-ImageNet", "ImageNet", "ImageNet_v2"]:
+                self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=0.0005))
+            elif self.dataset[m] in ["EMNIST", "CIFAR10"]:
+                self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
+            else:
+                self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.005))
 
         self.KL = nn.KLDivLoss()
         self.MSE = nn.MSELoss()
@@ -286,6 +300,9 @@ class clientKD(Client):
                     self.last_not_nan = output
                 # print("saida: ", torch.isnan(output).any(), output)
                 # print("true: ", torch.isnan(y).any())
+                print("sai: ", output.shape, y.shape, x.shape)
+                if output.shape[0] != y.shape[0]:
+                    continue
                 loss = self.loss(output, y)
                 test_loss += loss.item() * y.shape[0]
 
@@ -300,6 +317,9 @@ class clientKD(Client):
                 if self.num_classes[m] == 2:
                     lb = lb[:, :2]
                 y_true.append(lb)
+
+        if test_num == 0:
+            test_num = 1
 
         # self.model.cpu()
         # self.save_model(self.model, 'model')

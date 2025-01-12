@@ -60,6 +60,20 @@ class clientKDWithFedPredict(Client):
             self.feature_dim = list(args.model[m].parameters())[-2].shape[1]
             self.W_h[m] = nn.Linear(self.feature_dim, self.feature_dim, bias=False).to(self.device)
 
+        self.optimizer = []
+        self.learning_rate_scheduler = []
+        for m in range(self.M):
+            if self.dataset[m] in ['ExtraSensory', 'WISDM-W', 'WISDM-P']:
+                self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.001))
+                # self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.0001)) # loss constante não aprende
+                # self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
+            elif self.dataset[m] in ["Tiny-ImageNet", "ImageNet", "ImageNet_v2"]:
+                self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=0.0005))
+            elif self.dataset[m] in ["EMNIST", "CIFAR10"]:
+                self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
+            else:
+                self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.004))
+
         self.KL = nn.KLDivLoss()
         self.MSE = nn.MSELoss()
 

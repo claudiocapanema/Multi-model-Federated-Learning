@@ -77,8 +77,11 @@ class ClientAvgWithFedPredict(clientAVG):
         random.seed(self.id)
         np.random.seed(self.id)
         torch.manual_seed(self.id)
+        # self.train_predict(m, t, global_model)
         self.model[m].to(self.device)
         self.model[m].eval()
+
+        p = np.array(self.train_class_count[m])/np.sum(self.train_class_count[m])
 
         nt = t - self.last_training_round
         global_model = global_model.to(self.device)
@@ -104,6 +107,7 @@ class ClientAvgWithFedPredict(clientAVG):
                     y = torch.from_numpy(np.array(list(y), dtype=np.int32))
                 y = y.type(torch.LongTensor).to(self.device)
                 output = self.combined_model[m](x)
+                # output = output * torch.from_numpy(p).to(self.device)
                 loss = self.loss(output, y)
                 test_loss += loss.item() * y.shape[0]
 
@@ -155,3 +159,49 @@ class ClientAvgWithFedPredict(clientAVG):
                     test_macro_fscore,
                     test_weighted_fscore,
                     self.current_alpha[m])
+
+    def train_predict(self, m, t, global_model):
+        trainloader = self.trainloader[m]
+        self.set_parameters_train_predict(m, global_model)
+        self.combined_model[m].to(self.device)
+
+        start_time = time.time()
+
+        max_local_epochs = self.local_epochs
+        if self.train_slow:
+            max_local_epochs = np.random.randint(1, max_local_epochs // 2)
+
+        total = 0
+        for epoch in range(max_local_epochs):
+            for i, (x, y) in enumerate(trainloader):
+                # print(x.shape, y.shape)
+                # exit()
+                total += x.shape[0]
+                if total > 150:
+                    break
+                if type(x) == type([]):
+                    x[0] = x[0].to(self.device)
+                else:
+                    x = x.to(self.device)
+                y = torch.from_numpy(np.array(y).astype(int)).to(self.device)
+                y = y.type(torch.LongTensor).to(self.device)
+                if self.train_slow:
+                    time.sleep(0.1 * np.abs(np.random.rand()))
+                self.optimizer[m].zero_grad()
+                output = self.combined_model[m](x).to(self.device)
+                loss = self.loss(output, y)
+
+                loss.backward()
+                self.optimizer[m].step()
+
+    def set_parameters_train_predict(self, m, model):
+        self.combined_model[m] = copy.deepcopy(self.model[m])
+        layers = len([i for i in model.parameters()])
+        count = 0
+        for new_param, old_param in zip(model.parameters(), self.combined_model[m].parameters()):
+            count += 1
+            if count < layers - 4:
+                old_param.data = new_param.data.clone()
+                old_param.requires_grad = False
+            else:
+                old_param.requires_grad = True
