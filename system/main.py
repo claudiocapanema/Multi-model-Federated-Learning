@@ -625,6 +625,9 @@ if __name__ == "__main__":
     # FedMTL
     parser.add_argument('-itk', "--itk", type=int, default=4000,
                         help="The iterations for solving quadratic subproblems")
+    # MultiFedEfficiency
+    parser.add_argument('-tw', "--tw", type=int, default=16,
+                        help="Rounds window")
     # FedAMP
     parser.add_argument('-alk', "--alphaK", type=float, default=1.0, 
                         help="lambda/sqrt(GLOABL-ITRATION) according to the paper")

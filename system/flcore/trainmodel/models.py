@@ -269,38 +269,57 @@ class FedAvgCNNStudent(nn.Module):
         super().__init__()
         self.dataset = dataset
 
-        self.conv2 = nn.Conv2d(in_features,
+        # self.conv2 = nn.Conv2d(in_features,
+        #               32,
+        #               kernel_size=5,
+        #               padding=0,
+        #               stride=1,
+        #               bias=True)
+        # self.conv3 = nn.Conv2d(32,
+        #                        32,
+        #                        kernel_size=5,
+        #                        padding=0,
+        #                        stride=1,
+        #                        bias=True)
+        # dim = {"EMNIST": 512, "CIFAR10": 800, "GTSRB": 800}[dataset]
+        # self.fc1 = nn.Linear(dim, 512)
+        # self.fc = nn.Linear(512, num_classes)
+
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(in_features,
                       32,
-                      kernel_size=5,
+                      kernel_size=3,
                       padding=0,
                       stride=1,
-                      bias=True)
-        self.conv3 = nn.Conv2d(32,
-                               32,
-                               kernel_size=5,
-                               padding=0,
-                               stride=1,
-                               bias=True)
-        dim = {"EMNIST": 512, "CIFAR10": 800, "GTSRB": 800}[dataset]
-        self.fc1 = nn.Linear(dim, 512)
-        self.fc = nn.Linear(512, num_classes)
+                      bias=True),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=(2, 2)),
+            nn.Flatten(),
+            nn.Linear(dim, 512),
+            nn.ReLU(inplace=True))
+        self.out = nn.Linear(512, num_classes)
+        self.out = nn.Linear(512, num_classes)
 
     def forward(self, x):
 
-        out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv2(x)))
-        out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv3(out)))
-        out = torch.flatten(out, 1)
-        out = nn.ReLU(inplace=True)(self.fc1(out))
-        out = self.fc(out)
+        # out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv2(x)))
+        # out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv3(out)))
+        # out = torch.flatten(out, 1)
+        # out = nn.ReLU(inplace=True)(self.fc1(out))
+        # out = self.fc(out)
+        rep = self.conv1(x)
+        out = self.out(rep)
 
         return out
 
     def forward_kd(self, x):
-        out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv2(x)))
-        out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv3(out)))
-        out = torch.flatten(out, 1)
-        rep = nn.ReLU(inplace=True)(self.fc1(out))
-        out = self.fc(rep)
+        # out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv2(x)))
+        # out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv3(out)))
+        # out = torch.flatten(out, 1)
+        # rep = nn.ReLU(inplace=True)(self.fc1(out))
+        # out = self.fc(rep)
+        rep = self.conv1(x)
+        out = self.out(rep)
 
         return out, rep
 
@@ -312,8 +331,10 @@ class FedAvgCNNKD(nn.Module):
         super().__init__()
         self.dataset = dataset
 
-        self.teacher = FedAvgCNN(dataset, in_features=in_features, num_classes=num_classes, dim=dim)
-        self.student = FedAvgCNNStudent(dataset, in_features=in_features, num_classes=num_classes, dim=dim)
+        teacher_dim = {"GTSRB": 256}[dataset]
+        student_dim = {"GTSRB": 7200}[dataset]
+        self.teacher = CNN_3_proto(dataset, in_features=in_features, num_classes=num_classes, dim=teacher_dim)
+        self.student = FedAvgCNNStudent(dataset, in_features=in_features, num_classes=num_classes, dim=student_dim)
 
     def forward(self, x):
 
@@ -327,6 +348,89 @@ class FedAvgCNNKD(nn.Module):
         out_student, rep_student = self.student.forward_kd(x)
 
         return out_student, rep_student, out_teacher, rep_teacher
+
+class CNN_3_proto(torch.nn.Module):
+    def __init__(self, dataset, in_features, dim, num_classes=10):
+
+        try:
+            super(CNN_3_proto, self).__init__()
+
+                # queda para asl
+                # nn.Conv2d(input_shape, 32, kernel_size=3, padding=1),
+                # nn.ReLU(),
+                # nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+                # nn.ReLU(),
+                # nn.MaxPool2d(2, 2),  # output: 64 x 16 x 16
+                #
+                # nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+                # nn.ReLU(),
+                # nn.MaxPool2d(2, 2),  # output: 128 x 8 x 8
+                # nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
+                # nn.ReLU(),
+                # nn.MaxPool2d(2, 2),  # output: 128 x 8 x 8
+                #
+                # nn.Flatten(),
+                # nn.Linear(mid_dim,512),
+                # nn.ReLU(),
+                # nn.Linear(512, num_classes))
+
+                # nn.Linear(28*28, 392),
+                # nn.ReLU(),
+                # nn.Dropout(0.5),
+                # nn.Linear(392, 196),
+                # nn.ReLU(),
+                # nn.Linear(196, 98),
+                # nn.ReLU(),
+                # nn.Dropout(0.3),
+                # nn.Linear(98, num_classes)
+
+            self.conv1 = torch.nn.Sequential(torch.nn.Conv2d(in_channels=in_features, out_channels=32, kernel_size=3, padding=1),
+                                             torch.nn.ReLU(),
+                                             # Input = 32 x 32 x 32, Output = 32 x 16 x 16
+                                             torch.nn.MaxPool2d(kernel_size=2),
+
+                                             # Input = 32 x 16 x 16, Output = 64 x 16 x 16
+                                             torch.nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1),
+                                             torch.nn.ReLU(),
+                                             # Input = 64 x 16 x 16, Output = 64 x 8 x 8
+                                             torch.nn.MaxPool2d(kernel_size=2),
+
+                                             # Input = 64 x 8 x 8, Output = 64 x 8 x 8
+                                             torch.nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, padding=1),
+                                             torch.nn.ReLU(),
+                                             # Input = 64 x 8 x 8, Output = 64 x 4 x 4
+                                             torch.nn.MaxPool2d(kernel_size=2),
+                                             torch.nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, padding=1),
+
+                                             torch.nn.ReLU(),
+                                             # Input = 64 x 8 x 8, Output = 64 x 4 x 4
+                                             torch.nn.MaxPool2d(kernel_size=2),
+                                             torch.nn.Flatten(),
+                                             torch.nn.Linear(dim, 512))
+
+            self.fc = torch.nn.Linear(512, num_classes)
+
+        except Exception as e:
+            print("CNN_3_proto")
+            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
+
+    def forward(self, x):
+        try:
+            proto = self.conv1(x)
+            out = self.fc(proto)
+            return out, proto
+        except Exception as e:
+            print("forward CNN_3_proto")
+            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
+
+    def forward_kd(self, x):
+        try:
+            proto = self.conv1(x)
+            out = self.fc(proto)
+            return out, proto
+        except Exception as e:
+            print("forward CNN_3_proto_kd")
+            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
 
 class TinyImageNetCNN(nn.Module):
     # def __init__(self):
@@ -843,49 +947,3 @@ class CNN_3(torch.nn.Module):
 
     def forward(self, x):
         return self.model(x)
-
-class CNN_3_proto(torch.nn.Module):
-    def __init__(self, input_shape, mid_dim=64, num_classes=10):
-
-        try:
-            super(CNN_3_proto, self).__init__()
-
-            self.conv1 = torch.nn.Sequential(
-                torch.nn.Conv2d(in_channels=input_shape, out_channels=32, kernel_size=3, padding=1),
-                torch.nn.ReLU(),
-                # Input = 32 x 32 x 32, Output = 32 x 16 x 16
-                torch.nn.MaxPool2d(kernel_size=2),
-
-                # Input = 32 x 16 x 16, Output = 64 x 16 x 16
-                torch.nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1),
-                torch.nn.ReLU(),
-                # Input = 64 x 16 x 16, Output = 64 x 8 x 8
-                torch.nn.MaxPool2d(kernel_size=2),
-
-                # Input = 64 x 8 x 8, Output = 64 x 8 x 8
-                torch.nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, padding=1),
-                torch.nn.ReLU(),
-                # Input = 64 x 8 x 8, Output = 64 x 4 x 4
-                torch.nn.MaxPool2d(kernel_size=2),
-                torch.nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, padding=1),
-
-                torch.nn.ReLU(),
-                # Input = 64 x 8 x 8, Output = 64 x 4 x 4
-                torch.nn.MaxPool2d(kernel_size=2),
-                torch.nn.Flatten(),
-                torch.nn.Linear(mid_dim * 4 * 4, 512))
-
-            self.fc = torch.nn.Linear(512, num_classes)
-
-        except Exception as e:
-            print("CNN_3_proto")
-            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
-
-    def forward(self, x):
-        try:
-            proto = self.conv1(x)
-            out = self.fc(proto)
-            return out, proto
-        except Exception as e:
-            print("CNN_3_proto")
-            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)

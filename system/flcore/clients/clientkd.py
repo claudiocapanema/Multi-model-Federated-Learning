@@ -50,8 +50,8 @@ class clientKD(Client):
                 self.optimizer_g.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
                 self.optimizer_w.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
             else:
-                self.optimizer_g.append(torch.optim.SGD(self.model[m].parameters(), lr=0.004))
-                self.optimizer_w.append(torch.optim.SGD(self.model[m].parameters(), lr=0.004))
+                self.optimizer_g.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
+                self.optimizer_w.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
 
             self.feature_dim = list(args.model[m].parameters())[-2].shape[1]
             self.W_h[m] = nn.Linear(self.feature_dim, self.feature_dim, bias=False).to(self.device)

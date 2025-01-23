@@ -10,45 +10,62 @@ import matplotlib.pyplot as plt
 def read_data(read_solutions, read_dataset_order):
 
     df_concat = None
-    solution_strategy_version = {"MultiFedAvgWithFedPredict": {"Strategy_separated": "MultiFedAvg", "Version": "FP", "Strategy": "MultiFedAvg+FP"},
-                                 "MultiFedAvg": {"Strategy_separated": "MultiFedAvg", "Version": "Original", "Strategy": "MultiFedAvg"},
-                                 "MultiFedAvgGlobalModelEval": {"Strategy_separated": "MultiFedAvgGlobalModelEval", "Version": "Original", "Strategy": "MultiFedAvgGlobalModelEval"},
-                                 "MultiFedAvgGlobalModelEvalWithFedPredict": {"Strategy_separated": "MultiFedAvgGlobalModelEval", "Version": "FP", "Strategy": "MultiFedAvgGlobalModelEval+FP"},
-                                 "MultiFedPer": {"Strategy_separated": "MultiFedPer", "Version": "Original", "Strategy": "MultiFedPer"},
-                                 "MultiFedYogi": {"Strategy_separated": "MultiFedYogi", "Version": "Original", "Strategy": "MultiFedYogi"}, "MultiFedYogiWithFedPredict": {"Strategy_separated": "MultiFedYogi", "Version": "FP", "Strategy": "MultiFedYogi+FP"}}
+    solution_strategy_version = {
+        "MultiFedAvgWithFedPredict": {"Strategy": "MultiFedAvg", "Version": "FP", "Table": "FedAvg+FP"},
+        "MultiFedAvg": {"Strategy": "MultiFedAvg", "Version": "Original", "Table": "FedAvg"},
+        "MultiFedAvgGlobalModelEval": {"Strategy": "MultiFedAvgGlobalModelEval", "Version": "Original",
+                                       "Table": "FedAvgGlobalModelEval"},
+        "MultiFedAvgGlobalModelEvalWithFedPredict": {"Strategy": "MultiFedAvgGlobalModelEval", "Version": "FP",
+                                                     "Table": "MultiFedAvgGlobalModelEvalWithFedPredict"},
+        "MultiFedPer": {"Strategy": "MultiFedPer", "Version": "Original", "Table": "FedPer"},
+        "MultiFedYogi": {"Strategy": "MultiFedYogi", "Version": "Original", "Table": "FedYogi"},
+        "MultiFedYogiWithFedPredict": {"Strategy": "MultiFedYogi", "Version": "FP", "Table": "FedYogi+FP"},
+        "MultiFedYogiGlobalModelEval": {"Strategy": "MultiFedYogiGlobalModelEval", "Version": "Original", "Table": "FedYogiGlobalModelEval"},
+        "MultiFedYogiGlobalModelEvalWithFedPredict": {"Strategy": "MultiFedYogiGlobalModelEval", "Version": "FP",
+                                                      "Table": "FedYogiGlobalModelEvalWithFedPredict"},
+        "MultiFedKD": {"Strategy": "MultiFedKD", "Version": "Original", "Table": "FedKD"},
+        "MultiFedKDWithFedPredict": {"Strategy": "MultiFedKD", "Version": "FP", "Table": "FedKD+FP"},
+        "FedProto": {"Strategy": "FedProto", "Version": "Original", "Table": "FedProto"}}
+    hue_order = []
     for solution in read_solutions:
 
         paths = read_solutions[solution]
         for i in range(len(paths)):
-            dataset = read_dataset_order[i]
-            path = paths[i]
-            df = pd.read_csv(path)
-            df["Solution"] = np.array([solution] * len(df))
-            df["Accuracy (%)"] = df["Accuracy"] * 100
-            df["Balanced accuracy (%)"] = df["Balanced accuracy"] * 100
-            df["Round (t)"] = df["Round"]
-            df["Dataset"] = np.array([dataset] * len(df))
-            df["Strategy_separated"] = np.array([solution_strategy_version[solution]["Strategy_separated"]] * len(df))
-            df["Strategy"] = np.array(
-                [solution_strategy_version[solution]["Strategy"]] * len(df))
-            df["Version"] = np.array([solution_strategy_version[solution]["Version"]] * len(df))
+            try:
+                dataset = read_dataset_order[i]
+                path = paths[i]
+                df = pd.read_csv(path)
+                df["Solution"] = np.array([solution] * len(df))
+                df["Accuracy (%)"] = df["Accuracy"] * 100
+                df["Balanced accuracy (%)"] = df["Balanced accuracy"] * 100
+                df["Round (t)"] = df["Round"]
+                df["Dataset"] = np.array([dataset] * len(df))
+                df["Strategy"] = np.array([solution_strategy_version[solution]["Table"]] * len(df))
+                df["Version"] = np.array([solution_strategy_version[solution]["Version"]] * len(df))
 
-            if df_concat is None:
-                df_concat = df
-            else:
-                df_concat = pd.concat([df_concat, df])
+                if df_concat is None:
+                    df_concat = df
+                else:
+                    df_concat = pd.concat([df_concat, df])
 
-    print(df_concat.columns)
+                strategy = solution_strategy_version[solution]["Strategy"]
+                if strategy not in hue_order:
+                    hue_order.append(strategy)
+            except:
+                print("\n######### \nFaltando", paths[i])
 
-    return df_concat
+    return df_concat, hue_order
 
 
-def table(df, write_path, t=None):
+def table(df, write_path, metric, t=None):
 
     datasets = df["Dataset"].unique().tolist()
     alphas = df["Alpha"].unique().tolist()
     columns = df["Strategy"].unique().tolist()
     n_strategies = str(len(columns))
+
+    print(columns)
+
 
 
     model_report = {i: {} for i in alphas}
@@ -79,7 +96,7 @@ def table(df, write_path, t=None):
             for dt in datasets:
                 models_datasets_dict[dt][column] = t_distribution((filter(df_test, dt,
                                                                      alpha=float(alpha), strategy=column)[
-                    'Balanced accuracy (%)']).tolist(), ci)
+                    metric]).tolist(), ci)
 
         model_metrics = []
 
@@ -153,21 +170,21 @@ def table(df, write_path, t=None):
         "&  \\", "& - \\").replace(" - " + r"\textbf", " " + r"\textbf").replace("_{dc}", r"_{\text{dc}}").replace("\multirow[t]{"+n_strategies+"}{*}{EMNIST}", "EMNIST").replace("\multirow[t]{"+n_strategies+"}{*}{CIFAR10}", "CIFAR10").replace("\multirow[t]{"+n_strategies+"}{*}{GTSRB}", "GTSRB").replace("\cline{1-5}", "\hline")
 
     if t is not None:
-        filename = """{}latex_round_{}.txt""".format(write_path, t)
+        filename = """{}latex_round_{}_{}.txt""".format(write_path, t, metric)
     else:
-        filename = """{}latex.txt""".format(write_path)
+        filename = """{}latex_{}.txt""".format(write_path, metric)
     pd.DataFrame({'latex': [latex]}).to_csv(filename, header=False, index=False)
 
-    improvements(df_table, datasets)
+    improvements(df_table, datasets, metric)
 
     #  df.to_latex().replace("\}", "}").replace("\{", "{").replace("\\\nRecall", "\\\n\hline\nRecall").replace("\\\nF-score", "\\\n\hline\nF1-score")
 
 
-def improvements(df, datasets):
-    strategies = {"MultiFedAvg+FP": "MultiFedAvg", "MultiFedYogi+FP": "MultiFedYogi"}
+def improvements(df, datasets, metric):
+    strategies = {"FedAvg+FP": "FedAvg", "FedYogi+FP": "FedYogi", "FedKD+FP": "FedKD"}
     # strategies = {r"MultiFedAvg+FP": "MultiFedAvg"}
     columns = df.columns.tolist()
-    improvements_dict = {'Dataset': [], 'Strategy': [], 'Original strategy': [], 'Alpha': [], 'Balanced accuracy (%)': []}
+    improvements_dict = {'Dataset': [], 'Strategy': [], 'Original strategy': [], 'Alpha': [], metric: []}
     df_improvements = pd.DataFrame(improvements_dict)
 
     for dataset in datasets:
@@ -179,11 +196,11 @@ def improvements(df, datasets):
                 index_original = (dataset, original_strategy)
                 print(df)
                 print("indice: ", index)
-                acc = float(df.loc[index].tolist()[j].replace("textbf{", "")[:4])
-                acc_original = float(df.loc[index_original].tolist()[j].replace("textbf{", "")[:4])
+                acc = float(df.loc[index].tolist()[j].replace("textbf{", "").replace(u"\u00B1", "")[:4])
+                acc_original = float(df.loc[index_original].tolist()[j].replace("textbf{", "")[:4].replace(u"\u00B1", ""))
 
                 row = {'Dataset': [dataset], 'Strategy': [strategy], 'Original strategy': [original_strategy],
-                       'Alpha': [columns[j]], 'Balanced accuracy (%)': [acc - acc_original]}
+                       'Alpha': [columns[j]], metric: [acc - acc_original]}
                 row = pd.DataFrame(row)
 
                 print(row)
@@ -196,11 +213,11 @@ def improvements(df, datasets):
     print(df_improvements)
 
 
-def groupb_by_plot(self, df):
-    accuracy = float(df['Balanced accuracy (%)'].mean())
+def groupb_by_plot(self, df, metric):
+    accuracy = float(df[metric].mean())
     loss = float(df['Loss'].mean())
 
-    return pd.DataFrame({'Balanced accuracy (%)': [accuracy], 'Loss': [loss]})
+    return pd.DataFrame({metric: [accuracy], 'Loss': [loss]})
 
 
 def filter(df, dataset, alpha, strategy=None):
@@ -239,8 +256,13 @@ def accuracy_improvement(df, datasets):
     columns = df.columns.tolist()
     indexes = df.index.tolist()
     solutions = pd.Series([i[1] for i in indexes]).unique().tolist()
-    reference_solutions = {"MultiFedAvg+FP": "MultiFedAvg", "MultiFedYogi+FP": "MultiFedYogi", "MultiFedAvgGlobalModelEval+FP": "MultiFedAvgGlobalModelEval"}
+    # reference_solutions = {"MultiFedAvg+FP": "MultiFedAvg", "MultiFedYogi+FP": "MultiFedYogi", "FedAvgGlobalModelEval+FP": "FedAvgGlobalModelEval", "MultiFedKD+FP": "FedKD"}
     # reference_solutions = {"MultiFedAvg+FP": "MultiFedAvg", "MultiFedAvgGlobalModelEval+FP": "MultiFedAvgGlobalModelEval"}
+    reference_solutions = {"FedAvg+FP": "FedAvg", "FedYogi+FP": "FedYogi",
+                           "FedKD+FP": "FedKD"}
+
+    print(df_difference)
+    # exit()
 
 
     for dataset in datasets:
@@ -249,8 +271,8 @@ def accuracy_improvement(df, datasets):
             target_index = (dataset, reference_solutions[solution])
 
             for column in columns:
-                difference = str(round(float(df.loc[reference_index, column][:4]) - float(df.loc[target_index, column][:4]), 1))
-                difference = str(round(float(difference)*100/float(df.loc[target_index, column][:4]), 1))
+                difference = str(round(float(df.loc[reference_index, column].replace(u"\u00B1", "")[:4]) - float(df.loc[target_index, column].replace(u"\u00B1", "")[:4]), 1))
+                difference = str(round(float(difference)*100/float(df.loc[target_index, column][:4].replace(u"\u00B1", "")), 1))
                 if difference[0] != "-":
                     difference = r"\textuparrow" + difference
                 else:
@@ -313,18 +335,26 @@ def idmax( df, n_solutions):
 if __name__ == "__main__":
     cd = "False"
     num_clients = 20
+    metric = "Balanced accuracy (%)"
+    metric = "Accuracy (%)"
     alphas = [0.1, 1.0, 10.0]
     dataset = ["EMNIST", "CIFAR10", "GTSRB"]
     # dataset = ["EMNIST", "CIFAR10"]
+    # models_names = ["cnn_c"]
     models_names = ["cnn_a"]
     join_ratio = 0.3
     global_rounds = 100
     local_epochs = 1
-    fraction_new_clients = 0.3
-    round_new_clients = 70
-    solutions = ["MultiFedAvgWithFedPredict", "MultiFedAvg", "MultiFedAvgGlobalModelEvalWithFedPredict", "MultiFedAvgGlobalModelEval",  "MultiFedYogiWithFedPredict", "MultiFedYogi", "MultiFedPer"]
-    # solutions = ["MultiFedAvgWithFedPredict", "MultiFedAvg", "MultiFedAvgGlobalModelEvalWithFedPredict", "MultiFedAvgGlobalModelEval",
-    #              "MultiFedPer"]
+    fraction_new_clients = 0
+    round_new_clients = 0
+    # solutions = ["MultiFedAvgWithFedPredict", "MultiFedAvg",
+    #              "MultiFedAvgGlobalModelEvalWithFedPredict", "MultiFedAvgGlobalModelEval",
+    #              "MultiFedYogiWithFedPredict", "MultiFedYogi", "MultiFedYogiGlobalModelEval", "MultiFedPer"]
+    # solutions = ["MultiFedAvgWithFedPredict", "MultiFedAvg", "MultiFedAvgGlobalModelEval",
+    #              "MultiFedAvgGlobalModelEvalWithFedPredict", "MultiFedPer"]
+    solutions = ["MultiFedAvgWithFedPredict", "MultiFedAvg", "MultiFedYogiWithFedPredict", "MultiFedYogi",
+                 "MultiFedKDWithFedPredict", "MultiFedKD", "MultiFedPer"]
+    # solutions = ["MultiFedAvgWithFedPredict", "MultiFedAvg"]
 
     read_solutions = {solution: [] for solution in solutions}
     read_dataset_order = []
@@ -366,6 +396,8 @@ if __name__ == "__main__":
         global_rounds,
         local_epochs)
 
-    df = read_data(read_solutions, read_dataset_order)
-    table(df, write_path, t=None)
-    table(df, write_path, t=100)
+    df, hue_order = read_data(read_solutions, read_dataset_order)
+    table(df, write_path, "Balanced accuracy (%)", t=None)
+    table(df, write_path, "Accuracy (%)", t=None)
+    table(df, write_path, "Balanced accuracy (%)", t=100)
+    table(df, write_path, "Accuracy (%)", t=100)
