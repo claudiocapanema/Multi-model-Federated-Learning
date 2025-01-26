@@ -113,7 +113,7 @@ class Client(object):
         self.optimizer = []
         self.learning_rate_scheduler = []
         for m in range(self.M):
-            if self.dataset[m] in ['ExtraSensory', 'WISDM-W', 'WISDM-P']:
+            if self.dataset[m] in ['ExtraSensory', 'WISDM-W', 'WISDM-P', 'Gowalla']:
                 self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.001))
                 # self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.0001)) # loss constante não aprende
                 # self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
@@ -127,7 +127,8 @@ class Client(object):
         self.learning_rate_decay = args.learning_rate_decay
 
         self.test_metrics_list_dict = [{} for m in range(self.M)]
-        self.train_metrics_list_dict = [{} for m in range(self.M)]
+        self.train_metrics_list_dict = [[0] * 8 for m in range(self.M)]
+        self.last_training_round = 0
 
 
         #
@@ -222,6 +223,93 @@ class Client(object):
 
         except Exception as e:
             print("load WISDM client base")
+            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
+
+    def load_gowalla(self, m, name, alpha, mode="train", batch_size=32, dataset_name=None):
+
+        try:
+            dir_path = "../dataset/" + name + "/" + "clients_" + str(self.args.num_clients) + "/alpha_" + str(alpha) + "/"
+            filename_train = dir_path + """train/idx_train_{}.csv""".format(self.id)
+            filename_test = dir_path + "test/idx_test_{}.csv""".format(self.id)
+            cid = self.id
+            filename_train = filename_train.replace("pickle", "csv")
+            filename_test = filename_test.replace("pickle", "csv")
+
+            train = pd.read_csv(filename_train)
+            test = pd.read_csv(filename_test)
+
+            df = pd.concat([train, test], ignore_index=True)
+            x = np.array([ast.literal_eval(i) for i in df['X'].tolist()], dtype=np.float32)
+            y = np.array([i for i in df['Y'].to_numpy().astype(np.int32)])
+
+            for i in range(len(x)):
+                row = x[i]
+                indexes = row[:, 0].argsort(kind='mergesort')
+                row = row[indexes]
+                x[i] = row
+
+            last_timestamp = []
+            for i in range(len(x)):
+
+                last_timestamp.append(x[i, -1, 0])
+
+            indexes = np.array(last_timestamp).argsort(kind='heapsort')
+
+            x = x[indexes]
+            y = y[indexes]
+
+            new_x = []
+            for i in range(len(x)):
+                row = x[i]
+                if dataset_name != 'Cologne':
+                    new_x.append(row[:, [0, 1, 2, 3]])
+                else:
+                    new_x.append(row[:, [1, 2]])
+
+            x = np.array(new_x)
+
+            p = np.unique(y, return_counts=True)
+            c = p[0]
+            total = np.sum(p[1])
+            p = p[1]/total
+
+            size = int(len(x) * 0.8)
+            x_train, x_test = x[:size], x[size:]
+            y_train, y_test = y[:size], y[size:]
+            unique_count = {i: 0 for i in range(self.args.num_classes[m])}
+            unique, count = np.unique(y, return_counts=True)
+            data_unique_count_dict = dict(zip(unique, count))
+            for class_ in data_unique_count_dict:
+                unique_count[class_] = data_unique_count_dict[class_]
+            unique_count = np.array(list(unique_count.values()))
+            print("Wisdm tamanho original dataset: ", len(x_train))
+
+            training_dataset = torch.utils.data.TensorDataset(torch.from_numpy(x_train).to(dtype=torch.float32), torch.from_numpy(y_train).to(dtype=torch.int32))
+            validation_dataset = torch.utils.data.TensorDataset(torch.from_numpy(x_test).to(dtype=torch.float32), torch.from_numpy(y_test).to(dtype=torch.int32))
+
+            random.seed(cid)
+            np.random.seed(cid)
+            torch.manual_seed(cid)
+
+            def seed_worker(worker_id):
+                np.random.seed(cid)
+                random.seed(cid)
+
+            g = torch.Generator()
+            g.manual_seed(cid)
+            np.random.seed(cid)
+            random.seed(cid)
+
+            trainLoader = DataLoader(training_dataset, batch_size, shuffle=True, worker_init_fn=seed_worker, generator=g)
+            testLoader = DataLoader(validation_dataset, batch_size, drop_last=False, shuffle=False)
+
+            if mode == "train":
+                return trainLoader, unique_count
+            else:
+                return testLoader
+
+        except Exception as e:
+            print("load Gowalla client base")
             print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
 
     def load_imagenet(self, name, m, alpha, t, mode="train", batch_size=32, ):
@@ -368,6 +456,8 @@ class Client(object):
                 self.current_alpha[m] = alpha
             if self.dataset[m] in ["WISDM-W", "WISDM-P"]:
                 return self.load_wisdm(m=m, alpha=alpha, name=self.dataset[m],  mode='train')
+            elif self.dataset[m] in ["Gowalla"]:
+                return self.load_gowalla(m=m, alpha=alpha, name=self.dataset[m],  mode='train')
             elif "ImageNet" in self.dataset[m]:
                 return self.load_imagenet(self.dataset[m], m=m, alpha=alpha, t=t, mode='train')
             if self.dataset[m] == "GTSRB":
@@ -388,6 +478,8 @@ class Client(object):
                 self.current_alpha[m] = alpha
             if self.dataset[m] in ["WISDM-W", "WISDM-P"]:
                 return self.load_wisdm(m=m, name=self.dataset[m], alpha=alpha, mode='test')
+            elif self.dataset[m] in ["Gowalla"]:
+                return self.load_gowalla(m=m, name=self.dataset[m], alpha=alpha, mode='test')
             elif "ImageNet" in self.dataset[m]:
                 return self.load_imagenet(name=self.dataset[m], m=m, alpha=alpha, t=t, mode='test')
             if self.dataset[m] == "GTSRB":
@@ -603,9 +695,7 @@ class Client(object):
         # self.model.cpu()
         # self.save_model(self.model, 'model')
 
-        self.train_metrics_list_dict[m] = {'ids': self.id, 'Accuracy': train_acc, "Loss": train_loss, "Samples": train_num,
-                                           'Balanced accuracy': train_balanced_acc, 'Micro f1-score': train_micro_fscore,
-                                           'Macro f1-score': train_macro_fscore, 'Weighted f1-score': train_weighted_fscore}
+        self.train_metrics_list_dict[m] = train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore, self.current_alpha[m]
 
         return train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore, self.current_alpha[m]
 

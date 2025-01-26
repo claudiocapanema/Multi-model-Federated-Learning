@@ -14,6 +14,7 @@ import numpy as np
 # from dataset_utils.partition.user_index import UserPartition
 from partition.dirichlet import DirichletPartition
 from wisdm import load_dataset
+from gowalla import load_dataset_gowalla
 def bar_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, hue_order=None, y_lim=False, y_min=0, y_max=100, log_scale=False, sci=False, x_order=None, ax=None, tipo=None, palette=None):
     Path(base_dir + "png/").mkdir(parents=True, exist_ok=True)
     Path(base_dir + "svg/").mkdir(parents=True, exist_ok=True)
@@ -289,6 +290,78 @@ def save_dataloaders_widsm(dataset_name="WISDM-W", num_clients=10, num_classes=1
         modality = "phone"
     dataset = load_dataset(reprocess=True, modality=modality)
     num_classes = 12
+    partition_type = 'dirichlet'
+    # dataset_name = 'WISDM-WATCH'
+    client_num_per_round = 6
+
+    partition, client_num_in_total, client_num_per_round = get_partition(partition_type,
+                                                                         dataset_name,
+                                                                         num_classes,
+                                                                         num_clients,
+                                                                         client_num_per_round,
+                                                                         alpha,
+                                                                         dataset)
+
+    client_datasets_train = partition(dataset['train'])
+    client_datasets_test = partition(dataset['test'])
+    print(len(client_datasets_train))
+    # exit()
+    final_target = []
+    classes_list = []
+
+    for client_id in range(len(client_datasets_train)):
+        index_train = list(client_datasets_train[client_id].indices)
+        index_test = list(client_datasets_test[client_id].indices)
+        data_train = client_datasets_train[client_id].dataset.data[index_train]
+        data_test = client_datasets_test[client_id].dataset.data[index_test]
+        target_train = client_datasets_train[client_id].dataset.targets[index_train]
+        target_test = client_datasets_test[client_id].dataset.targets[index_test]
+        final_target += list(target_train) + list(target_test)
+        print("dimensao: ", target_train.shape)
+        # print(target_train)
+        classes = len(pd.Series(target_train).unique().tolist())
+        classes_list.append(classes)
+        # " Sem duplicadas: ", len(pd.Series(data_train).drop_duplicates()),
+        print("Original: ", len(data_train),
+              " classes: ", classes, " teste: ", len(data_test))
+        print("Suporte: \n", pd.Series(target_train).astype(str).value_counts())
+
+        dir_path = dataset_name + "/" + "clients_" + str(num_clients) + "/alpha_" + str(alpha) + "/"
+
+
+        filename_train = """{}train/idx_train_{}.csv""".format(dir_path,
+                                                                                                               client_id)
+        filename_test = """{}test/idx_test_{}.csv""".format(dir_path,
+                                                                                                             client_id)
+
+        print("escrever: ", filename_train)
+        os.makedirs(os.path.dirname(filename_train), exist_ok=True)
+        os.makedirs(os.path.dirname(filename_test), exist_ok=True)
+
+        # with open(filename_train, 'wb') as handle:
+        #     pickle.dump(index_train, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        #
+        # with open(filename_test, 'wb') as handle:
+        #     pickle.dump(index_test, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+        data_train = {"X": data_train.tolist(), "Y": target_train.tolist()}
+        data_test = {"X": data_test.tolist(), "Y": target_test.tolist()}
+
+        for df, filename in zip([data_train, data_test], [filename_train, filename_test]):
+
+            pd.DataFrame(df).to_csv(filename, index=False)
+
+
+def save_dataloaders_gowalla(dataset_name="Gowalla", num_clients=10, num_classes=10, niid=True, balance=False, partition="dir",
+                 class_per_client=2,
+                 batch_size=10, train_size=0.8, alpha=0.1, dataset_dir="./dataset/", sim_id=0):
+
+    num_classes = 12
+
+    # transform = get_transform(dataset_name)
+
+    dataset = load_dataset_gowalla(reprocess=True)
+    num_classes = 7
     partition_type = 'dirichlet'
     # dataset_name = 'WISDM-WATCH'
     client_num_per_round = 6

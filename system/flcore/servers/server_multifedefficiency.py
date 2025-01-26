@@ -20,6 +20,9 @@ import sys
 import math
 import numpy as np
 import random
+import os
+
+import pandas as pd
 from flcore.clients.clientfednome import clientFedNome
 from flcore.servers.serverbase import Server
 from threading import Thread
@@ -80,10 +83,12 @@ class MultiFedEfficiency(Server):
         self.minimum_training_level = 2 / self.num_clients
         self.models_semi_convergence_rounds_n_clients = {m: [] for m in range(self.M)}
         self.max_n_training_clients = 10
+        self.m_clients_rounds_without_training = np.ones((self.M, len(self.clients)))
         # Semi convergence detection window of rounds
         self.tw = []
         for d in self.dataset:
-            self.tw.append({"WISDM-W": 5, "WISDM-P": 5, "ImageNet": 5, "CIFAR10": 5, "ImageNet_v2": 5}[d])
+            self.tw.append({"WISDM-W": args.tw, "WISDM-P": args.tw, "ImageNet": args.tw, "CIFAR10": args.tw, "ImageNet_v2": args.tw, "Gowalla": args.tw}[d])
+        self.tw_range = [0.5, 0.1]
         self.models_semi_convergence_min_n_training_clients = {m: self.minimum_training_clients_per_model for m in range(self.M)}
         self.models_semi_convergence_min_n_training_clients_percentage = {m: self.minimum_training_clients_per_model/self.num_join_clients for m in
                                                                range(self.M)}
@@ -99,6 +104,8 @@ class MultiFedEfficiency(Server):
         self.accuracy_gain_models = {m: [] for m in range(self.M)}
         self.stop_cpd = [False for m in range(self.M)]
         self.re_per_model = int(args.reduction)
+        self.fraction_of_classes = np.zeros((self.M, self.num_clients))
+        self.imbalance_level = np.zeros((self.M, self.num_clients))
         # self.selected_clients_cosine = {m: {} for m in range(self.M)}
 
     def cold_start_selection(self):
@@ -119,28 +126,73 @@ class MultiFedEfficiency(Server):
 
         return prob, use_cold_start
 
-    def uniform_selection(self, t):
+    def weighted_selection(self, t):
 
-        if t == 1:
-            return [np.array([1 / self.num_clients for i in range(self.num_clients)]) for j in range(self.M)]
+        try:
+            # if t == 1:
+            #     return [np.array([1 / self.num_clients for i in range(self.num_clients)]) for j in range(self.M)]
+            #
+            # prob = [[0 for i in range(self.num_clients)] for j in range(self.M)]
+            #
+            # for m in range(self.M):
+            #     clients = np.argsort(self.clients_training_count[m])
+            #     p = np.array(self.clients_training_count[m]) / np.sum(self.clients_training_count[m])
+            #     print("soma: ", p, self.clients_training_count[m])
+            #     p = 1 - p # high probability for less training clients
+            #     p = (-3 + np.power(2, 2 * p)) # Keeps high probability when it is very close to 1
+            #     p[p<0] = 0 # Avoid negative probability
+            #     prob[m] = p
+            #     # clients = clients[0:c]
+            #     # prob[m] = np.array([1 if i in clients else 0 for i in range(self.num_clients)])
+            #
+            # print("Uniform")
+            # print(prob)
+            #
+            # return prob
 
-        prob = [[0 for i in range(self.num_clients)] for j in range(self.M)]
+            n_selected_clients_m = [self.num_join_clients / self.M] * self.M
 
-        for m in range(self.M):
-            clients = np.argsort(self.clients_training_count[m])
-            p = np.array(self.clients_training_count[m]) / np.sum(self.clients_training_count[m])
-            print("soma: ", p, self.clients_training_count[m])
-            p = 1 - p # high probability for less training clients
-            p = (-3 + np.power(2, 2 * p)) # Keeps high probability when it is very close to 1
-            p[p<0] = 0 # Avoid negative probability
-            prob[m] = p
-            # clients = clients[0:c]
-            # prob[m] = np.array([1 if i in clients else 0 for i in range(self.num_clients)])
+            prob = np.ones((self.M, len(self.clients)))
+            for m in range(self.M):
+                n_selected_clients_m[m] = int(max(self.minimum_training_clients_per_model,
+                                                  n_selected_clients_m[m] - self.models_semi_convergence_count[m]))
+                # (1 - need for training) * uniform probability + (need for training) * weighted probability
+                prob[m] = (1 - self.need_for_training[m]) * prob[m] / np.sum(prob[m]) + self.need_for_training[m] * np.array(self.m_clients_rounds_without_training[m]) / np.sum(self.m_clients_rounds_without_training[m])
+                prob[m] = prob[m] / np.sum(prob[m])
+            p = np.array([prob[m] for m in range(self.M)]).flatten()
+            if np.sum(p) == 0:
+                p = np.ones(p.shape)
 
-        print("Uniform")
-        print(prob)
+            # print("quantidade de clientes para selecionar modelo m: ", n_selected_clients_m)
 
-        return prob
+            p = p / np.sum(p)
+            selected_clients_m_2 = np.random.choice([i for i in range(int(self.num_clients * self.M))],
+                                                    self.current_num_join_clients * self.M, replace=False, p=p)
+
+            selected_clients = []
+            selected_clients_dict = {m: [] for m in range(self.M)}
+            for i in selected_clients_m_2:
+                client_id = i % self.num_clients
+                client_model = i // self.num_clients
+                # print("fora: ", client_model, client_id not in selected_clients,  len(selected_clients_dict[client_model]) < n_selected_clients_m[client_model], len(selected_clients_dict[client_model]), n_selected_clients_m[client_model])
+                if client_id not in selected_clients and len(
+                        selected_clients_dict[client_model]) < n_selected_clients_m[client_model]:
+                    selected_clients.append(client_id)
+                    selected_clients_dict[client_model].append(client_id)
+                    # print("total por modelo: ", client_model, [len(selected_clients_dict[m]) for m in range(self.M)])
+                    if len(selected_clients) == np.sum(n_selected_clients_m):
+                        print("Atingiu o total: ", len(selected_clients), np.sum(n_selected_clients_m), len(selected_clients_m_2))
+                        break
+
+            # print("len selec 2: ", len(selected_clients), np.sum(n_selected_clients_m), len(selected_clients_m_2))
+            final = [[] for m in range(self.M)]
+            for m in range(self.M):
+                final[m] = selected_clients_dict[m]
+
+            return final
+
+        except Exception as e:
+            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
 
     def data_quality_selection(self):
 
@@ -279,7 +331,11 @@ class MultiFedEfficiency(Server):
             #
             #     self.calculate_accuracy_gain_models()
             #
-            #     prob_cold_start_m, use_cold_start_m = self.cold_start_selection()
+            prob_cold_start_m, use_cold_start_m = self.cold_start_selection()
+
+            print("Cold start")
+            print(prob_cold_start_m, use_cold_start_m)
+
             #
             #     clients_losses = []
             #
@@ -301,37 +357,56 @@ class MultiFedEfficiency(Server):
             #     print("Modelos clientes: ", selected_clients_m)
 
             """semi-convergence detection"""
-            min_clients = np.min(list(self.models_semi_convergence_min_n_training_clients.values()))
+            diff = self.tw_range[0] - self.tw_range[1]
+            lim = []
+            for m in range(self.M):
+                if self.need_for_training[m] >= 0.5:
+                    lower = self.tw_range[1]
+                    upper = lower + diff * self.need_for_training[m]
+                else:
+                    upper = self.tw_range[0]
+                    lower = upper - diff * self.need_for_training[m]
+                lim.append([upper, lower])
             flag = True
+            print(lim)
+            # exit()
             for m in range(self.M):
                 if not self.stop_cpd[m]:
                     self.rounds_since_last_semi_convergence[m] += 1
 
                     """Stop CPD"""
+                    print("Modelo m: ", m)
                     print("tw: ", self.tw[m], self.results_test_metrics[m]["Loss"])
-                    losses = self.results_test_metrics[m]["Loss"][-self.tw[m]:]
+                    losses = self.results_test_metrics[m]["Loss"][-(self.tw[m]+1):]
                     losses = np.array([losses[i] - losses[i+1] for i in range(len(losses)-1)])
                     print("Modelo ", m, " losses: ", losses)
                     idxs = np.argwhere(losses < 0)
-                    if len(idxs) <= int(self.tw[m] * 0.5) and len(idxs) >= int(self.tw[m] * 0.25) and self.rounds_since_last_semi_convergence[m] >= 4:
-                        self.rounds_since_last_semi_convergence[m] = 0
-                        idxs_rounds = np.array(idxs, dtype=np.int32).flatten()
-                        print("indices: ", idxs_rounds, idxs_rounds[-1])
-                        print("a, remaining_clients_per_model, total_clientsb: ", self.training_clients_per_model_per_round[m])
-                        self.models_semi_convergence_rounds_n_clients[m].append({'round': t - 2, 'n_training_clients':
-                            self.training_clients_per_model_per_round[m][t - 2]})
-                        # more clients are trained for the semi converged model
-                        print("treinados na rodada passada: ", m, self.training_clients_per_model_per_round[m][t - 2])
+                    # lim = [[0.5, 0.25], [0.35, 0.15]]
+                    upper = lim[m][0]
+                    lower = lim[m][1]
+                    print("Condição 1: ", len(idxs) <= int(self.tw[m] * lim[m][0]), "Condição 2: ",
+                          len(idxs) >= int(self.tw[m] * lim[m][1]))
+                    print(len(idxs), self.tw[m], lim[m][0], lim[m][1], int(self.tw[m] * lim[m][0]), int(self.tw[m] * lim[m][1]))
+                    if self.rounds_since_last_semi_convergence[m] >= 4:
+                        if len(idxs) <= int(self.tw[m] * upper) and len(idxs) >= int(self.tw[m] * lower):
+                            self.rounds_since_last_semi_convergence[m] = 0
+                            # idxs_rounds = np.array(idxs, dtype=np.int32).flatten()
+                            # print("indices: ", idxs_rounds, idxs_rounds[-1])
+                            print("a, remaining_clients_per_model, total_clientsb: ", self.training_clients_per_model_per_round[m])
+                            self.models_semi_convergence_rounds_n_clients[m].append({'round': t - 2, 'n_training_clients':
+                                self.training_clients_per_model_per_round[m][t - 2]})
+                            # more clients are trained for the semi converged model
+                            print("treinados na rodada passada: ", m, self.training_clients_per_model_per_round[m][t - 2])
 
-                        if flag:
-                            self.models_semi_convergence_flag[m] = True
-                            self.models_semi_convergence_count[m] += 1
-                            flag = False
+                            if flag:
+                                self.models_semi_convergence_flag[m] = True
+                                self.models_semi_convergence_count[m] += 1
+                                flag = False
 
-                    elif len(idxs) > int(self.tw[m] * 0.5):
-                        self.rounds_since_last_semi_convergence[m] += 1
-                        self.models_semi_convergence_count[m] -= 1
-                        self.models_semi_convergence_count[m] = max(0, self.models_semi_convergence_count[m])
+                        elif len(idxs) > int(self.tw[m] * upper):
+                            self.rounds_since_last_semi_convergence[m] += 1
+                            self.models_semi_convergence_count[m] -= 1
+                            self.models_semi_convergence_count[m] = max(0, self.models_semi_convergence_count[m])
 
             """Selection"""
             if t < self.round_new_clients:
@@ -349,37 +424,91 @@ class MultiFedEfficiency(Server):
             else:
                 self.current_num_join_clients = self.num_available_clients
 
-            selected_clients = list(
-                np.random.choice(self.available_clients, self.current_num_join_clients, replace=False))
-            selected_clients = [i.id for i in selected_clients]
 
-            n = len(selected_clients) // self.M
+            # if use_cold_start_m.all() == False:
+            #
+            #     selected_clients = list(
+            #         np.random.choice(self.available_clients, self.current_num_join_clients, replace=False))
+            #     selected_clients = [i.id for i in selected_clients]
+            #
+            #     n = len(selected_clients) // self.M
+            #
+            #     # selected_clients_m = np.array_split(selected_clients, self.M)
+            #     n_selected_clients_m = [self.num_join_clients / self.M] * self.M
+            #     for m in range(self.M):
+            #         n_selected_clients_m[m] = max(self.minimum_training_clients_per_model, n_selected_clients_m[m] - self.models_semi_convergence_count[m])
+            #
+            #     n_selected_clients_m = np.array(n_selected_clients_m).astype(int)
+            #
+            #     selected_clients_m = []
+            #     i = 0
+            #     for m in range(self.M):
+            #         j = i + n_selected_clients_m[m]
+            #         # print("sec: ", m, " i ", i, " j ", j, "\n n sele: ", n_selected_clients_m, n_selected_clients_m[m], self.models_semi_convergence_count[m], self.num_join_clients)
+            #         selected_clients_m.append(selected_clients[i: j])
+            #         i = j
+            #
+            # else:
+            #     n_selected_clients_m = [self.num_join_clients / self.M] * self.M
+            #     remaining_clients_m = [self.num_join_clients / self.M for m in range(self.M)]
+            #     selected_clients_m = [[] for m in range(self.M)]
+            #     for m in range(self.M):
+            #         n_selected_clients_m[m] = int(max(self.minimum_training_clients_per_model,
+            #                                       n_selected_clients_m[m] - self.models_semi_convergence_count[m]))
+            #         if use_cold_start_m[m]:
+            #             print(np.argwhere(np.array(prob_cold_start_m[m] == 1).flatten()).flatten(), n_selected_clients_m[m])
+            #             selected_clients_arg = list(np.argwhere(np.array(prob_cold_start_m[m] == 1).flatten()).flatten())[:n_selected_clients_m[m]]
+            #             selected_clients_m[m] += selected_clients_arg
+            #             remaining_clients_m[m] = n_selected_clients_m[m] - len(selected_clients_m[m])
+            #             for m_i in range(self.M):
+            #                 prob_cold_start_m[m_i][selected_clients_arg] = 0
+            #
+            #     print("pre: ", selected_clients_m)
+            #     aux = []
+            #     for m_i in range(self.M):
+            #         aux += selected_clients_m[m_i]
+            #     available_clients = set(i for i in range(len(self.clients))) - set(aux)
+            #     print("disponiveis pos cold: ", available_clients)
+            #
+            #     for m in range(self.M):
+            #         if remaining_clients_m[m] > 0:
+            #             selected = np.random.choice(list(available_clients), remaining_clients_m[m], replace=False)
+            #             available_clients -= set(selected)
+            #             selected_clients_m[m] += list(selected)
 
-            # selected_clients_m = np.array_split(selected_clients, self.M)
-            n_selected_clients_m = [self.num_join_clients / self.M] * self.M
-            for m in range(self.M):
-                n_selected_clients_m[m] = max(self.minimum_training_clients_per_model, n_selected_clients_m[m] - self.models_semi_convergence_count[m])
+            print("Semi convergências: ", self.models_semi_convergence_count)
+            selected_clients_m = self.weighted_selection(t)
 
-            n_selected_clients_m = np.array(n_selected_clients_m).astype(int)
+            # selected_clients = list(np.random.choice(self.available_clients, self.num_join_clients, replace=False))
+            # selected_clients = [i.id for i in selected_clients]
+            #
+            # selected_clients_m = []
+            # a = 0
+            # b = 0
+            # for m in range(self.M):
+            #     b = a + int(max(self.minimum_training_clients_per_model,
+            #                                       self.num_join_clients//self.M - self.models_semi_convergence_count[m]))
+            #     selected_clients_m.append(selected_clients[a:b])
+            #     a = b
 
-            selected_clients_m = []
-            i = 0
-            for m in range(self.M):
-                j = i + n_selected_clients_m[m]
-                print("sec: ", m, " i ", i, " j ", j, "\n n sele: ", n_selected_clients_m, n_selected_clients_m[m], self.models_semi_convergence_count[m], self.num_join_clients)
-                selected_clients_m.append(selected_clients[i: j])
-                i = j
-
-
-            print("Selecionados: ", t, sum([len(i) for i in selected_clients_m]), [len(i) for i in selected_clients_m], selected_clients_m)
+            print("Selecionados: ", t, sum([len(selected_clients_m[i]) for i in range(len(selected_clients_m))]), [len(i) for i in selected_clients_m], selected_clients_m)
             # print("Quantidade: ", n_clients_selected)
             # exit()
             self.previous_selected_clients = selected_clients_m
             for m in range(self.M):
                 n = len(self.previous_selected_clients[m])
                 self.training_clients_per_model_per_round[m].append(n)
+                self.m_clients_rounds_without_training[m] += 1
+                self.m_clients_rounds_without_training[m][np.array(selected_clients_m[m])] = 0
 
             selected_clients_m = [np.array(i) for i in selected_clients_m]
+
+            aux = []
+            for a in selected_clients_m:
+                aux += list(a)
+            if pd.Series(a).duplicated().any():
+                print("Existem duplicadas")
+                raise
 
             return selected_clients_m
 
@@ -394,6 +523,9 @@ class MultiFedEfficiency(Server):
             for i in range(self.num_clients):
                 self.client_class_count[m][i] = self.clients[i].train_class_count[m]
                 print("no train: ", " cliente: ", i, " modelo: ", m, " train class count: ", self.clients[i].train_class_count[m])
+                # non-iid degree
+                self.fraction_of_classes[m][i] = self.clients[i].fraction_of_classes[m]
+                self.imbalance_level[m][i] = self.clients[i].imbalance_level[m]
 
         # self.detect_non_iid_degree()
 
@@ -401,6 +533,28 @@ class MultiFedEfficiency(Server):
         # print("#########")
         # print("""M1: {}\nM2: {}""".format(self.non_iid_degree[0], self.non_iid_degree[1]))
 
+        print(self.dataset)
+        average_fraction_of_classes = 1 - np.mean(self.fraction_of_classes, axis=1)
+        average_balance_level = np.mean(self.imbalance_level, axis=1)
+        self.need_for_training = (average_fraction_of_classes + average_balance_level) / 2
+        weighted_need_for_training = self.need_for_training / np.sum(self.need_for_training)
+
+        print("Média fraction of classes: ", np.mean(self.fraction_of_classes, axis=1))
+        print("Média imbalance level: ", np.mean(self.imbalance_level, axis=1))
+        print("Need for training: ", self.need_for_training)
+        print("Weighted need for training: ", weighted_need_for_training)
+
+
+        min_need_for_training = np.min(self.need_for_training)
+
+
+        # for i in range(len(self.dataset)):
+        #     self.tw[i] = min(int((self.tw[i] * need_for_training[i]) / min_need_for_training), self.tw[i] * 2)
+        #
+        # self.tw = [10, 5]
+
+        print("tw ajustado: ", self.tw)
+        # exit()
         for t in range(1, self.global_rounds+1):
             s_t = time.time()
             self.selected_clients = self.select_clients(t)
@@ -631,6 +785,98 @@ class MultiFedEfficiency(Server):
         return {'ids': ids, 'num_samples': num_samples, 'Accuracy': acc, "Loss": loss,
                 'Balanced accuracy': balanced_acc,
                 'Micro f1-score': micro_fscore, 'Macro f1-score': macro_fscore, 'Weighted f1-score': weighted_fscore, "Alpha": alpha}
+
+
+    def get_results(self, m):
+
+        algo = self.dataset[m] + "_" + self.algorithm
+        cd = bool(self.args.concept_drift)
+        if cd:
+            result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(cd,
+                                                                                                                        self.fraction_new_clients,
+                                                                                                                        self.round_new_clients,
+                                                                                                                        self.num_clients,
+                                                                                                                       self.alpha,
+                                                                                                                        self.alpha_end[
+                                                                                                                            0],
+                                                                                                                        self.alpha_end[
+                                                                                                                            1],
+                                                                                                                       self.dataset,
+                                                                                                                        self.rounds_concept_drift[
+                                                                                                                            0],
+                                                                                                                        self.rounds_concept_drift[
+                                                                                                                            1],
+                                                                                                                       self.models_names,
+                                                                                                                       self.args.join_ratio,
+                                                                                                                       self.args.global_rounds,
+                                                                                                                       self.local_epochs)
+        elif len(self.alpha) == 1:
+            result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(
+                cd,
+                self.fraction_new_clients,
+                self.round_new_clients,
+                self.num_clients,
+                [self.alpha[0]],
+                self.alpha[
+                    0],
+                self.alpha[
+                    0],
+                [self.dataset[0]],
+                0,
+                0,
+                [self.models_names[0]],
+                self.args.join_ratio,
+                self.args.global_rounds,
+                self.local_epochs)
+        else:
+
+            result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(
+                cd,
+                self.fraction_new_clients,
+                self.round_new_clients,
+                self.num_clients,
+                self.alpha,
+                self.alpha[
+                    0],
+                self.alpha[
+                    1],
+                self.dataset,
+                0,
+                0,
+                self.models_names,
+                self.args.join_ratio,
+                self.args.global_rounds,
+                self.local_epochs)
+
+        if not os.path.exists(result_path):
+            os.makedirs(result_path)
+
+        if (len(self.rs_test_acc)):
+            algo = algo + "_" + self.goal + "_" + str(self.times)
+            file_path = result_path + "{}_tw_{}.csv".format(algo, self.tw[m])
+            header = self.test_metrics_names
+            print(self.rs_test_acc)
+            print(self.rs_test_auc)
+            print(self.rs_train_loss)
+            list_of_metrics = []
+            for me in self.results_test_metrics[m]:
+                print(me, len(self.results_test_metrics[m][me]))
+                length = len(self.results_test_metrics[m][me])
+                list_of_metrics.append(self.results_test_metrics[m][me])
+
+            data = []
+            for i in range(length):
+                row = []
+                for j in range(len(list_of_metrics)):
+                    row.append(list_of_metrics[j][i])
+
+                data.append(row)
+
+            print("File path: " + file_path)
+            print(data)
+            print("me: ", self.rs_test_acc)
+
+            return file_path, header, data
 
 
 

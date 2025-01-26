@@ -122,7 +122,7 @@ def run(args):
     num_classes = []
     for dt in dts:
         num_classes.append({'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'Tiny-ImageNet': 200,
-                            'ImageNet100': 15, 'ImageNet': 15, "ImageNet_v2": 15}[dt])
+                            'ImageNet100': 15, 'ImageNet': 15, "ImageNet_v2": 15, "Gowalla": 7}[dt])
 
     args.num_classes = num_classes
 
@@ -200,7 +200,11 @@ def run(args):
 
             elif model_str == "gru":
                 if dt in ["WISDM-W", "WISDM-P"]:
-                    model = GRU(6, num_layers=1, hidden_size=4, sequence_length=200, num_classes=num_classes_m).to(args.device)
+                    model = GRU(6, num_layers=1, hidden_size=2, sequence_length=200, num_classes=num_classes_m).to(args.device)
+            elif model_str == "lstm":
+                if dt in ["Gowalla"]:
+                    model = LSTM(4, num_layers=1, hidden_size=1, sequence_length=6, num_classes=num_classes_m).to(
+                        args.device)
 
             elif model_str == "lstm":
                 if dt in ["WISDM-W", "WISDM-P"]:
@@ -760,16 +764,13 @@ if __name__ == "__main__":
             args.local_epochs,
             args.algorithm)
     else:
-        result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/log_{}.txt""".format(
+        result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/log_{}.txt""".format(
             bool(args.concept_drift),
             args.fraction_new_clients,
             args.round_new_clients,
             args.num_clients,
             args.alpha,
-            args.alpha[
-                0],
-            args.alpha[
-                1],
+            args.alpha,
             args.dataset,
             0,
             0,

@@ -105,8 +105,8 @@ class Server(object):
         self.uploaded_ids = []
         self.uploaded_models = []
 
-        self.train_metrics_names = ["Accuracy", "Loss", "Samples", "AUC", "Balanced accuracy", "Micro f1-score", "Weighted f1-score", "Macro f1-score", "Round", "Fraction fit", "# training clients", "Alpha"]
-        self.test_metrics_names = ["Accuracy", "Std Accuracy", "Loss", "Std loss", "AUC", "Balanced accuracy", "Micro f1-score", "Weighted f1-score", "Macro f1-score", "Round", "Fraction fit", "# training clients", "training clients and models", "model size", "Alpha"]
+        self.train_metrics_names = ["Accuracy", "Balanced accuracy", "Loss",  "Round", "Samples", "AUC", "Micro f1-score", "Weighted f1-score", "Macro f1-score","Fraction fit", "# training clients", "Alpha"]
+        self.test_metrics_names = ["Accuracy",  "Balanced accuracy", "Loss", "Round", "Std loss", "Std Accuracy", "AUC", "Micro f1-score", "Weighted f1-score", "Macro f1-score", "Fraction fit", "# training clients", "training clients and models", "model size", "Alpha"]
         self.rs_test_acc = []
         self.rs_test_auc = []
         self.rs_train_loss = []
@@ -334,20 +334,17 @@ class Server(object):
         model_path = os.path.join(model_path, self.algorithm + "_server" + ".pt")
         return os.path.exists(model_path)
 
-    def get_results(self, m):
+    def get_results(self, m, train_test, mode):
 
         algo = self.dataset[m] + "_" + self.algorithm
         cd = bool(self.args.concept_drift)
         if cd:
-            result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(cd,
+            result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/{}/""".format(cd,
                                                                                                                         self.fraction_new_clients,
                                                                                                                         self.round_new_clients,
                                                                                                                         self.num_clients,
                                                                                                                        self.alpha,
-                                                                                                                        self.alpha_end[
-                                                                                                                            0],
-                                                                                                                        self.alpha_end[
-                                                                                                                            1],
+                                                                                                                        self.alpha_end,
                                                                                                                        self.dataset,
                                                                                                                         self.rounds_concept_drift[
                                                                                                                             0],
@@ -356,16 +353,15 @@ class Server(object):
                                                                                                                        self.models_names,
                                                                                                                        self.args.join_ratio,
                                                                                                                        self.args.global_rounds,
-                                                                                                                       self.local_epochs)
+                                                                                                                       self.local_epochs,
+                                                                                                                        train_test)
         elif len(self.alpha) == 1:
-            result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(
+            result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/{}/""".format(
                 cd,
                 self.fraction_new_clients,
                 self.round_new_clients,
                 self.num_clients,
                 [self.alpha[0]],
-                self.alpha[
-                    0],
                 self.alpha[
                     0],
                 [self.dataset[0]],
@@ -374,56 +370,118 @@ class Server(object):
                 [self.models_names[0]],
                 self.args.join_ratio,
                 self.args.global_rounds,
-                self.local_epochs)
+                self.local_epochs,
+                train_test)
         else:
 
-            result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(
+            result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/{}/""".format(
                 cd,
                 self.fraction_new_clients,
                 self.round_new_clients,
                 self.num_clients,
                 self.alpha,
-                self.alpha[
-                    0],
-                self.alpha[
-                    1],
+                self.alpha,
                 self.dataset,
                 0,
                 0,
                 self.models_names,
                 self.args.join_ratio,
                 self.args.global_rounds,
-                self.local_epochs)
+                self.local_epochs,
+                train_test)
 
         if not os.path.exists(result_path):
             os.makedirs(result_path)
 
         if (len(self.rs_test_acc)):
-            algo = algo + "_" + self.goal + "_" + str(self.times)
+            algo = algo + "_" + train_test + "_" + str(self.times)
             file_path = result_path + "{}.csv".format(algo)
-            header = self.test_metrics_names
-            print(self.rs_test_acc)
-            print(self.rs_test_auc)
-            print(self.rs_train_loss)
-            list_of_metrics = []
-            for me in self.results_test_metrics[m]:
-                print(me, len(self.results_test_metrics[m][me]))
-                length = len(self.results_test_metrics[m][me])
-                list_of_metrics.append(self.results_test_metrics[m][me])
 
-            data = []
-            for i in range(length):
-                row = []
-                for j in range(len(list_of_metrics)):
-                    row.append(list_of_metrics[j][i])
+        if train_test == 'test':
 
-                data.append(row)
+            if mode == '':
+                header = self.test_metrics_names
+                print(self.rs_test_acc)
+                print(self.rs_test_auc)
+                print(self.rs_train_loss)
+                list_of_metrics = []
+                for me in self.results_test_metrics[m]:
+                    print(me, len(self.results_test_metrics[m][me]))
+                    length = len(self.results_test_metrics[m][me])
+                    list_of_metrics.append(self.results_test_metrics[m][me])
 
-            print("File path: " + file_path)
-            print(data)
-            print("me: ", self.rs_test_acc)
+                data = []
+                for i in range(length):
+                    row = []
+                    for j in range(len(list_of_metrics)):
+                        row.append(list_of_metrics[j][i])
 
-            return file_path, header, data
+                    data.append(row)
+
+            else:
+                header = self.test_metrics_names
+                list_of_metrics = []
+                for me in self.results_test_metrics_w[m]:
+                    print(me, len(self.results_test_metrics_w[m][me]))
+                    length = len(self.results_test_metrics_w[m][me])
+                    list_of_metrics.append(self.results_test_metrics_w[m][me])
+
+                data = []
+                for i in range(length):
+                    row = []
+                    for j in range(len(list_of_metrics)):
+                        row.append(list_of_metrics[j][i])
+
+                    data.append(row)
+                file_path = file_path.replace(".csv", "_weighted.csv")
+
+        else:
+            if mode == '':
+                header = self.train_metrics_names
+                list_of_metrics = []
+                for me in self.results_train_metrics[m]:
+                    print(me, len(self.results_train_metrics[m][me]))
+                    length = len(self.results_train_metrics[m][me])
+                    list_of_metrics.append(self.results_train_metrics[m][me])
+
+                data = []
+                print("tamanho: ", length, list_of_metrics)
+                for i in range(length):
+                    row = []
+                    for j in range(len(list_of_metrics)):
+                        if len(list_of_metrics[j]) > 0:
+                            row.append(list_of_metrics[j][i])
+                        else:
+                            row.append(0)
+
+                    data.append(row)
+
+            else:
+
+                header = self.train_metrics_names
+                list_of_metrics = []
+                for me in self.results_train_metrics_w[m]:
+                    print(me, len(self.results_train_metrics_w[m][me]))
+                    length = len(self.results_train_metrics_w[m][me])
+                    list_of_metrics.append(self.results_train_metrics_w[m][me])
+
+                data = []
+                for i in range(length):
+                    row = []
+                    for j in range(len(list_of_metrics)):
+                        if len(list_of_metrics[j]) > 0:
+                            row.append(list_of_metrics[j][i])
+                        else:
+                            row.append(0)
+
+                    data.append(row)
+
+                file_path = file_path.replace(".csv", "_weighted.csv")
+
+        print("File path: " + file_path)
+        print(data)
+
+        return file_path, header, data
 
     def get_results_weighted(self, m):
 
@@ -453,12 +511,26 @@ class Server(object):
         
     def save_results(self, m):
 
-            file_path, header, data = self.get_results(m)
+            # train
+            print("save results:")
+            file_path, header, data = self.get_results(m, 'train', '')
+            print("dados: ", data, file_path)
             self.clients_test_metrics_preprocess(m, file_path)
             self._write_header(file_path, header=header)
             self._write_outputs(file_path, data=data)
-            header, data = self.get_results_weighted(m)
-            file_path = file_path.replace(".csv", "_weighted.csv")
+            print("escreveu aa: ", file_path)
+            file_path, header, data = self.get_results(m, 'train', 'w')
+            self.clients_test_metrics_preprocess(m, file_path)
+            self._write_header(file_path, header=header)
+            self._write_outputs(file_path, data=data)
+
+            # test
+
+            file_path, header, data = self.get_results(m, 'test', '')
+            self.clients_test_metrics_preprocess(m, file_path)
+            self._write_header(file_path, header=header)
+            self._write_outputs(file_path, data=data)
+            file_path, header, data = self.get_results(m, 'test', 'w')
             self.clients_test_metrics_preprocess(m, file_path)
             self._write_header(file_path, header=header)
             self._write_outputs(file_path, data=data)
@@ -579,47 +651,98 @@ class Server(object):
 
     def train_metrics(self, m, t):
 
-        accs = []
-        losses = []
         num_samples = []
-        balanced_accs = []
-        micro_fscores = []
-        macro_fscores = []
-        weighted_fscores = []
+        accs_w = []
+        std_acc_w = []
+        loss_w = []
+        std_loss_w = []
+        auc_w = []
+        balanced_acc_w = []
+        micro_fscore_w = []
+        weighted_fscore_w = []
+        macro_fscore_w = []
+        accs = []
+        std_accs = []
+        loss = []
+        std_losses = []
+        auc = []
+        balanced_acc = []
+        micro_fscore = []
+        weighted_fscore = []
+        macro_fscore = []
+        alpha_list = []
         available_clients = self.get_available_clients(t, m)
         for i in range(len(available_clients)):
             c = available_clients[i]
-            if i in self.selected_clients[m] or t == 1:
+            if i in self.selected_clients[m] or t == 1 or c.last_training_round == 0:
                 train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore, alpha = c.train_metrics(m, t)
-                accs.append(train_acc * train_num)
-                num_samples.append(train_num)
-                balanced_accs.append(train_balanced_acc * train_num)
-                micro_fscores.append(train_micro_fscore * train_num)
-                macro_fscores.append(train_macro_fscore * train_num)
-                weighted_fscores.append(train_weighted_fscore * train_num)
-                self.clients_train_metrics[c.id]["Samples"][m].append(num_samples)
-                self.clients_train_metrics[c.id]["Accuracy"][m].append(train_acc)
-                self.clients_train_metrics[c.id]["Loss"][m].append(train_loss)
-                self.clients_train_metrics[c.id]["Balanced accuracy"][m].append(train_balanced_acc)
-                self.clients_train_metrics[c.id]["Micro f1-score"][m].append(train_micro_fscore)
-                self.clients_train_metrics[c.id]["Macro f1-score"][m].append(train_macro_fscore)
-                self.clients_train_metrics[c.id]["Weighted f1-score"][m].append(train_weighted_fscore)
+            elif c.last_training_round > 0:
+                # get previously calculated metrics
+                train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore, alpha = c.train_metrics_list_dict[m]
+
+            accs_w.append(train_acc * train_num)
+            loss_w.append(train_loss * train_num)
+            balanced_acc_w.append(train_balanced_acc * train_num)
+            micro_fscore_w.append(train_micro_fscore * train_num)
+            macro_fscore_w.append(train_macro_fscore * train_num)
+            weighted_fscore_w.append(train_weighted_fscore * train_num)
+
+            # self.clients_train_metrics[c.id]["Samples"][m].append(num_samples_w)
+            # self.clients_train_metrics[c.id]["Accuracy"][m].append(train_acc)
+            # self.clients_train_metrics[c.id]["Loss"][m].append(train_loss)
+            # self.clients_train_metrics[c.id]["Balanced accuracy"][m].append(train_balanced_acc)
+            # self.clients_train_metrics[c.id]["Micro f1-score"][m].append(train_micro_fscore)
+            # self.clients_train_metrics[c.id]["Macro f1-score"][m].append(train_macro_fscore)
+            # self.clients_train_metrics[c.id]["Weighted f1-score"][m].append(train_weighted_fscore)
+            accs.append(train_acc)
+            std_accs.append(train_acc)
+            num_samples.append(train_num)
+            loss.append(train_loss)
+            std_losses.append(train_loss)
+            balanced_acc.append(train_balanced_acc)
+            micro_fscore.append(train_micro_fscore)
+            weighted_fscore.append(train_weighted_fscore)
+            macro_fscore.append(train_macro_fscore)
+            alpha_list.append(alpha)
 
         ids = [c.id for c in available_clients]
 
         decimals = 5
-        print("amostras: ", num_samples, accs, self.selected_clients)
+
+        acc = round(np.mean(accs), decimals)
+        std_acc = np.round(np.std(np.array(std_accs)), decimals)
+        auc = round(np.mean(auc), decimals)
+        loss = round(np.mean(loss), decimals)
+        std_loss = np.round(np.std(np.array(std_losses)), decimals)
+        balanced_acc = round(np.mean(balanced_acc), decimals)
+        micro_fscore = round(np.mean(micro_fscore), decimals)
+        weighted_fscore = round(np.mean(weighted_fscore), decimals)
+        macro_fscore = round(np.mean(macro_fscore), decimals)
+
+        print("amostras: ", num_samples, accs_w, self.selected_clients)
         if len(num_samples) == 0:
             return None
-        acc = round(sum(accs) / sum(num_samples), decimals)
-        loss = round(sum(losses) / sum(num_samples), decimals)
-        balanced_acc = round(sum(balanced_accs) / sum(num_samples), decimals)
-        micro_fscore = round(sum(micro_fscores) / sum(num_samples), decimals)
-        macro_fscore = round(sum(macro_fscores) / sum(num_samples), decimals)
-        weighted_fscore = round(sum(weighted_fscores) / sum(num_samples), decimals)
+        acc_w = round(sum(accs_w) / sum(num_samples), decimals)
+        loss_w = round(sum(loss_w) / sum(num_samples), decimals)
+        balanced_acc_w = round(sum(balanced_acc_w) / sum(num_samples), decimals)
+        micro_fscore_w = round(sum(micro_fscore_w) / sum(num_samples), decimals)
+        macro_fscore_w = round(sum(macro_fscore_w) / sum(num_samples), decimals)
+        weighted_fscore_w = round(sum(weighted_fscore_w) / sum(num_samples), decimals)
 
-        return {'ids': ids, 'num_samples': num_samples, 'Accuracy': acc, "Loss": loss, 'Balanced accuracy': balanced_acc,
-                'Micro f1-score': micro_fscore, 'Macro f1-score': macro_fscore, 'Weighted f1-score': weighted_fscore, "Alpha": alpha}
+        # print("loss treino: ", loss)
+        # exit()
+
+        server_metrics = {'ids': ids, 'num_samples': num_samples, 'Accuracy': acc, "Loss": loss,
+                                   'Balanced accuracy': balanced_acc, 'Micro f1-score': micro_fscore,
+                                    'Macro f1-score': macro_fscore, 'Weighted f1-score': weighted_fscore,
+                                    "Alpha": alpha}
+
+        server_metrics_weighted =  {'ids': ids, 'num_samples': num_samples, 'Accuracy': acc_w, "Loss": loss_w,
+                                    'Balanced accuracy': balanced_acc_w, 'Micro f1-score': micro_fscore_w,
+                                    'Macro f1-score': macro_fscore_w, 'Weighted f1-score': weighted_fscore_w,
+                                    "Alpha": alpha}
+
+        return server_metrics, server_metrics_weighted
 
     # evaluate selected clients
     def evaluate(self, m, t, acc=None, loss=None):
@@ -637,7 +760,7 @@ class Server(object):
         test_loss_w = test_metrics_w['Loss']
         test_auc_w = test_metrics_w['AUC']
 
-        train_metrics = self.train_metrics(m, t)
+        train_metrics, train_metrics_w = self.train_metrics(m, t)
         if train_metrics is not None:
             self.past_train_metrics_m[m][t] = train_metrics
             self.max_loss_m[m] = max(self.max_loss_m[m], train_metrics["Loss"])
@@ -648,6 +771,13 @@ class Server(object):
         # test_auc = sum(stats[3])*1.0 / sum(stats[1])
         # train_loss = sum(train_metrics[2])*1.0 / sum(train_metrics[1])
         train_loss = train_metrics["Loss"]
+        train_loss_w = train_metrics_w["Loss"]
+        train_acc = train_metrics["Accuracy"]
+        train_acc_w = train_metrics_w["Accuracy"]
+        train_balanced_acc = train_metrics["Balanced accuracy"]
+        train_balanced_acc_w = train_metrics_w["Balanced accuracy"]
+        test_balanced_acc_w = test_metrics_w["Balanced accuracy"]
+
         # accs = [a / n for a, n in zip(stats[2], stats[1])]
         # aucs = [a / n for a, n in zip(stats[3], stats[1])]
 
@@ -660,10 +790,14 @@ class Server(object):
             if metric in ['ids', 'num_samples']:
                 continue
             self.results_train_metrics[m][metric].append(train_metrics[metric])
+            self.results_train_metrics_w[m][metric].append(train_metrics_w[metric])
             # self.results_train_metrics_w[m][metric].append(train_metrics_w[metric])
         self.results_train_metrics[m]['Round'].append(t)
         self.results_train_metrics[m]['Fraction fit'].append(self.join_ratio)
         self.results_train_metrics[m]['# training clients'].append(len(self.selected_clients[m]))
+        self.results_train_metrics_w[m]['Round'].append(t)
+        self.results_train_metrics_w[m]['Fraction fit'].append(self.join_ratio)
+        self.results_train_metrics_w[m]['# training clients'].append(len(self.selected_clients[m]))
 
         self.results_test_metrics[m]['Round'].append(t)
         self.results_test_metrics[m]['Fraction fit'].append(self.join_ratio)
@@ -691,12 +825,21 @@ class Server(object):
             loss.append(train_loss)
 
         print("Evaluate model {}".format(m))
-        print("Averaged Train Loss: {:.4f}".format(train_loss))
+        print("Averaged Train Accuracy: {:.4f}".format(train_acc))
         print("Averaged Test Accuracy: {:.4f}".format(test_acc))
+        print("Averaged Train Balanced Accuracy: {:.4f}".format(train_balanced_acc))
         print("Averaged Test Balanced Accuracy: {:.4f}".format(test_balanced_acc))
+
+        print("Averaged Train Accuracy w: {:.4f}".format(train_acc_w))
         print("Averaged Test Accuracy w: {:.4f}".format(test_acc_w))
+        print("Averaged Train Balanced Accuracy w: {:.4f}".format(train_balanced_acc_w))
+        print("Averaged Test Balanced Accuracy w: {:.4f}".format(test_balanced_acc_w))
+
+        print("Averaged Train Loss: {:.4f}".format(train_loss))
         print("Averaged Test Loss: {:.4f}".format(test_loss))
+        print("Averaged Train Loss w: {:.4f}".format(train_loss_w))
         print("Averaged Test Loss w: {:.4f}".format(test_loss_w))
+
         print("Averaged Test AUC: {:.4f}".format(test_auc))
         # self.print_(test_acc, train_acc, train_loss)
         print("Std Test Accuracy: {:.4f}".format(test_std_acc))

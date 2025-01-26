@@ -27,6 +27,7 @@ class clientAVG(Client):
         super().__init__(args, id, **kwargs)
 
     def train(self, m, t, global_model):
+        self.last_training_round = t
         trainloader = self.trainloader[m]
         self.set_parameters(m, global_model)
         self.model[m].to(self.device)

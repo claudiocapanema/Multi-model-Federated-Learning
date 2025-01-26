@@ -3,7 +3,7 @@ import os
 import random
 import time
 
-from utils_file import save_dataloaders, save_dataloaders_widsm
+from utils_file import save_dataloaders, save_dataloaders_widsm, save_dataloaders_gowalla
 
 trainloaders = []
 valloaders = []
@@ -43,6 +43,17 @@ if __name__ == '__main__':
 
     if args.dataset in ["WISDM-W", "WISDM-P"]:
         save_dataloaders_widsm(args.dataset, int(args.clients),
+                     int(args.num_classes),
+                     bool(args.niid),
+                     bool(args.balance), args.partition,
+                     int(args.class_per_client),
+                     int(args.batch_size),
+                     float(args.train_perc),
+                     float(args.alpha),
+                     args.data_dir,
+                     int(args.sim_id))
+    elif args.dataset == "Gowalla":
+        save_dataloaders_gowalla(args.dataset, int(args.clients),
                      int(args.num_classes),
                      bool(args.niid),
                      bool(args.balance), args.partition,

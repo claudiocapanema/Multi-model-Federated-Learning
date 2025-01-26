@@ -767,6 +767,44 @@ class GRU(torch.nn.Module):
 
 # ====================================================================================================================
 
+class LSTM(torch.nn.Module):
+    def __init__(self, input_shape, num_layers=1, hidden_size=2, sequence_length=28, num_classes=10):
+        super().__init__()
+        try:
+            random.seed(0)
+            np.random.seed(0)
+            torch.manual_seed(0)
+            self.input_size = input_shape
+            self.hidden_size = hidden_size
+            self.num_layers = num_layers
+            self.output_size = num_classes
+            self.time_length = sequence_length
+
+            self.gru = nn.LSTM(self.input_size, self.hidden_size, self.num_layers, batch_first=True)
+            self.dp = nn.Dropout(0.2)
+            self.fc = nn.Linear(self.time_length * self.hidden_size, self.output_size, bias=True)
+        except Exception as e:
+            print("LSTM init")
+            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
+
+    def forward(self, x):
+        try:
+            random.seed(0)
+            np.random.seed(0)
+            torch.manual_seed(0)
+            # print("entrada: ", x.shape)
+            x, h = self.gru(x)
+            x = nn.Flatten()(x)
+            x = self.dp(x)
+            # print("e2: ", x.shape)
+            out = self.fc(x)
+            return out
+        except Exception as e:
+            print("LSTM forward")
+            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
+
+# ====================================================================================================================
+
 class LSTM_NET(nn.Module):
     """Class to design a LSTM model."""
 
