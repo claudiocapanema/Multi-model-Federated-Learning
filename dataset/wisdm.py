@@ -246,7 +246,8 @@ def split_dataset(data: dict, client_mapping_train: dict, client_mapping_test: d
     return WISDMDataset(train_data), WISDMDataset(test_data), {'train': mapping_train, 'test': mapping_test}
 
 
-def load_dataset(window=200, overlap=0.5, reprocess=True, split=0.8, modality='watch'):
+def load_dataset(window=100, overlap=0.7, reprocess=True, split=0.8, modality='watch'):
+    # antes window 25 rsmprop
     """
     Load the WISDM dataset, either from disk or by reprocessing it based on the specified parameters.
 

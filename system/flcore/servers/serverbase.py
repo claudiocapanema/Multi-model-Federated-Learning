@@ -572,7 +572,13 @@ class Server(object):
             global_model = self.global_model[m]
             if type(global_model) != list:
                 global_model = self.global_model[m].to(self.device)
-            test_acc, test_loss, test_num, test_auc, test_balanced_acc, test_micro_fscore, test_macro_fscore, test_weighted_fscore, alpha = c.test_metrics(m, t, self.global_rounds, copy.deepcopy(global_model))
+            # if i in self.selected_clients[m] or t == 1 or c.last_training_round == 0:
+            #     test_acc, test_loss, test_num, test_auc, test_balanced_acc, test_micro_fscore, test_macro_fscore, test_weighted_fscore, alpha = c.test_metrics(m, t, self.global_rounds, copy.deepcopy(global_model))
+            # elif c.last_training_round > 0:
+            #     test_acc, test_loss, test_num, test_auc, test_balanced_acc, test_micro_fscore, test_macro_fscore, test_weighted_fscore, alpha = c.test_metrics_list_dict[m]
+            test_acc, test_loss, test_num, test_auc, test_balanced_acc, test_micro_fscore, test_macro_fscore, test_weighted_fscore, alpha = c.test_metrics(
+                m, t, self.global_rounds, copy.deepcopy(global_model))
+
             self.clients_test_metrics[i]["Accuracy"][m].append(test_acc)
             self.clients_test_metrics[i]["Loss"][m].append(test_loss)
             self.clients_test_metrics[i]["Balanced accuracy"][m].append(test_balanced_acc)
@@ -676,34 +682,36 @@ class Server(object):
             c = available_clients[i]
             if i in self.selected_clients[m] or t == 1 or c.last_training_round == 0:
                 train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore, alpha = c.train_metrics(m, t)
-            elif c.last_training_round > 0:
-                # get previously calculated metrics
-                train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore, alpha = c.train_metrics_list_dict[m]
+            # elif c.last_training_round > 0:
+            #     # get previously calculated metrics
+            #     train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore, alpha = c.train_metrics_list_dict[m]
+            # train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore, alpha = c.train_metrics(
+            #     m, t)
 
-            accs_w.append(train_acc * train_num)
-            loss_w.append(train_loss * train_num)
-            balanced_acc_w.append(train_balanced_acc * train_num)
-            micro_fscore_w.append(train_micro_fscore * train_num)
-            macro_fscore_w.append(train_macro_fscore * train_num)
-            weighted_fscore_w.append(train_weighted_fscore * train_num)
+                accs_w.append(train_acc * train_num)
+                loss_w.append(train_loss * train_num)
+                balanced_acc_w.append(train_balanced_acc * train_num)
+                micro_fscore_w.append(train_micro_fscore * train_num)
+                macro_fscore_w.append(train_macro_fscore * train_num)
+                weighted_fscore_w.append(train_weighted_fscore * train_num)
 
-            # self.clients_train_metrics[c.id]["Samples"][m].append(num_samples_w)
-            # self.clients_train_metrics[c.id]["Accuracy"][m].append(train_acc)
-            # self.clients_train_metrics[c.id]["Loss"][m].append(train_loss)
-            # self.clients_train_metrics[c.id]["Balanced accuracy"][m].append(train_balanced_acc)
-            # self.clients_train_metrics[c.id]["Micro f1-score"][m].append(train_micro_fscore)
-            # self.clients_train_metrics[c.id]["Macro f1-score"][m].append(train_macro_fscore)
-            # self.clients_train_metrics[c.id]["Weighted f1-score"][m].append(train_weighted_fscore)
-            accs.append(train_acc)
-            std_accs.append(train_acc)
-            num_samples.append(train_num)
-            loss.append(train_loss)
-            std_losses.append(train_loss)
-            balanced_acc.append(train_balanced_acc)
-            micro_fscore.append(train_micro_fscore)
-            weighted_fscore.append(train_weighted_fscore)
-            macro_fscore.append(train_macro_fscore)
-            alpha_list.append(alpha)
+                # self.clients_train_metrics[c.id]["Samples"][m].append(num_samples_w)
+                # self.clients_train_metrics[c.id]["Accuracy"][m].append(train_acc)
+                # self.clients_train_metrics[c.id]["Loss"][m].append(train_loss)
+                # self.clients_train_metrics[c.id]["Balanced accuracy"][m].append(train_balanced_acc)
+                # self.clients_train_metrics[c.id]["Micro f1-score"][m].append(train_micro_fscore)
+                # self.clients_train_metrics[c.id]["Macro f1-score"][m].append(train_macro_fscore)
+                # self.clients_train_metrics[c.id]["Weighted f1-score"][m].append(train_weighted_fscore)
+                accs.append(train_acc)
+                std_accs.append(train_acc)
+                num_samples.append(train_num)
+                loss.append(train_loss)
+                std_losses.append(train_loss)
+                balanced_acc.append(train_balanced_acc)
+                micro_fscore.append(train_micro_fscore)
+                weighted_fscore.append(train_weighted_fscore)
+                macro_fscore.append(train_macro_fscore)
+                alpha_list.append(alpha)
 
         ids = [c.id for c in available_clients]
 

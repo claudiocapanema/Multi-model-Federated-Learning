@@ -184,7 +184,6 @@ def line_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, log_
     if y_lim:
         plt.ylim([y_min, y_max])
 
-    x = df[x_column].tolist()
     # plt.xticks(np.arange(0, max(x) + 1, 2.0))
     if tipo is not None:
         palette = sns.color_palette()

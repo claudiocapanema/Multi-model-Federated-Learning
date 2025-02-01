@@ -209,6 +209,9 @@ class FedAvgCNN(nn.Module):
                       stride=1,
                       bias=True)
         self.fc1 = nn.Linear(dim, 512)
+        self.dropout1 = nn.Dropout(0.25)
+        self.dropout2 = nn.Dropout(0.3)
+        self.dropout3 = nn.Dropout(0.5)
         self.fc = nn.Linear(512, num_classes)
 
     def forward(self, x):
@@ -224,9 +227,12 @@ class FedAvgCNN(nn.Module):
         #     pass
 
         out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv1(x)))
+        out = self.dropout1(out)
         out = nn.MaxPool2d(kernel_size=(2, 2))(nn.ReLU(inplace=True)(self.conv2(out)))
+        out = self.dropout2(out)
         out = torch.flatten(out, 1)
         out = nn.ReLU(inplace=True)(self.fc1(out))
+        out = self.dropout3(out)
         out = self.fc(out)
 
         # out = self.conv1(x)
@@ -745,7 +751,7 @@ class GRU(torch.nn.Module):
             self.time_length = sequence_length
 
             self.gru = nn.GRU(self.input_size, self.hidden_size, self.num_layers, batch_first=True)
-            self.dp = nn.Dropout(0.2)
+            self.dp = nn.Dropout(0.5)
             self.fc = nn.Linear(self.time_length * self.hidden_size, self.output_size, bias=True)
         except Exception as e:
             print("GRU init")
@@ -781,7 +787,7 @@ class LSTM(torch.nn.Module):
             self.time_length = sequence_length
 
             self.gru = nn.LSTM(self.input_size, self.hidden_size, self.num_layers, batch_first=True)
-            self.dp = nn.Dropout(0.2)
+            self.dp = nn.Dropout(0.5)
             self.fc = nn.Linear(self.time_length * self.hidden_size, self.output_size, bias=True)
         except Exception as e:
             print("LSTM init")

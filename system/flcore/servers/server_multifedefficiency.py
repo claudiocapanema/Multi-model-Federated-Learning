@@ -98,6 +98,8 @@ class MultiFedEfficiency(Server):
         self.models_semi_convergence_training_probability = [0] * self.M
         self.training_clients_per_model = np.array([0] * self.M)
         self.training_clients_per_model_per_round = {m: [] for m in range(self.M)}
+        self.training_clients_per_model_per_round_dict = {m: {i: [] for i in range(self.minimum_training_clients_per_model, self.num_join_clients + 1)} for m in range(self.M)}
+        self.n_training_clients_efficiency = np.zeros((self.M, self.num_join_clients))
         self.rounds_since_last_semi_convergence = {m: 0 for m in range(self.M)}
         self.unique_count_samples = {m: np.array([0 for i in range(self.num_classes[m])]) for m in range(self.M)}
         self.similarity_matrix = np.zeros((self.M, self.num_clients))
@@ -106,7 +108,11 @@ class MultiFedEfficiency(Server):
         self.re_per_model = int(args.reduction)
         self.fraction_of_classes = np.zeros((self.M, self.num_clients))
         self.imbalance_level = np.zeros((self.M, self.num_clients))
+        self.lim = []
+        self.free_budget_distribution_factor = args.df
         # self.selected_clients_cosine = {m: {} for m in range(self.M)}
+
+        print("Rodando com tw: ", self.tw)
 
     def cold_start_selection(self):
 
@@ -125,6 +131,52 @@ class MultiFedEfficiency(Server):
             self.use_cold_start_m = np.array([False for m in range(self.M)])
 
         return prob, use_cold_start
+
+    def random_selection(self):
+
+        try:
+            budget = int(self.num_join_clients / self.M)
+            cm = [budget] * self.M
+
+            for m in range(self.M):
+                if self.models_semi_convergence_count[m] > 0:
+                    cm[m] = int(max(self.minimum_training_clients_per_model,
+                                                      cm[m] - self.models_semi_convergence_count[m]))
+
+            free_budget = self.num_join_clients - np.sum(cm)
+            k_nt = len(np.argwhere(self.need_for_training >= 0.5))
+            free_budget_k = int(int(free_budget * self.free_budget_distribution_factor) / k_nt)
+            rest = free_budget - free_budget_k * k_nt
+
+            print("Free budget: ", free_budget, " k nt: ", k_nt, " Free budget k: ", free_budget_k, " resto: ", rest)
+
+            for m in range(self.M):
+                if self.need_for_training[m] >= 0.5:
+                    cm[m] = int(cm[m] + free_budget_k)
+                    if rest > 0:
+                        cm[m] += 1
+                        rest -= 1
+                        rest = max(rest, 0)
+
+            selected_clients = list(np.random.choice(self.available_clients, self.num_join_clients, replace=False))
+            selected_clients = [i.id for i in selected_clients]
+
+            selected_clients_m = [None] * self.M
+
+            print("a : ", selected_clients_m)
+            print("b selec: ", selected_clients)
+            print("cm: ", cm)
+            i = 0
+            for m in range(self.M):
+                j = i + cm[m]
+                selected_clients_m[m] = selected_clients[i:j]
+                i = j
+
+            return selected_clients_m
+
+        except Exception as e:
+            print("Error random selection")
+            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
 
     def weighted_selection(self, t):
 
@@ -167,7 +219,7 @@ class MultiFedEfficiency(Server):
 
             p = p / np.sum(p)
             selected_clients_m_2 = np.random.choice([i for i in range(int(self.num_clients * self.M))],
-                                                    self.current_num_join_clients * self.M, replace=False, p=p)
+                                                    self.current_num_join_clients, replace=False, p=p)
 
             selected_clients = []
             selected_clients_dict = {m: [] for m in range(self.M)}
@@ -331,10 +383,10 @@ class MultiFedEfficiency(Server):
             #
             #     self.calculate_accuracy_gain_models()
             #
-            prob_cold_start_m, use_cold_start_m = self.cold_start_selection()
-
-            print("Cold start")
-            print(prob_cold_start_m, use_cold_start_m)
+            # prob_cold_start_m, use_cold_start_m = self.cold_start_selection()
+            #
+            # print("Cold start")
+            # print(prob_cold_start_m, use_cold_start_m)
 
             #
             #     clients_losses = []
@@ -357,19 +409,34 @@ class MultiFedEfficiency(Server):
             #     print("Modelos clientes: ", selected_clients_m)
 
             """semi-convergence detection"""
-            diff = self.tw_range[0] - self.tw_range[1]
-            lim = []
-            for m in range(self.M):
-                if self.need_for_training[m] >= 0.5:
+            if t == 1:
+                diff = self.tw_range[0] - self.tw_range[1]
+                middle = self.tw_range[1] + diff//2
+                for m in range(self.M):
+                    # method 2
+                    # r = diff * (1 - self.need_for_training[m])
+                    # if self.need_for_training[m] >= 0.5:
+                    #     # Makes it harder to reduce training intensity
+                    #     lower = upper - t/2
+                    #     upper = lower + diff * (1- self.need_for_training[m])
+                    # else:
+                    #     # Makes it easier to reduce training intensity
+                    #     upper = self.tw_range[0]
+                    #     lower = upper - diff * self.need_for_training[m]
+
+                    # method 1 funciona bem
                     lower = self.tw_range[1]
-                    upper = lower + diff * self.need_for_training[m]
-                else:
                     upper = self.tw_range[0]
-                    lower = upper - diff * self.need_for_training[m]
-                lim.append([upper, lower])
+                    r = diff * (1 - self.need_for_training[m])
+                    # Smaller training reduction interval for higher need for training
+                    lower = max(middle - r/2, lower)
+                    upper = min(middle + r/2, upper)
+
+                    self.lim.append([upper, lower])
             flag = True
-            print(lim)
+            print("limites: ", self.lim)
             # exit()
+            loss_reduction = [0] * self.M
             for m in range(self.M):
                 if not self.stop_cpd[m]:
                     self.rounds_since_last_semi_convergence[m] += 1
@@ -379,14 +446,16 @@ class MultiFedEfficiency(Server):
                     print("tw: ", self.tw[m], self.results_test_metrics[m]["Loss"])
                     losses = self.results_test_metrics[m]["Loss"][-(self.tw[m]+1):]
                     losses = np.array([losses[i] - losses[i+1] for i in range(len(losses)-1)])
+                    if len(losses) > 0:
+                        loss_reduction[m] = losses[-1]
                     print("Modelo ", m, " losses: ", losses)
                     idxs = np.argwhere(losses < 0)
                     # lim = [[0.5, 0.25], [0.35, 0.15]]
-                    upper = lim[m][0]
-                    lower = lim[m][1]
-                    print("Condição 1: ", len(idxs) <= int(self.tw[m] * lim[m][0]), "Condição 2: ",
-                          len(idxs) >= int(self.tw[m] * lim[m][1]))
-                    print(len(idxs), self.tw[m], lim[m][0], lim[m][1], int(self.tw[m] * lim[m][0]), int(self.tw[m] * lim[m][1]))
+                    upper = self.lim[m][0]
+                    lower = self.lim[m][1]
+                    print("Condição 1: ", len(idxs) <= int(self.tw[m] * self.lim[m][0]), "Condição 2: ",
+                          len(idxs) >= int(self.tw[m] * lower))
+                    print(len(idxs), self.tw[m], upper, lower, int(self.tw[m] * upper), int(self.tw[m] * lower))
                     if self.rounds_since_last_semi_convergence[m] >= 4:
                         if len(idxs) <= int(self.tw[m] * upper) and len(idxs) >= int(self.tw[m] * lower):
                             self.rounds_since_last_semi_convergence[m] = 0
@@ -477,9 +546,10 @@ class MultiFedEfficiency(Server):
             #             selected_clients_m[m] += list(selected)
 
             print("Semi convergências: ", self.models_semi_convergence_count)
-            selected_clients_m = self.weighted_selection(t)
+            # selected_clients_m = self.weighted_selection(t)
+            selected_clients_m = self.random_selection()
 
-            # selected_clients = list(np.random.choice(self.available_clients, self.num_join_clients, replace=False))
+            selected_clients = list(np.random.choice(self.available_clients, self.num_join_clients, replace=False))
             # selected_clients = [i.id for i in selected_clients]
             #
             # selected_clients_m = []
@@ -494,6 +564,24 @@ class MultiFedEfficiency(Server):
             print("Selecionados: ", t, sum([len(selected_clients_m[i]) for i in range(len(selected_clients_m))]), [len(i) for i in selected_clients_m], selected_clients_m)
             # print("Quantidade: ", n_clients_selected)
             # exit()
+
+            if t > 2:
+                for m in range(self.M):
+                    n = len(self.previous_selected_clients[m])
+                    self.training_clients_per_model_per_round_dict[m][n].append(loss_reduction[m])
+                    recent_loss_reductions = self.training_clients_per_model_per_round_dict[m][n][-4:]
+                    self.n_training_clients_efficiency[m][n-self.minimum_training_clients_per_model-1] = np.sum(recent_loss_reductions) / n
+
+                normalized = []
+                for m in range(self.M):
+                    total = np.sum(self.n_training_clients_efficiency[m])
+                    if total > 0:
+                        normalized.append(self.n_training_clients_efficiency[m] / total)
+                    else:
+                        normalized.append([0] * len(self.n_training_clients_efficiency[m]))
+
+                print("Efficiência de treinamento: ", normalized)
+
             self.previous_selected_clients = selected_clients_m
             for m in range(self.M):
                 n = len(self.previous_selected_clients[m])
@@ -743,64 +831,60 @@ class MultiFedEfficiency(Server):
     #     print(m, i, self.clients_cosine_similarities_with_current_model[m])
     #     return weights_prime
 
-    def train_metrics(self, m, t):
+    # def train_metrics(self, m, t):
+    #
+    #     accs = []
+    #     losses = []
+    #     num_samples = []
+    #     balanced_accs = []
+    #     micro_fscores = []
+    #     macro_fscores = []
+    #     weighted_fscores = []
+    #     for i in range(len(self.clients)):
+    #         c = self.clients[i]
+    #         train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore, alpha = c.train_metrics(m, t)
+    #         accs.append(train_acc * train_num)
+    #         num_samples.append(train_num)
+    #         balanced_accs.append(train_balanced_acc * train_num)
+    #         micro_fscores.append(train_micro_fscore * train_num)
+    #         macro_fscores.append(train_macro_fscore * train_num)
+    #         weighted_fscores.append(train_weighted_fscore * train_num)
+    #         self.clients_train_metrics[c.id]["Samples"][m].append(num_samples)
+    #         self.clients_train_metrics[c.id]["Accuracy"][m].append(train_acc)
+    #         self.clients_train_metrics[c.id]["Loss"][m].append(train_loss)
+    #         self.clients_train_metrics[c.id]["Balanced accuracy"][m].append(train_balanced_acc)
+    #         self.clients_train_metrics[c.id]["Micro f1-score"][m].append(train_micro_fscore)
+    #         self.clients_train_metrics[c.id]["Macro f1-score"][m].append(train_macro_fscore)
+    #         self.clients_train_metrics[c.id]["Weighted f1-score"][m].append(train_weighted_fscore)
+    #
+    #     ids = [c.id for c in self.clients]
+    #
+    #     decimals = 5
+    #     print("amostras: ", num_samples, accs, self.selected_clients)
+    #     if len(num_samples) == 0:
+    #         return None
+    #     acc = round(sum(accs) / sum(num_samples), decimals)
+    #     loss = round(sum(losses) / sum(num_samples), decimals)
+    #     balanced_acc = round(sum(balanced_accs) / sum(num_samples), decimals)
+    #     micro_fscore = round(sum(micro_fscores) / sum(num_samples), decimals)
+    #     macro_fscore = round(sum(macro_fscores) / sum(num_samples), decimals)
+    #     weighted_fscore = round(sum(weighted_fscores) / sum(num_samples), decimals)
+    #
+    #     return {'ids': ids, 'num_samples': num_samples, 'Accuracy': acc, "Loss": loss,
+    #             'Balanced accuracy': balanced_acc,
+    #             'Micro f1-score': micro_fscore, 'Macro f1-score': macro_fscore, 'Weighted f1-score': weighted_fscore, "Alpha": alpha}
 
-        accs = []
-        losses = []
-        num_samples = []
-        balanced_accs = []
-        micro_fscores = []
-        macro_fscores = []
-        weighted_fscores = []
-        for i in range(len(self.clients)):
-            c = self.clients[i]
-            train_acc, train_loss, train_num, train_balanced_acc, train_micro_fscore, train_macro_fscore, train_weighted_fscore, alpha = c.train_metrics(m, t)
-            accs.append(train_acc * train_num)
-            num_samples.append(train_num)
-            balanced_accs.append(train_balanced_acc * train_num)
-            micro_fscores.append(train_micro_fscore * train_num)
-            macro_fscores.append(train_macro_fscore * train_num)
-            weighted_fscores.append(train_weighted_fscore * train_num)
-            self.clients_train_metrics[c.id]["Samples"][m].append(num_samples)
-            self.clients_train_metrics[c.id]["Accuracy"][m].append(train_acc)
-            self.clients_train_metrics[c.id]["Loss"][m].append(train_loss)
-            self.clients_train_metrics[c.id]["Balanced accuracy"][m].append(train_balanced_acc)
-            self.clients_train_metrics[c.id]["Micro f1-score"][m].append(train_micro_fscore)
-            self.clients_train_metrics[c.id]["Macro f1-score"][m].append(train_macro_fscore)
-            self.clients_train_metrics[c.id]["Weighted f1-score"][m].append(train_weighted_fscore)
-
-        ids = [c.id for c in self.clients]
-
-        decimals = 5
-        print("amostras: ", num_samples, accs, self.selected_clients)
-        if len(num_samples) == 0:
-            return None
-        acc = round(sum(accs) / sum(num_samples), decimals)
-        loss = round(sum(losses) / sum(num_samples), decimals)
-        balanced_acc = round(sum(balanced_accs) / sum(num_samples), decimals)
-        micro_fscore = round(sum(micro_fscores) / sum(num_samples), decimals)
-        macro_fscore = round(sum(macro_fscores) / sum(num_samples), decimals)
-        weighted_fscore = round(sum(weighted_fscores) / sum(num_samples), decimals)
-
-        return {'ids': ids, 'num_samples': num_samples, 'Accuracy': acc, "Loss": loss,
-                'Balanced accuracy': balanced_acc,
-                'Micro f1-score': micro_fscore, 'Macro f1-score': macro_fscore, 'Weighted f1-score': weighted_fscore, "Alpha": alpha}
-
-
-    def get_results(self, m):
+    def get_results(self, m, train_test, mode):
 
         algo = self.dataset[m] + "_" + self.algorithm
         cd = bool(self.args.concept_drift)
         if cd:
-            result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(cd,
+            result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/{}/""".format(cd,
                                                                                                                         self.fraction_new_clients,
                                                                                                                         self.round_new_clients,
                                                                                                                         self.num_clients,
                                                                                                                        self.alpha,
-                                                                                                                        self.alpha_end[
-                                                                                                                            0],
-                                                                                                                        self.alpha_end[
-                                                                                                                            1],
+                                                                                                                        self.alpha_end,
                                                                                                                        self.dataset,
                                                                                                                         self.rounds_concept_drift[
                                                                                                                             0],
@@ -809,16 +893,15 @@ class MultiFedEfficiency(Server):
                                                                                                                        self.models_names,
                                                                                                                        self.args.join_ratio,
                                                                                                                        self.args.global_rounds,
-                                                                                                                       self.local_epochs)
+                                                                                                                       self.local_epochs,
+                                                                                                                        train_test)
         elif len(self.alpha) == 1:
-            result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(
+            result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/{}/""".format(
                 cd,
                 self.fraction_new_clients,
                 self.round_new_clients,
                 self.num_clients,
                 [self.alpha[0]],
-                self.alpha[
-                    0],
                 self.alpha[
                     0],
                 [self.dataset[0]],
@@ -827,56 +910,117 @@ class MultiFedEfficiency(Server):
                 [self.models_names[0]],
                 self.args.join_ratio,
                 self.args.global_rounds,
-                self.local_epochs)
+                self.local_epochs,
+                train_test)
         else:
 
-            result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(
+            result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/{}/""".format(
                 cd,
                 self.fraction_new_clients,
                 self.round_new_clients,
                 self.num_clients,
                 self.alpha,
-                self.alpha[
-                    0],
-                self.alpha[
-                    1],
+                self.alpha,
                 self.dataset,
                 0,
                 0,
                 self.models_names,
                 self.args.join_ratio,
                 self.args.global_rounds,
-                self.local_epochs)
+                self.local_epochs,
+                train_test)
 
         if not os.path.exists(result_path):
             os.makedirs(result_path)
 
         if (len(self.rs_test_acc)):
-            algo = algo + "_" + self.goal + "_" + str(self.times)
-            file_path = result_path + "{}_tw_{}.csv".format(algo, self.tw[m])
-            header = self.test_metrics_names
-            print(self.rs_test_acc)
-            print(self.rs_test_auc)
-            print(self.rs_train_loss)
-            list_of_metrics = []
-            for me in self.results_test_metrics[m]:
-                print(me, len(self.results_test_metrics[m][me]))
-                length = len(self.results_test_metrics[m][me])
-                list_of_metrics.append(self.results_test_metrics[m][me])
+            algo = algo + "_" + train_test + "_" + str(self.times)
+            file_path = result_path + "{}_tw_{}_df_{}.csv".format(algo, self.tw[m], self.free_budget_distribution_factor)
 
-            data = []
-            for i in range(length):
-                row = []
-                for j in range(len(list_of_metrics)):
-                    row.append(list_of_metrics[j][i])
+        if train_test == 'test':
 
-                data.append(row)
+            if mode == '':
+                header = self.test_metrics_names
+                print(self.rs_test_acc)
+                print(self.rs_test_auc)
+                print(self.rs_train_loss)
+                list_of_metrics = []
+                for me in self.results_test_metrics[m]:
+                    print(me, len(self.results_test_metrics[m][me]))
+                    length = len(self.results_test_metrics[m][me])
+                    list_of_metrics.append(self.results_test_metrics[m][me])
 
-            print("File path: " + file_path)
-            print(data)
-            print("me: ", self.rs_test_acc)
+                data = []
+                for i in range(length):
+                    row = []
+                    for j in range(len(list_of_metrics)):
+                        row.append(list_of_metrics[j][i])
 
-            return file_path, header, data
+                    data.append(row)
+
+            else:
+                header = self.test_metrics_names
+                list_of_metrics = []
+                for me in self.results_test_metrics_w[m]:
+                    print(me, len(self.results_test_metrics_w[m][me]))
+                    length = len(self.results_test_metrics_w[m][me])
+                    list_of_metrics.append(self.results_test_metrics_w[m][me])
+
+                data = []
+                for i in range(length):
+                    row = []
+                    for j in range(len(list_of_metrics)):
+                        row.append(list_of_metrics[j][i])
+
+                    data.append(row)
+                file_path = file_path.replace(".csv", "_weighted.csv")
+
+        else:
+            if mode == '':
+                header = self.train_metrics_names
+                list_of_metrics = []
+                for me in self.results_train_metrics[m]:
+                    print(me, len(self.results_train_metrics[m][me]))
+                    length = len(self.results_train_metrics[m][me])
+                    list_of_metrics.append(self.results_train_metrics[m][me])
+
+                data = []
+                print("tamanho: ", length, list_of_metrics)
+                for i in range(length):
+                    row = []
+                    for j in range(len(list_of_metrics)):
+                        if len(list_of_metrics[j]) > 0:
+                            row.append(list_of_metrics[j][i])
+                        else:
+                            row.append(0)
+
+                    data.append(row)
+
+            else:
+
+                header = self.train_metrics_names
+                list_of_metrics = []
+                for me in self.results_train_metrics_w[m]:
+                    print(me, len(self.results_train_metrics_w[m][me]))
+                    length = len(self.results_train_metrics_w[m][me])
+                    list_of_metrics.append(self.results_train_metrics_w[m][me])
+
+                data = []
+                for i in range(length):
+                    row = []
+                    for j in range(len(list_of_metrics)):
+                        if len(list_of_metrics[j]) > 0:
+                            row.append(list_of_metrics[j][i])
+                        else:
+                            row.append(0)
+
+                    data.append(row)
+
+                file_path = file_path.replace(".csv", "_weighted.csv")
+
+        print("File path: " + file_path)
+
+        return file_path, header, data
 
 
 

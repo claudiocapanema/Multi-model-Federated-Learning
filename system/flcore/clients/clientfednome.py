@@ -50,9 +50,10 @@ class clientFedNome(Client):
                 y = y.type(torch.LongTensor).to(self.device)
                 if self.train_slow:
                     time.sleep(0.1 * np.abs(np.random.rand()))
-                output = self.model[m](x)
-                loss = self.loss(output, y)
                 self.optimizer[m].zero_grad()
+                output = self.model[m](x).to(self.device)
+                loss = self.loss(output, y)
+
                 loss.backward()
                 self.optimizer[m].step()
 

@@ -200,7 +200,7 @@ def run(args):
 
             elif model_str == "gru":
                 if dt in ["WISDM-W", "WISDM-P"]:
-                    model = GRU(6, num_layers=1, hidden_size=2, sequence_length=200, num_classes=num_classes_m).to(args.device)
+                    model = GRU(6, num_layers=1, hidden_size=2, sequence_length=100, num_classes=num_classes_m).to(args.device)
             elif model_str == "lstm":
                 if dt in ["Gowalla"]:
                     model = LSTM(4, num_layers=1, hidden_size=1, sequence_length=6, num_classes=num_classes_m).to(
@@ -632,6 +632,7 @@ if __name__ == "__main__":
     # MultiFedEfficiency
     parser.add_argument('-tw', "--tw", type=int, default=16,
                         help="Rounds window")
+    parser.add_argument('-df', "--df", type=float, default=0)
     # FedAMP
     parser.add_argument('-alk', "--alphaK", type=float, default=1.0, 
                         help="lambda/sqrt(GLOABL-ITRATION) according to the paper")
@@ -725,6 +726,12 @@ if __name__ == "__main__":
     #     ) as prof:
     # with torch.autograd.profiler.profile(profile_memory=True) as prof:
 
+    if args.algorithm == "MultiFedEfficiency":
+        log_name = args.algorithm + "_tw_" + str(args.tw) + "_df_" + str(args.df)
+
+    else:
+        log_name = args.algorithm
+
     if bool(args.concept_drift):
         result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/log_{}.txt""".format(bool(args.concept_drift),
                                                                                                                                                                                                     args.fraction_new_clients,
@@ -744,7 +751,7 @@ if __name__ == "__main__":
                                                                                                                                                                                                     args.join_ratio,
                                                                                                                                                                                                     args.global_rounds,
                                                                                                                                                                                                     args.local_epochs,
-                                                                                                                                                                                                    args.algorithm)
+                                                                                                                                                                                                    log_name)
     elif len(args.alpha) == 1:
         # run singe model
         result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/log_{}.txt""".format(
@@ -762,7 +769,7 @@ if __name__ == "__main__":
             args.join_ratio,
             args.global_rounds,
             args.local_epochs,
-            args.algorithm)
+            log_name)
     else:
         result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/log_{}.txt""".format(
             bool(args.concept_drift),
@@ -778,7 +785,7 @@ if __name__ == "__main__":
             args.join_ratio,
             args.global_rounds,
             args.local_epochs,
-            args.algorithm)
+            log_name)
     print("log: ", result_path)
     import sys
 

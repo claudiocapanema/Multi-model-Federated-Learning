@@ -113,12 +113,33 @@ class Client(object):
         self.optimizer = []
         self.learning_rate_scheduler = []
         for m in range(self.M):
-            if self.dataset[m] in ['ExtraSensory', 'WISDM-W', 'WISDM-P', 'Gowalla']:
-                self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.001))
+            if self.dataset[m] in ['ExtraSensory', 'WISDM-W', 'WISDM-P']:
+                # self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.0001))
                 # self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.0001)) # loss constante não aprende
-                # self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
+                # self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.0005)) # 102 rounds
+                # self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.001)) antes
+
+                self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=0.0001))
+            elif self.dataset[m] in ['Gowalla']:
+                # self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.0001))
+                # self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.0001)) # loss constante não aprende
+                # self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.001))  # bom para alpha 10# 101 e 102 rounds
+                if float(self.alpha[m]) == 0.1:
+                    self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.0001))
+                elif float(self.alpha[m]) == 1.0:
+                    self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.001))
+                elif float(self.alpha[m]) > 1.0:
+                    self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.0001))
             elif self.dataset[m] in ["Tiny-ImageNet", "ImageNet", "ImageNet_v2"]:
-                self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=0.0005))
+                # self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=0.0001)) # bom para alpha 0.1
+                # self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.001))  # aprende pouco mas não dá overfitting
+                if float(self.alpha[m]) == 0.1:
+                    self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=0.0001))
+                elif float(self.alpha[m]) == 1.0:
+                    self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=0.0001)) # funciona bem
+                elif float(self.alpha[m]) > 1.0:
+                    self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01)) # sgd 0.01 bom 3% diferença
+
             elif self.dataset[m] in ["EMNIST", "CIFAR10"]:
                 self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
             else:
@@ -331,6 +352,7 @@ class Client(object):
 
                         transforms.Resize((32, 32)),
                         transforms.RandomRotation(10),  # Rotates the image to a specified angel
+                        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
                         transforms.ToTensor(),
                         transforms.Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
                         # transforms.Resize((32, 32)),  # resises the image so it can be perfect for our model.
@@ -537,10 +559,10 @@ class Client(object):
                 self.update_loader[m] = False
         testloaderfull = self.testloaderfull[m]
         g = torch.Generator()
-        g.manual_seed(self.id)
-        random.seed(self.id)
-        np.random.seed(self.id)
-        torch.manual_seed(self.id)
+        g.manual_seed(t)
+        random.seed(t)
+        np.random.seed(t)
+        torch.manual_seed(t)
         self.model[m].to(self.device)
         self.model[m].eval()
 
@@ -597,9 +619,15 @@ class Client(object):
 
         self.test_loss[m].append(test_loss)
 
-        self.test_metrics_list_dict[m] = {'ids': self.id, 'Accuracy': test_acc, 'AUC': test_auc,
-                "Loss": test_loss, "Samples": test_num, "Balanced accuracy": test_balanced_acc, "Micro f1-score": test_micro_fscore,
-                "Weighted f1-score": test_weighted_fscore, "Macro f1-score": test_macro_fscore}
+        self.test_metrics_list_dict[m] = (test_acc,
+                test_loss,
+                test_num,
+                test_auc,
+                test_balanced_acc,
+                test_micro_fscore,
+                test_macro_fscore,
+                test_weighted_fscore,
+                self.current_alpha[m])
         
         return (test_acc,
                 test_loss,
@@ -614,10 +642,10 @@ class Client(object):
     def train_metrics(self, m, t):
 
         g = torch.Generator()
-        g.manual_seed(self.id)
-        random.seed(self.id)
-        np.random.seed(self.id)
-        torch.manual_seed(self.id)
+        g.manual_seed(t)
+        random.seed(t)
+        np.random.seed(t)
+        torch.manual_seed(t)
         if bool(self.args.concept_drift):
             alpha = float(
                 self.experiment_config_df.query("""Dataset == '{}' and Round == {}""".format(self.dataset[m], t))[
@@ -637,11 +665,6 @@ class Client(object):
             else:
                 self.update_loader[m] = False
         trainloader = self.trainloader[m]
-        g = torch.Generator()
-        g.manual_seed(self.id)
-        random.seed(self.id)
-        np.random.seed(self.id)
-        torch.manual_seed(self.id)
         # self.model = self.load_model('model')
         # self.model.to(self.device)
         self.model[m].eval()
