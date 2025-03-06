@@ -200,10 +200,10 @@ def run(args):
 
             elif model_str == "gru":
                 if dt in ["WISDM-W", "WISDM-P"]:
-                    model = GRU(6, num_layers=1, hidden_size=2, sequence_length=100, num_classes=num_classes_m).to(args.device)
+                    model = GRU(6, num_layers=1, hidden_size=2, sequence_length=200, num_classes=num_classes_m).to(args.device)
             elif model_str == "lstm":
                 if dt in ["Gowalla"]:
-                    model = LSTM(4, num_layers=1, hidden_size=1, sequence_length=6, num_classes=num_classes_m).to(
+                    model = LSTM(4, num_layers=1, hidden_size=1, sequence_length=10, num_classes=num_classes_m).to(
                         args.device)
 
             elif model_str == "lstm":

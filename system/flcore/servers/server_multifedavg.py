@@ -51,11 +51,6 @@ class MultiFedAvg(Server):
                 for i in range(len(self.selected_clients[m])):
                     self.clients[self.selected_clients[m][i]].train(m, t, self.global_model[m])
 
-                if t%self.eval_gap == 0:
-                    print(f"\n-------------Round number: {t}-------------")
-                    print("\nEvaluate global model for ", self.dataset[m])
-                    self.evaluate(m, t=t)
-
             # threads = [Thread(target=client.train)
             #            for client in self.selected_clients]
             # [t.start() for t in threads]
@@ -65,6 +60,13 @@ class MultiFedAvg(Server):
             if self.dlg_eval and t%self.dlg_gap == 0:
                 self.call_dlg(t)
             self.aggregate_parameters()
+
+            for m in range(len(self.selected_clients)):
+
+                if t%self.eval_gap == 0:
+                    print(f"\n-------------Round number: {t}-------------")
+                    print("\nEvaluate global model for ", self.dataset[m])
+                    self.evaluate(m, t=t)
 
             self.Budget.append(time.time() - s_t)
             print('-'*25, 'time cost', '-'*25, self.Budget[-1])

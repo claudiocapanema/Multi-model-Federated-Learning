@@ -180,7 +180,9 @@ def create_dataset(df, clients=None, window=200, overlap=0.5):
     Y = []
     for client in tqdm(clients):
         c_idxs[client] = []
-        data = df[df.subject == client].sort_values(by='timestamp').sample(frac=1, random_state=None)
+        # data = df[df.subject == client].sort_values(by='timestamp').sample(frac=0.5, random_state=None)
+        size_selected = int(len(df[df.subject == client])*0.5)
+        data = df[df.subject == client].sort_values(by='timestamp').head(n=size_selected)
         activities = data.activity.unique()
         for activity in activities:
             df_f = data[data.activity == activity]
@@ -246,7 +248,7 @@ def split_dataset(data: dict, client_mapping_train: dict, client_mapping_test: d
     return WISDMDataset(train_data), WISDMDataset(test_data), {'train': mapping_train, 'test': mapping_test}
 
 
-def load_dataset(window=100, overlap=0.7, reprocess=True, split=0.8, modality='watch'):
+def load_dataset(window=200, overlap=0.5, reprocess=True, split=0.8, modality='watch'):
     # antes window 25 rsmprop
     """
     Load the WISDM dataset, either from disk or by reprocessing it based on the specified parameters.
@@ -286,7 +288,8 @@ def load_dataset(window=100, overlap=0.7, reprocess=True, split=0.8, modality='w
             'client_mapping': idx,
             'split': split
         }, "WISDM/" + f'wisdm_{modality}.dt')
-    data = torch.load("WISDM/"+ f'wisdm_{modality}.dt')
+    print("salvar: ", "WISDM/" + f'wisdm_{modality}.dt')
+    data = torch.load("WISDM/"+ f'wisdm_{modality}.dt', weights_only=False)
     # print("ler data")
     # exit()
     return data

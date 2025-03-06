@@ -47,6 +47,8 @@ class clientAVG(Client):
                     x[0] = x[0].to(self.device)
                 else:
                     x = x.to(self.device)
+                if self.dataset[m] == "Gowalla":
+                    x = torch.tensor(x, dtype=torch.long).to(self.device)
                 y = torch.from_numpy(np.array(y).astype(int)).to(self.device)
                 y = y.type(torch.LongTensor).to(self.device)
                 if self.train_slow:

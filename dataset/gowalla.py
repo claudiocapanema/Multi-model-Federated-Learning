@@ -197,12 +197,13 @@ def create_dataset(df, clients=None, window=200, overlap=0.5):
     for client in tqdm(clients):
         c_idxs[client] = []
         df['datetime'] = pd.to_datetime(df['datetime'], infer_datetime_format=True)
-        data = df[df.userid == client].sort_values(by='datetime').sample(frac=1, random_state=0)
+        data = df[df.userid == client].sort_values(by='datetime')
         data = data.sort_values(by='datetime', ascending=True)
         dur_list = []
         dis_list = []
         hour_list = []
         category_list = []
+        type_of_day_list = []
         for i in range(1, len(data)):
             lat_a = data['lat'].iloc[i]
             lng_a = data['lng'].iloc[i]
@@ -212,9 +213,13 @@ def create_dataset(df, clients=None, window=200, overlap=0.5):
             dis = round(haversine_np(lat_a, lng_a, lat_b, lng_b), 3)
             if dur > 48 or dis > 50:
                 continue
+            type_of_day = 0 if data['datetime'].dt.weekday.iloc[i] <= 4 else 1
+            hour = data['hour'].iloc[i]
+            hour = hour if type_of_day < 24 else hour + 24
+            type_of_day_list.append(type_of_day)
             dis_list.append(dis)
             dur_list.append(dur)
-            hour_list.append(data['hour'].iloc[i])
+            hour_list.append(hour)
             category_list.append(data['category_id'].iloc[i])
 
         data = pd.DataFrame({'hour': hour_list, 'category_id': category_list, 'dur': dur_list, 'dis': dis_list})
@@ -288,7 +293,7 @@ def split_dataset(data: dict, client_mapping_train: dict, client_mapping_test: d
     return GowallaDataset(train_data), GowallaDataset(test_data), {'train': mapping_train, 'test': mapping_test}
 
 
-def load_dataset_gowalla(window=6, overlap=0.5, reprocess=True, split=0.8, modality='watch'):
+def load_dataset_gowalla(window=10, overlap=0.7, reprocess=True, split=0.8, modality='watch'):
     """
     Load the WISDM dataset, either from disk or by reprocessing it based on the specified parameters.
 
@@ -327,8 +332,8 @@ def load_dataset_gowalla(window=6, overlap=0.5, reprocess=True, split=0.8, modal
             'test': test_dataset,
             'client_mapping': idx,
             'split': split
-        }, "gowalla/gowalla_checkins_texas_preprocessed.csv")
-    data = torch.load("gowalla/gowalla_checkins_texas_preprocessed.csv")
+        }, "gowalla/gowalla_checkins_texas_preprocessed.dt")
+    data = torch.load("gowalla/gowalla_checkins_texas_preprocessed.dt", weights_only=False)
     # print("ler data")
     # exit()
     return data

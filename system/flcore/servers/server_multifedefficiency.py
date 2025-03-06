@@ -75,7 +75,7 @@ class MultiFedEfficiency(Server):
         self.clients_rounds_since_last_training = {m: np.array([0 for i in range(self.num_clients)]) for m in range(self.M)}
         self.clients_rounds_since_last_training_probability = {m: np.array([0 for i in range(self.num_clients)]) for m in range(self.M)}
         self.rounds_client_trained_model = {cid: {m: [] for m in range(self.M)} for cid in range(self.num_clients)}
-        self.minimum_training_clients_per_model = {0.1: 1, 0.2: 2, 0.3: 3}[self.join_ratio]
+        self.minimum_training_clients_per_model = {0.1: 1, 0.2: 2, 0.3: 3, 0.5: 3}[self.join_ratio]
         self.minimum_training_clients_per_model_percentage = self.minimum_training_clients_per_model / self.num_join_clients
         self.use_cold_start_m = np.array([True for m in range(self.M)])
         self.cold_start_max_non_iid_level = 1
@@ -132,9 +132,14 @@ class MultiFedEfficiency(Server):
 
         return prob, use_cold_start
 
-    def random_selection(self):
+    def random_selection(self, t):
 
         try:
+            g = torch.Generator()
+            g.manual_seed(t)
+            np.random.seed(t)
+            random.seed(t)
+
             budget = int(self.num_join_clients / self.M)
             cm = [budget] * self.M
 
@@ -143,20 +148,23 @@ class MultiFedEfficiency(Server):
                     cm[m] = int(max(self.minimum_training_clients_per_model,
                                                       cm[m] - self.models_semi_convergence_count[m]))
 
-            free_budget = self.num_join_clients - np.sum(cm)
-            k_nt = len(np.argwhere(self.need_for_training >= 0.5))
-            free_budget_k = int(int(free_budget * self.free_budget_distribution_factor) / k_nt)
-            rest = free_budget - free_budget_k * k_nt
+            print("cm i: ", cm)
 
-            print("Free budget: ", free_budget, " k nt: ", k_nt, " Free budget k: ", free_budget_k, " resto: ", rest)
+            if self.free_budget_distribution_factor > 0:
+                free_budget = self.num_join_clients - np.sum(cm)
+                k_nt = len(np.argwhere(self.need_for_training >= 0.5))
+                free_budget_k = int(int(free_budget * self.free_budget_distribution_factor) / k_nt)
+                rest = free_budget - free_budget_k * k_nt
 
-            for m in range(self.M):
-                if self.need_for_training[m] >= 0.5:
-                    cm[m] = int(cm[m] + free_budget_k)
-                    if rest > 0:
-                        cm[m] += 1
-                        rest -= 1
-                        rest = max(rest, 0)
+                print("Free budget: ", free_budget, " k nt: ", k_nt, " Free budget k: ", free_budget_k, " resto: ", rest)
+
+                for m in range(self.M):
+                    if self.need_for_training[m] >= 0.5 and cm[m] == budget:
+                        cm[m] = int(cm[m] + free_budget_k)
+                        if rest > 0:
+                            cm[m] += 1
+                            rest -= 1
+                            rest = max(rest, 0)
 
             selected_clients = list(np.random.choice(self.available_clients, self.num_join_clients, replace=False))
             selected_clients = [i.id for i in selected_clients]
@@ -164,12 +172,13 @@ class MultiFedEfficiency(Server):
             selected_clients_m = [None] * self.M
 
             print("a : ", selected_clients_m)
-            print("b selec: ", selected_clients)
+            print("random: ", selected_clients)
             print("cm: ", cm)
             i = 0
-            for m in range(self.M):
+            reverse_list = [0, 1, 2]
+            for m in reverse_list:
                 j = i + cm[m]
-                selected_clients_m[m] = selected_clients[i:j]
+                selected_clients_m[m] = selected_clients[i: j]
                 i = j
 
             return selected_clients_m
@@ -459,8 +468,6 @@ class MultiFedEfficiency(Server):
                     if self.rounds_since_last_semi_convergence[m] >= 4:
                         if len(idxs) <= int(self.tw[m] * upper) and len(idxs) >= int(self.tw[m] * lower):
                             self.rounds_since_last_semi_convergence[m] = 0
-                            # idxs_rounds = np.array(idxs, dtype=np.int32).flatten()
-                            # print("indices: ", idxs_rounds, idxs_rounds[-1])
                             print("a, remaining_clients_per_model, total_clientsb: ", self.training_clients_per_model_per_round[m])
                             self.models_semi_convergence_rounds_n_clients[m].append({'round': t - 2, 'n_training_clients':
                                 self.training_clients_per_model_per_round[m][t - 2]})
@@ -547,7 +554,7 @@ class MultiFedEfficiency(Server):
 
             print("Semi convergências: ", self.models_semi_convergence_count)
             # selected_clients_m = self.weighted_selection(t)
-            selected_clients_m = self.random_selection()
+            selected_clients_m = self.random_selection(t)
 
             selected_clients = list(np.random.choice(self.available_clients, self.num_join_clients, replace=False))
             # selected_clients = [i.id for i in selected_clients]
@@ -655,14 +662,11 @@ class MultiFedEfficiency(Server):
                 for i in range(len(self.selected_clients[m])):
                     client_id = self.selected_clients[m][i]
                     self.clients_training_round_per_model[client_id][m].append(t)
-                    self.clients[client_id].train(m, self.global_model[m], self.clients_cosine_similarities_with_current_model[m][client_id])
+                    self.clients[client_id].train(m, self.global_model[m], self.clients_cosine_similarities_with_current_model[m][client_id], t)
                     self.clients_training_count[m][client_id] += 1
                     self.current_training_class_count[m] += self.clients[client_id].train_class_count[m]
 
-                if t%self.eval_gap == 0:
-                    print(f"\n-------------Round number: {t}-------------")
-                    print("\nEvaluate global model for ", self.dataset[m])
-                    self.evaluate(m, t=t)
+
 
                 self.current_training_class_count[m] = np.round(self.current_training_class_count[m] / np.sum(self.current_training_class_count[m]), 2)
                 # print("current training class count ", self.current_training_class_count[m])
@@ -674,6 +678,12 @@ class MultiFedEfficiency(Server):
             if self.dlg_eval and t%self.dlg_gap == 0:
                 self.call_dlg(t)
             self.aggregate_parameters()
+
+            for m in range(len(self.selected_clients)):
+                if t%self.eval_gap == 0:
+                    print(f"\n-------------Round number: {t}-------------")
+                    print("\nEvaluate global model for ", self.dataset[m])
+                    self.evaluate(m, t=t)
 
             self.Budget.append(time.time() - s_t)
             print('-'*25, 'time cost', '-'*25, self.Budget[-1])

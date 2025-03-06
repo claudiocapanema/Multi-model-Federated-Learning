@@ -4,40 +4,12 @@ This project extends [PFLlib (Personalized Federated Learning Algorithm Library)
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPL_v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html) [![arXiv](https://img.shields.io/badge/arXiv-2312.04992-b31b1b.svg)](https://arxiv.org/abs/2312.04992)
 
-![](./structure.png)
-Figure 1: An Example for FedAvg. You can create a scenario using `generate_DATA.py` and run an algorithm using `main.py`, `clientNAME.py`, and `serverNAME.py`. 
+## MEFL example
 
-***We expose this user-friendly algorithm library (with an integrated evaluation platform) for beginners who intend to start federated learning (FL) study.***
+```bash
 
-- ***34 traditional FL ([tFL](#traditional-fl-tfl)) or personalized FL ([pFL](#personalized-fl-pfl)) algorithms, 3 scenarios, and 20 datasets**.*
+python main.py --num_clients=60 --global_rounds=25 --algorithm="MultiFedAvg" --dataset="ImageNet" --dataset="WISDM-W" --dataset="Gowalla" --model="cnn_a" --model="gru" --model="lstm" --join_ratio=0.3 --alpha=0.1 --alpha=0.1 --alpha=0.1
 
-- Some **experimental results** are avalible [here](#experimental-results). 
-
-- Refer to [this guide](#how-to-start-simulating-examples-for-fedavg) to learn how to use it.
-
-- *This library can simulate scenarios using the 4-layer CNN on Cifar100 for **500 clients** on **one NVIDIA GeForce RTX 3090 GPU card** with only **5.08GB GPU memory** cost.*
-
-- PFLlib primarily focuses on data (statistical) heterogeneity. For algorithms and an evaluation platform that address **both data and model heterogeneity**, please refer to our extended project **[Heterogeneous Federated Learning (HtFL)](https://github.com/TsingZ0/HtFL)**.
-
-- As we strive to meet diverse user demands, frequent updates to the project may alter default settings and scenario creation codes, affecting experimental results.
-  
-- [Closed issues](https://github.com/TsingZ0/PFLlib/issues?q=is%3Aissue+is%3Aclosed) may help you a lot.
-
-- When submitting pull requests, please provide sufficient *instructions* and *examples* in the comment box. 
-
-The origin of the **statistical heterogeneity** phenomenon is the personalization of users, who generate non-IID (not Independent and Identically Distributed) and unbalanced data. With statistical heterogeneity existing in the FL scenario, a myriad of approaches have been proposed to crack this hard nut. In contrast, the personalized FL (pFL) may take advantage of the statistically heterogeneous data to learn the personalized model for each user. 
-
-Thanks to [@Stonesjtu](https://github.com/Stonesjtu/pytorch_memlab/blob/d590c489236ee25d157ff60ecd18433e8f9acbe3/pytorch_memlab/mem_reporter.py#L185), this library can also record the **GPU memory usage** for the model. By using the package [opacus](https://opacus.ai/), we introduce **DP (differential privacy)** into this library (please refer to `./system/flcore/clients/clientavg.py` for example). Following [FedCG](https://www.ijcai.org/proceedings/2022/0324.pdf), we also introduce the **[DLG (Deep Leakage from Gradients)](https://papers.nips.cc/paper_files/paper/2019/hash/60a6c4002cc7b29142def8871531281a-Abstract.html) attack** and **PSNR (Peak Signal-to-Noise Ratio) metric** to evaluate the privacy-preserving ability of tFL/pFL algorithms (please refer to `./system/flcore/servers/serveravg.py` for example). *Now we can train on some clients and evaluate performance on other new clients by setting `args.num_new_clients` in `./system/main.py`. Note that not all the tFL/pFL algorithms support this feature.*
-
-**Citation**
-
-```
-@article{zhang2023pfllib,
-  title={PFLlib: Personalized Federated Learning Algorithm Library},
-  author={Zhang, Jianqing and Liu, Yang and Hua, Yang and Wang, Hao and Song, Tao and Xue, Zhengui and Ma, Ruhui and Cao, Jian},
-  journal={arXiv preprint arXiv:2312.04992},
-  year={2023}
-}
 ```
 
 

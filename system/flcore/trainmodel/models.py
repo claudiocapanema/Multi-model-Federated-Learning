@@ -786,7 +786,12 @@ class LSTM(torch.nn.Module):
             self.output_size = num_classes
             self.time_length = sequence_length
 
-            self.gru = nn.LSTM(self.input_size, self.hidden_size, self.num_layers, batch_first=True)
+            self.embedding_category = nn.Embedding(num_embeddings=7, embedding_dim=3)
+            self.embedding_hour = nn.Embedding(num_embeddings=48, embedding_dim=10)
+            self.embedding_distance = nn.Embedding(num_embeddings=50, embedding_dim=10)
+            self.embedding_duration = nn.Embedding(num_embeddings=48, embedding_dim=10)
+
+            self.gru = nn.LSTM(33, self.hidden_size, self.num_layers, batch_first=True)
             self.dp = nn.Dropout(0.5)
             self.fc = nn.Linear(self.time_length * self.hidden_size, self.output_size, bias=True)
         except Exception as e:
@@ -799,11 +804,36 @@ class LSTM(torch.nn.Module):
             np.random.seed(0)
             torch.manual_seed(0)
             # print("entrada: ", x.shape)
-            x, h = self.gru(x)
+            x = x.int()
+
+            category, hour, distance, duration = torch.split(x, [1, 1, 1, 1], dim=-1)
+            # category = x[0]
+            # hour = x[1]
+            # distance = x[2]
+            # duration = x[3]
+            # print("dim en: ", category.shape, hour.shape, distance.shape, duration.shape)
+            # print("valores: ", hour)
+            category_embbeded = self.embedding_category(category)
+            hour_embedded = self.embedding_hour(hour)
+            distance_embedded = self.embedding_distance(distance)
+            duration_embedded = self.embedding_duration(duration)
+
+            # Concatenando os embeddings com os dados reais
+            # print("dim: ", category_embbeded.shape, hour_embedded.shape, distance_embedded.shape, duration_embedded.shape)
+            # print("dev: ", category_embbeded.device, hour_embedded.device, distance_embedded.device, duration_embedded.device)
+            combined_embedded = torch.cat((category_embbeded, hour_embedded, distance_embedded, duration_embedded), dim=-1)
+            combined_embedded = combined_embedded.squeeze()
+            # print("co dim: ", combined_embedded.shape)
+            x, h = self.gru(combined_embedded)
+            # print("sai gru: ", x.shape)
             x = nn.Flatten()(x)
             x = self.dp(x)
             # print("e2: ", x.shape)
+            if x.shape[1] == 1:
+                x = x.rot90(1, dims=(0, 1))
+            # print("e3: ", x.shape)
             out = self.fc(x)
+            # print("sai lstm: ", out.shape)
             return out
         except Exception as e:
             print("LSTM forward")

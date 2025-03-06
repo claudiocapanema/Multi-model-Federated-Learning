@@ -119,24 +119,24 @@ class Client(object):
                 # self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.0005)) # 102 rounds
                 # self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.001)) antes
 
-                self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=0.0001))
+                self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
             elif self.dataset[m] in ['Gowalla']:
                 # self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.0001))
                 # self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.0001)) # loss constante não aprende
                 # self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.001))  # bom para alpha 10# 101 e 102 rounds
                 if float(self.alpha[m]) == 0.1:
-                    self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.0001))
+                    self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
                 elif float(self.alpha[m]) == 1.0:
-                    self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.001))
+                    self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
                 elif float(self.alpha[m]) > 1.0:
-                    self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.0001))
+                    self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
             elif self.dataset[m] in ["Tiny-ImageNet", "ImageNet", "ImageNet_v2"]:
                 # self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=0.0001)) # bom para alpha 0.1
                 # self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.001))  # aprende pouco mas não dá overfitting
                 if float(self.alpha[m]) == 0.1:
-                    self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=0.0001))
+                    self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
                 elif float(self.alpha[m]) == 1.0:
-                    self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=0.0001)) # funciona bem
+                    self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01)) # funciona bem
                 elif float(self.alpha[m]) > 1.0:
                     self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01)) # sgd 0.01 bom 3% diferença
 
@@ -539,6 +539,7 @@ class Client(object):
         random.seed(self.id)
         np.random.seed(self.id)
         torch.manual_seed(self.id)
+        self.set_parameters(m, global_model)
         if bool(self.args.concept_drift):
             alpha = float(
                 self.experiment_config_df.query("""Dataset == '{}' and Round == {}""".format(self.dataset[m], t))[
@@ -579,6 +580,8 @@ class Client(object):
                     x[0] = x[0].to(self.device)
                 else:
                     x = x.to(self.device)
+                if self.dataset[m] == "Gowalla":
+                    x = torch.tensor(x, dtype=torch.long).to(self.device)
                 contab = contab + 1
                 if type(y) == tuple:
                     y = torch.from_numpy(np.array(list(y), dtype=np.int32))
@@ -680,6 +683,8 @@ class Client(object):
                     x[0] = x[0].to(self.device)
                 else:
                     x = x.to(self.device)
+                if self.dataset[m] == "Gowalla":
+                    x = torch.tensor(x, dtype=torch.long).to(self.device)
                 if type(y) == tuple:
                     y = torch.from_numpy(np.array(list(y), dtype=np.int32))
                 y = y.type(torch.LongTensor).to(self.device)

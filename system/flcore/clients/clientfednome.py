@@ -27,12 +27,13 @@ class clientFedNome(Client):
     def __init__(self, args, id, **kwargs):
         super().__init__(args, id,  **kwargs)
 
-    def train(self, m, global_model, client_cosine_similarity):
+    def train(self, m, global_model, client_cosine_similarity, t):
+        self.last_training_round = t
         trainloader = self.trainloader[m]
         self.set_parameters(m, global_model)
         self.model[m].to(self.device)
         self.model[m].train()
-        
+
         start_time = time.time()
 
         max_local_epochs = self.local_epochs
@@ -41,12 +42,13 @@ class clientFedNome(Client):
 
         for epoch in range(max_local_epochs):
             for i, (x, y) in enumerate(trainloader):
+                # print(x.shape, y.shape)
+                # exit()
                 if type(x) == type([]):
                     x[0] = x[0].to(self.device)
                 else:
                     x = x.to(self.device)
-                if type(y) == tuple:
-                    y = torch.from_numpy(np.array(list(y), dtype=np.int32))
+                y = torch.from_numpy(np.array(y).astype(int)).to(self.device)
                 y = y.type(torch.LongTensor).to(self.device)
                 if self.train_slow:
                     time.sleep(0.1 * np.abs(np.random.rand()))
