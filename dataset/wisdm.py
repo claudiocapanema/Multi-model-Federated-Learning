@@ -159,7 +159,7 @@ def get_processed_dataframe(reprocess=False, modality='watch'):
     return processed_df
 
 
-def create_dataset(df, clients=None, window=200, overlap=0.5):
+def create_dataset(df, clients=None, window=200, overlap=0.7):
     """
     Create a dataset from the input DataFrame based on the specified parameters.
 
@@ -181,7 +181,7 @@ def create_dataset(df, clients=None, window=200, overlap=0.5):
     for client in tqdm(clients):
         c_idxs[client] = []
         # data = df[df.subject == client].sort_values(by='timestamp').sample(frac=0.5, random_state=None)
-        size_selected = int(len(df[df.subject == client])*0.5)
+        size_selected = int(len(df[df.subject == client]))
         data = df[df.subject == client].sort_values(by='timestamp').head(n=size_selected)
         activities = data.activity.unique()
         for activity in activities:
@@ -217,7 +217,7 @@ def create_dataset(df, clients=None, window=200, overlap=0.5):
                 # #        'y_gyro', 'z_gyro'],
                 # print(" iloc ", df_f.iloc[0:50])
                 # exit()
-                X.append(df_f[df_f.columns[2:10]].iloc[i:i + window].to_numpy().tolist())
+                X.append(df_f[df_f.columns[3:10]].iloc[i:i + window].to_numpy().tolist())
                 Y.append(activity)
                 c_idxs[client].append(idx)
                 idx += 1

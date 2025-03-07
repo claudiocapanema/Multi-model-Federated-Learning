@@ -196,7 +196,7 @@ class Client(object):
             for i in range(len(x)):
                 row = x[i]
                 if dataset_name != 'Cologne':
-                    new_x.append(row[:, [1, 2, 3, 4, 5, 6]])
+                    new_x.append(row[:, [0, 1, 2, 3, 4, 5]])
                 else:
                     new_x.append(row[:, [1, 2]])
 
@@ -350,11 +350,12 @@ class Client(object):
             transmforms = {'train': transforms.Compose(
                     [
 
-                        transforms.Resize((32, 32)),
-                        transforms.RandomRotation(10),  # Rotates the image to a specified angel
+                        transforms.RandomResizedCrop(64),
+                        transforms.RandomHorizontalFlip(),
                         transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
                         transforms.ToTensor(),
-                        transforms.Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
+                        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
                         # transforms.Resize((32, 32)),  # resises the image so it can be perfect for our model.
                         # transforms.RandomHorizontalFlip(),  # FLips the image w.r.t horizontal axis
                         # transforms.RandomRotation(10),  # Rotates the image to a specified angel
@@ -367,9 +368,11 @@ class Client(object):
                 ), 'test': transforms.Compose(
                     [
 
-                        transforms.Resize((32, 32)),
+                        transforms.RandomResizedCrop(64),
+                        transforms.RandomHorizontalFlip(),
                         transforms.ToTensor(),
-                        transforms.Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
+                        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
                         # transforms.Resize((32, 32)),
                         # transforms.ToTensor(),
                         # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))

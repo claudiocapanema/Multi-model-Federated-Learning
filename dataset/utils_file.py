@@ -356,14 +356,9 @@ def save_dataloaders_gowalla(dataset_name="Gowalla", num_clients=10, num_classes
                  class_per_client=2,
                  batch_size=10, train_size=0.8, alpha=0.1, dataset_dir="./dataset/", sim_id=0):
 
-    num_classes = 12
-
-    # transform = get_transform(dataset_name)
-
     dataset = load_dataset_gowalla(reprocess=True)
     num_classes = 7
     partition_type = 'dirichlet'
-    # dataset_name = 'WISDM-WATCH'
     client_num_per_round = 6
 
     partition, client_num_in_total, client_num_per_round = get_partition(partition_type,

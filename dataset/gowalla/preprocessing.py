@@ -1,7 +1,9 @@
 import json
 import pandas as pd
 
-base = "/home/claudio/Documentos/gowalla/"
+import geopandas as gpd
+
+base = "/media/claudio/e5069d0b-8c3d-4850-8e10-319862c4c082/home/claudio/Documentos/gowalla/"
 
 def p_spot(df):
 
@@ -16,7 +18,7 @@ def p_spot(df):
         urls.append(e["url"].replace("/categories/", ""))
         subcategories.append(e["name"])
 
-    return pd.DataFrame({"placeid": df["placeid"].to_numpy(), "id_subcategory": urls, "subcategory": subcategories}).drop_duplicates()
+    return pd.DataFrame({"placeid": df["placeid"].to_numpy(), "id_subcategory": urls, "subcategory": subcategories, "lng": df["lng"].to_numpy(), "lat": df["lat"].to_numpy()}).drop_duplicates()
 
 def category_structure(df):
 
@@ -39,16 +41,15 @@ def category_structure(df):
     return pd.DataFrame({"category": categories, "id_subcategory": subcategories}).drop_duplicates()
 
 
-c = json.loads("/home/claudio/Documentos/annotations_trainval2017/annotations/instances_train2017.json")
-print(c)
-exit()
+
+
 
 df = pd.read_csv(base + "gowalla_checkins.csv")
 df['datetime'] = pd.to_datetime(df['datetime'])
 print(df)
-spot = pd.read_csv(base + "gowalla_spots_subset1.csv")[["id", "spot_categories"]]
+spot = pd.read_csv(base + "gowalla_spots_subset1.csv")[["id", "spot_categories", "lng", "lat"]]
 spot["placeid"] = spot["id"].to_numpy()
-spot = spot[["placeid", "spot_categories"]]
+spot = spot[["placeid", "spot_categories", "lng", "lat"]]
 spot = p_spot(spot)
 df_json = pd.read_json(base + "gowalla_category_structure.json")
 df_json = category_structure(df_json)
@@ -59,3 +60,30 @@ df = df.join(spot.set_index("placeid"), on="placeid", how="inner")
 print(spot)
 print(df_json)
 print(df)
+
+df = gpd.GeoDataFrame(
+    df, geometry=gpd.points_from_xy(df.lng, df.lat), crs="EPSG:4326"
+)
+
+
+
+us_filnname = "/media/claudio/e5069d0b-8c3d-4850-8e10-319862c4c082/home/claudio/Documentos/gowalla/us_states/cb_2018_us_state_500k.shp"
+gdf = gpd.GeoDataFrame.from_file(us_filnname).query("STUSPS == 'TX'")
+
+df = df.sjoin(gdf, how="inner", predicate="within")
+
+print(df.columns)
+
+df = df[['userid', 'placeid', 'datetime', 'id_subcategory', 'subcategory', 'category', 'STUSPS', 'NAME', 'lat', 'lng']]
+
+print(df)
+
+df['datetime'] = pd.to_datetime(df['datetime'], infer_datetime_format=True)
+df['hour'] = df['datetime'].dt.hour + (df['datetime'].dt.dayofweek // 5) * 24
+
+print(df)
+
+df.to_csv(base + "gowalla_checkins_texas.csv", index=False)
+
+
+

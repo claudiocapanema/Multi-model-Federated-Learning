@@ -203,16 +203,19 @@ def create_dataset(df, clients=None, window=200, overlap=0.5):
         dis_list = []
         hour_list = []
         category_list = []
+        next_category_list = []
         type_of_day_list = []
-        for i in range(1, len(data)):
+        for i in range(1, len(data)-1):
             lat_a = data['lat'].iloc[i]
             lng_a = data['lng'].iloc[i]
             lat_b = data['lat'].iloc[i - 1]
             lng_b = data['lng'].iloc[i - 1]
             dur = round((data['datetime'].iloc[i] - data['datetime'].iloc[i - 1]).total_seconds() / 3600, 3)
             dis = round(haversine_np(lat_a, lng_a, lat_b, lng_b), 3)
-            if dur > 48 or dis > 50:
-                continue
+            if dur > 48:
+                dur = 48
+            if dis > 50:
+                dis = 50
             type_of_day = 0 if data['datetime'].dt.weekday.iloc[i] <= 4 else 1
             hour = data['hour'].iloc[i]
             hour = hour if type_of_day < 24 else hour + 24
@@ -221,48 +224,22 @@ def create_dataset(df, clients=None, window=200, overlap=0.5):
             dur_list.append(dur)
             hour_list.append(hour)
             category_list.append(data['category_id'].iloc[i])
+            next_category_list.append(data['category_id'].iloc[i + 1])
 
-        data = pd.DataFrame({'hour': hour_list, 'category_id': category_list, 'dur': dur_list, 'dis': dis_list})
+        data = pd.DataFrame({'hour': hour_list, 'category_id': category_list, 'dur': dur_list, 'dis': dis_list, 'next_category_id': next_category_list})
+        data['hour'] = data['hour'].astype(int)
+        data['category_id'] = data['category_id'].astype(int)
+        data['next_category_id'] = data['next_category_id'].astype(int)
 
 
         categories = data.category_id.unique()
-        for category in categories:
-            df_f = data[data.category_id == category]
-            for i in range(window, len(df_f), int(window * overlap)):
-                if i + window > len(df_f):
-                    continue
-                # x_data = df_f[df_f.columns[3:10]].iloc[i:i + window].to_numpy().tolist()
-                # print(x_data)
-                # print()
-                # print(x_data[2])
-                # print(x_data[5])
-                # fft_columns = ['x_acc', 'y_acc', 'z_acc', 'x_gyro', 'y_gyro', 'z_gyro']
-                # T = df_f['timestamp'].max() - df_f['timestamp'].min()
-                # n = len(df_f)
-                # delta_t = T/n
-
-                # for column in fft_columns:
-                #
-                #     fourier = np.absolute(scipy.fft.fft(df_f[column].to_numpy()))
-                #     # N = len(df_f[column].to_numpy())
-                #     # fourier = np.abs(fourier[0:N])
-                #     # print(pd.Series(fourier).describe())
-                #     # print(len(fourier), len(df_f))
-                #     # result = seasonal_decompose(df_f[column], model='additive', period=1)
-                #     # trend = result.trend
-                #     # seasonal = result.seasonal
-                #     # residual = result.resid
-                #     # print(seasonal, type(seasonal))
-                #     df_f[column] = fourier
-                # print("colunas: ", df_f.columns)
-                # # ['subject', 'activity', 'timestamp', 'x_acc', 'y_acc', 'z_acc', 'x_gyro',
-                # #        'y_gyro', 'z_gyro'],
-                # print(" iloc ", df_f.iloc[0:50])
-                # exit()
-                X.append(df_f[['category_id', 'hour', 'dis', 'dur']].iloc[i:i + window].to_numpy().tolist())
-                Y.append(category)
-                c_idxs[client].append(idx)
-                idx += 1
+        for i in range(window, len(data), int(window * overlap)):
+            if i + window > len(data):
+                continue
+            X.append(data[['category_id', 'hour', 'dis', 'dur']].iloc[i:i + window].to_numpy().tolist())
+            Y.append(data['next_category_id'].iloc[i + window - 1])
+            c_idxs[client].append(idx)
+            idx += 1
     #
     # print(X)
     # exit()
@@ -316,6 +293,7 @@ def load_dataset_gowalla(window=10, overlap=0.7, reprocess=True, split=0.8, moda
         print(processed_df)
         clients = list(range(1600, 1651))
         data, idx = create_dataset(processed_df, clients=clients, window=window, overlap=overlap)
+        pd.DataFrame({"x": data[0], "y": data[1]}).to_csv(f"gowalla/gowalla_texas_sequences_window={window}_overlap={overlap}.csv", index=False)
 
         # print(data['X'][0].shape, data['X'][0][0])
         # exit()
