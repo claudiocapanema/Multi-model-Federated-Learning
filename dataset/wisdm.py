@@ -272,6 +272,8 @@ def load_dataset(window=200, overlap=0.5, reprocess=True, split=0.8, modality='w
         print(processed_df)
         clients = list(range(1600, 1651))
         data, idx = create_dataset(processed_df, clients=clients, window=window, overlap=overlap)
+        pd.DataFrame({"x": data[0], "y": data[1]}).to_csv(
+            f"WISDM/wisdm_{modality}_sequences_window={window}_overlap={overlap}.csv", index=False)
         # print(data['X'][0].shape, data['X'][0][0])
         # exit()
         dataset = WISDMDataset(data)
