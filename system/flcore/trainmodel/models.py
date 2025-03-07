@@ -774,24 +774,25 @@ class GRU(torch.nn.Module):
 # ====================================================================================================================
 
 class LSTM(torch.nn.Module):
-    def __init__(self, input_shape, num_layers=1, hidden_size=2, sequence_length=28, num_classes=10):
+    def __init__(self, input_shape, device, num_layers=1, hidden_size=2, sequence_length=28, num_classes=10):
         super().__init__()
         try:
             random.seed(0)
             np.random.seed(0)
             torch.manual_seed(0)
             self.input_size = input_shape
+            self.device = device
             self.hidden_size = hidden_size
             self.num_layers = num_layers
             self.output_size = num_classes
             self.time_length = sequence_length
 
-            self.embedding_category = nn.Embedding(num_embeddings=7, embedding_dim=3)
-            self.embedding_hour = nn.Embedding(num_embeddings=48, embedding_dim=10)
-            self.embedding_distance = nn.Embedding(num_embeddings=50, embedding_dim=10)
-            self.embedding_duration = nn.Embedding(num_embeddings=48, embedding_dim=10)
+            self.embedding_category = nn.Embedding(num_embeddings=7, embedding_dim=6)
+            self.embedding_hour = nn.Embedding(num_embeddings=48, embedding_dim=15)
+            self.embedding_distance = nn.Embedding(num_embeddings=51, embedding_dim=15)
+            self.embedding_duration = nn.Embedding(num_embeddings=49, embedding_dim=15)
 
-            self.gru = nn.LSTM(33, self.hidden_size, self.num_layers, batch_first=True)
+            self.lstm = nn.LSTM(51, self.hidden_size, self.num_layers, batch_first=True)
             self.dp = nn.Dropout(0.5)
             self.fc = nn.Linear(self.time_length * self.hidden_size, self.output_size, bias=True)
         except Exception as e:
@@ -805,13 +806,15 @@ class LSTM(torch.nn.Module):
             torch.manual_seed(0)
             # print("entrada: ", x.shape)
             x = x.int()
+            if self.device == 'cuda':
+                x = x.int().cuda()
 
             category, hour, distance, duration = torch.split(x, [1, 1, 1, 1], dim=-1)
             # category = x[0]
             # hour = x[1]
             # distance = x[2]
             # duration = x[3]
-            # print("dim en: ", category.shape, hour.shape, distance.shape, duration.shape)
+            #print("dim en: ", category.shape, hour.shape, distance.shape, duration.shape)
             # print("valores: ", hour)
             category_embbeded = self.embedding_category(category)
             hour_embedded = self.embedding_hour(hour)
@@ -819,21 +822,21 @@ class LSTM(torch.nn.Module):
             duration_embedded = self.embedding_duration(duration)
 
             # Concatenando os embeddings com os dados reais
-            # print("dim: ", category_embbeded.shape, hour_embedded.shape, distance_embedded.shape, duration_embedded.shape)
-            # print("dev: ", category_embbeded.device, hour_embedded.device, distance_embedded.device, duration_embedded.device)
+            #print("dim: ", category_embbeded.shape, hour_embedded.shape, distance_embedded.shape, duration_embedded.shape)
+            #print("dev: ", category_embbeded.device, hour_embedded.device, distance_embedded.device, duration_embedded.device)
             combined_embedded = torch.cat((category_embbeded, hour_embedded, distance_embedded, duration_embedded), dim=-1)
             combined_embedded = combined_embedded.squeeze()
             # print("co dim: ", combined_embedded.shape)
-            x, h = self.gru(combined_embedded)
-            # print("sai gru: ", x.shape)
+            x, h = self.lstm(combined_embedded)
+            #print("sai gru: ", x.shape)
             x = nn.Flatten()(x)
             x = self.dp(x)
-            # print("e2: ", x.shape)
+            #print("e2: ", x.shape)
             if x.shape[1] == 1:
                 x = x.rot90(1, dims=(0, 1))
-            # print("e3: ", x.shape)
+            #print("e3: ", x.shape)
             out = self.fc(x)
-            # print("sai lstm: ", out.shape)
+            #print("sai lstm: ", out.shape)
             return out
         except Exception as e:
             print("LSTM forward")

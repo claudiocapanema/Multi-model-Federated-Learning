@@ -171,9 +171,9 @@ def run(args):
                     model = Digit5CNN().to(args.device)
                 elif dt in ["ImageNet100", "ImageNet", "ImageNet_v2"]:
                     # model = TinyImageNetCNN().to(args.device)
-                    model = FedAvgCNN(dataset=dt, in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
-                else:
                     model = FedAvgCNN(dataset=dt, in_features=3, num_classes=num_classes_m, dim=10816).to(args.device)
+                else:
+                    model = FedAvgCNN(dataset=dt, in_features=3, num_classes=num_classes_m, dim=1600).to(args.device)
 
             elif "cnn_b" in model_str:
                 if "GTSRB" == dt:
@@ -203,7 +203,7 @@ def run(args):
                     model = GRU(6, num_layers=1, hidden_size=2, sequence_length=200, num_classes=num_classes_m).to(args.device)
             elif model_str == "lstm":
                 if dt in ["Gowalla"]:
-                    model = LSTM(4, num_layers=1, hidden_size=1, sequence_length=10, num_classes=num_classes_m).to(
+                    model = LSTM(4, device=args.device, num_layers=1, hidden_size=1, sequence_length=10, num_classes=num_classes_m).to(
                         args.device)
 
             elif model_str == "lstm":
