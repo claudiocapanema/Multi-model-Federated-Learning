@@ -216,6 +216,8 @@ def create_dataset(df, clients=None, window=200, overlap=0.5):
                 dur = 48
             if dis > 50:
                 dis = 50
+            dur = dur / 48
+            dis = dis / 50
             type_of_day = 0 if data['datetime'].dt.weekday.iloc[i] <= 4 else 1
             hour = data['hour'].iloc[i]
             hour = hour if type_of_day < 24 else hour + 24

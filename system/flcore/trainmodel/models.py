@@ -789,10 +789,10 @@ class LSTM(torch.nn.Module):
 
             self.embedding_category = nn.Embedding(num_embeddings=7, embedding_dim=6)
             self.embedding_hour = nn.Embedding(num_embeddings=48, embedding_dim=15)
-            self.embedding_distance = nn.Embedding(num_embeddings=51, embedding_dim=15)
-            self.embedding_duration = nn.Embedding(num_embeddings=49, embedding_dim=15)
+            # self.embedding_distance = nn.Embedding(num_embeddings=51, embedding_dim=15)
+            # self.embedding_duration = nn.Embedding(num_embeddings=49, embedding_dim=15)
 
-            self.lstm = nn.LSTM(51, self.hidden_size, self.num_layers, batch_first=True)
+            self.lstm = nn.LSTM(23, self.hidden_size, self.num_layers, batch_first=True)
             self.dp = nn.Dropout(0.5)
             self.fc = nn.Linear(self.time_length * self.hidden_size, self.output_size, bias=True)
         except Exception as e:
@@ -818,14 +818,20 @@ class LSTM(torch.nn.Module):
             # print("valores: ", hour)
             category_embbeded = self.embedding_category(category)
             hour_embedded = self.embedding_hour(hour)
-            distance_embedded = self.embedding_distance(distance)
-            duration_embedded = self.embedding_duration(duration)
+            # distance_embedded = self.embedding_distance(distance)
+            # duration_embedded = self.embedding_duration(duration)
 
             # Concatenando os embeddings com os dados reais
             #print("dim: ", category_embbeded.shape, hour_embedded.shape, distance_embedded.shape, duration_embedded.shape)
             #print("dev: ", category_embbeded.device, hour_embedded.device, distance_embedded.device, duration_embedded.device)
-            combined_embedded = torch.cat((category_embbeded, hour_embedded, distance_embedded, duration_embedded), dim=-1)
+            combined_embedded = torch.cat((category_embbeded, hour_embedded), dim=-1)
+            # print("comb: ", combined_embedded.shape)
+            # if combined_embedded.shape[0] > 1:
             combined_embedded = combined_embedded.squeeze()
+            if combined_embedded.dim() == 2:
+                combined_embedded = combined_embedded.unsqueeze(0)
+            # print("dimensoes: ", combined_embedded.shape, distance.shape, duration.shape)
+            combined_embedded = torch.cat((combined_embedded, distance, duration), dim=-1)
             # print("co dim: ", combined_embedded.shape)
             x, h = self.lstm(combined_embedded)
             #print("sai gru: ", x.shape)
