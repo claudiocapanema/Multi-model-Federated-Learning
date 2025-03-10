@@ -119,7 +119,8 @@ class Client(object):
                 # self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.0005)) # 102 rounds
                 # self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.001)) antes
 
-                self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
+                # self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
+                self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.001))
             elif self.dataset[m] in ['Gowalla']:
                 # self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.0001))
                 # self.optimizer.append(torch.optim.RMSprop(self.model[m].parameters(), lr=0.0001)) # loss constante não aprende
@@ -134,11 +135,11 @@ class Client(object):
                 # self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=0.0001)) # bom para alpha 0.1
                 # self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.001))  # aprende pouco mas não dá overfitting
                 if float(self.alpha[m]) == 0.1:
-                    self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
+                    self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=0.001))
                 elif float(self.alpha[m]) == 1.0:
-                    self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01)) # funciona bem
+                    self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=0.001)) # funciona bem
                 elif float(self.alpha[m]) > 1.0:
-                    self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01)) # sgd 0.01 bom 3% diferença
+                    self.optimizer.append(torch.optim.Adam(self.model[m].parameters(), lr=0.001)) # sgd 0.01 bom 3% diferença
 
             elif self.dataset[m] in ["EMNIST", "CIFAR10"]:
                 self.optimizer.append(torch.optim.SGD(self.model[m].parameters(), lr=0.01))
