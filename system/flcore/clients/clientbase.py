@@ -20,6 +20,7 @@ import sys
 import random
 import ast
 import pickle
+import time
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -30,7 +31,12 @@ import os
 from torch.utils.data import DataLoader
 from sklearn.preprocessing import label_binarize
 from sklearn import metrics
-from utils.data_utils import read_client_data_v2, read_gtsrb
+from flwr_datasets import FederatedDataset
+from flwr_datasets.partitioner import IidPartitioner, DirichletPartitioner
+from custom_federated_dataset import CustomFederatedDataset
+from flwr_datasets.partitioner import IidPartitioner, DirichletPartitioner
+from torch.utils.data import DataLoader
+from torchvision.transforms import Compose, Resize, RandomHorizontalFlip, RandomResizedCrop, RandomAffine, ColorJitter,  Normalize, ToTensor, RandomRotation, Lambda
 
 
 class Client(object):
@@ -47,7 +53,7 @@ class Client(object):
         self.args = args
         self.M = len(args.dataset)
         self.model = copy.deepcopy(args.model)
-        self.algorithm = args.algorithm
+        self.algorithm = args.strategy
         self.dataset = args.dataset
         self.alpha = [args.alpha[i] for i in range(self.M)]
         self.device = args.device
@@ -57,6 +63,7 @@ class Client(object):
         self.num_classes = args.num_classes
         self.train_samples = [0] * self.M
         self.batch_size = [0] * self.M
+        self.num_clients = args.total_clients
         for m in range(self.M):
             if self.dataset[m] == "EMNIST":
                 self.batch_size[m] = 128
@@ -75,21 +82,21 @@ class Client(object):
         self.rounds_concept_drift = self.args.rounds_concept_drift
         if self.concept_drift:
             self.experiment_config_df = pd.read_csv(
-                """../concept_drift_configs/rounds_{}/datasets_{}/concept_drift_rounds_{}_{}/alpha_initial_{}_{}/alpha_end_{}_{}/config.csv""".format(self.args.global_rounds,
-                                                                                                                                                    self.dataset,
-                                                                                                                                                    self.rounds_concept_drift[0],
-                                                                                                                                                    self.rounds_concept_drift[1],
-                                                                                                                                                    self.alpha[0],
-                                                                                                                                                    self.alpha[1],
-                                                                                                                                                    self.alpha_end[0],
-                                                                                                                                                    self.alpha_end[1]))
+                """../concept_drift_configs/rounds_{}/datasets_{}/concept_drift_rounds_{}_{}/alpha_initial_{}_{}/alpha_end_{}_{}/config.csv""".format(self.args.number_of_rounds,
+                                                                                                                                                      self.dataset,
+                                                                                                                                                      self.rounds_concept_drift[0],
+                                                                                                                                                      self.rounds_concept_drift[1],
+                                                                                                                                                      self.alpha[0],
+                                                                                                                                                      self.alpha[1],
+                                                                                                                                                      self.alpha_end[0],
+                                                                                                                                                      self.alpha_end[1]))
         self.fraction_of_classes = [0 for m in range(self.M)]
         self.imbalance_level = [0 for m in range(self.M)]
         # check BatchNorm
         self.has_BatchNorm = False
         for m in range(self.M):
             print(self.model)
-            self.testloaderfull[m] = self.load_test_data(m, 1, batch_size=self.batch_size[m])
+            self.trainloader[m], self.testloaderfull[m] = self.load_data(self.dataset[m], self.alpha[m], self.id, self.total_clients, self.batch_size[m])
             self.trainloader[m], self.train_class_count[m] = self.load_train_data(m, 1, batch_size=self.batch_size[m])
             self.train_samples[m] = 0
             for i, sample in enumerate(self.trainloader[m]):
@@ -152,369 +159,132 @@ class Client(object):
         self.train_metrics_list_dict = [[0] * 8 for m in range(self.M)]
         self.last_training_round = 0
 
-
-        #
-        # for m in range(self.M):
-        #     trainloader, self.train_class_count[m] = self.load_train_data(m, 1)
-        #     self.fc[m] = np.nonzero(self.train_class_count[m])/len(self.train_class_count[m])
-
-        print("Cliente: ", self.id, " modelo: ", m, " train class count: ", self.train_class_count[m])
-
-    def load_wisdm(self, m, name, alpha, mode="train", batch_size=32, dataset_name=None):
-
+    def load_data(self, dataset_name: str, alpha: float, partition_id: int, num_partitions: int, batch_size: int,
+                  data_sampling_percentage: int, get_from_volume: bool = True):
         try:
-            dir_path = "../dataset/" + name + "/" + "clients_" + str(self.args.num_clients) + "/alpha_" + str(alpha) + "/"
-            filename_train = dir_path + """train/idx_train_{}.csv""".format(self.id)
-            filename_test = dir_path + "test/idx_test_{}.csv""".format(self.id)
-            cid = self.id
-            filename_train = filename_train.replace("pickle", "csv")
-            filename_test = filename_test.replace("pickle", "csv")
 
-            train = pd.read_csv(filename_train)
-            test = pd.read_csv(filename_test)
+            DATASET_INPUT_MAP = {"CIFAR10": "img", "MNIST": "image", "EMNIST": "image", "GTSRB": "image",
+                                 "Gowalla": "sequence", "WISDM-W": "sequence", "ImageNet": "image"}
+            # Only initialize `FederatedDataset` once
+            print(
+                """Loading {} {} {} {} {} {} data.""".format(dataset_name, partition_id, num_partitions, batch_size,
+                                                             data_sampling_percentage, alpha))
+            global fds
+            if not get_from_volume:
 
-            df = pd.concat([train, test], ignore_index=True)
-            x = np.array([ast.literal_eval(i) for i in df['X'].tolist()], dtype=np.float32)
-            y = np.array([i for i in df['Y'].to_numpy().astype(np.int32)])
+                if dataset_name not in fds:
+                    partitioner = DirichletPartitioner(num_partitions=num_partitions, partition_by="label",
 
-            for i in range(len(x)):
-                row = x[i]
-                indexes = row[:, 0].argsort(kind='mergesort')
-                row = row[indexes]
-                x[i] = row
+                                                       alpha=alpha, min_partition_size=10,
 
-            last_timestamp = []
-            for i in range(len(x)):
-
-                last_timestamp.append(x[i, -1, 0])
-
-            indexes = np.array(last_timestamp).argsort(kind='heapsort')
-
-            x = x[indexes]
-            y = y[indexes]
-
-            new_x = []
-            for i in range(len(x)):
-                row = x[i]
-                if dataset_name != 'Cologne':
-                    new_x.append(row[:, [0, 1, 2, 3, 4, 5]])
-                else:
-                    new_x.append(row[:, [1, 2]])
-
-            x = np.array(new_x)
-
-            p = np.unique(y, return_counts=True)
-            c = p[0]
-            total = np.sum(p[1])
-            p = p[1]/total
-
-            size = int(len(x) * 0.8)
-            x_train, x_test = x[:size], x[size:]
-            y_train, y_test = y[:size], y[size:]
-            unique_count = {i: 0 for i in range(self.args.num_classes[m])}
-            unique, count = np.unique(y, return_counts=True)
-            data_unique_count_dict = dict(zip(unique, count))
-            for class_ in data_unique_count_dict:
-                unique_count[class_] = data_unique_count_dict[class_]
-            unique_count = np.array(list(unique_count.values()))
-            print("Wisdm tamanho original dataset: ", len(x_train))
-
-            training_dataset = torch.utils.data.TensorDataset(torch.from_numpy(x_train).to(dtype=torch.float32), torch.from_numpy(y_train).to(dtype=torch.int32))
-            validation_dataset = torch.utils.data.TensorDataset(torch.from_numpy(x_test).to(dtype=torch.float32), torch.from_numpy(y_test).to(dtype=torch.int32))
-
-            random.seed(cid)
-            np.random.seed(cid)
-            torch.manual_seed(cid)
-
-            def seed_worker(worker_id):
-                np.random.seed(cid)
-                random.seed(cid)
-
-            g = torch.Generator()
-            g.manual_seed(cid)
-            np.random.seed(cid)
-            random.seed(cid)
-
-            trainLoader = DataLoader(training_dataset, batch_size, shuffle=True, worker_init_fn=seed_worker, generator=g)
-            testLoader = DataLoader(validation_dataset, batch_size, drop_last=False, shuffle=False)
-
-            if mode == "train":
-                return trainLoader, unique_count
+                                                       self_balancing=True)
+                    fds[dataset_name] = FederatedDataset(
+                        dataset=
+                        {"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "MNIST": "ylecun/mnist",
+                         "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas",
+                         "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"}[
+                            dataset_name],
+                        partitioners={"train": partitioner},
+                        seed=42
+                    )
             else:
-                return testLoader
+                # dts = dt.load_from_disk(f"datasets/{dataset_name}")
+                partitioner = DirichletPartitioner(num_partitions=num_partitions, partition_by="label",
+                                                   alpha=alpha, min_partition_size=10,
+                                                   self_balancing=True)
+                print("dataset from volume")
+                fd = CustomFederatedDataset(
+                    dataset=
+                    {"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "MNIST": "ylecun/mnist",
+                     "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas",
+                     "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"}[
+                        dataset_name],
+                    partitioners={"train": partitioner},
+                    path=f"datasets/{dataset_name}",
+                    seed=42
+                )
+                fds[dataset_name] = fd
 
-        except Exception as e:
-            print("load WISDM client base")
-            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
+            attempts = 0
+            while True:
+                attempts += 1
+                try:
+                    time.sleep(random.randint(1, 1))
+                    partition = fds[dataset_name].load_partition(partition_id)
+                    print("""Loaded dataset {} in the {} attempt for client {}""".format(dataset_name, attempts,
+                                                                                               partition_id))
+                    break
+                except Exception as e:
+                    print(
+                        """Tried to load dataset {} for the {} time for the client {} error""".format(dataset_name,
+                                                                                                      attempts,
+                                                                                                      partition_id))
+                    print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+                    time.sleep(1)
+            # Divide data on each node: 80% train, 20% test
+            test_size = 1 - data_sampling_percentage
+            partition_train_test = partition.train_test_split(test_size=test_size, seed=42)
 
-    def load_gowalla(self, m, name, alpha, mode="train", batch_size=32, dataset_name=None):
+            if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "WISDM-W", "Gowalla"]:
+                pytorch_transforms = {"CIFAR10": Compose(
+                    [ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
+                    "MNIST": Compose([ToTensor(), RandomRotation(10),
+                                      Normalize([0.5], [0.5])]),
+                    "EMNIST": Compose([ToTensor(), RandomRotation(10),
+                                       Normalize([0.5], [0.5])]),
+                    "GTSRB": Compose(
+                        [
 
-        try:
-            dir_path = "../dataset/" + name + "/" + "clients_" + str(self.args.num_clients) + "/alpha_" + str(alpha) + "/"
-            filename_train = dir_path + """train/idx_train_{}.csv""".format(self.id)
-            filename_test = dir_path + "test/idx_test_{}.csv""".format(self.id)
-            cid = self.id
-            filename_train = filename_train.replace("pickle", "csv")
-            filename_test = filename_test.replace("pickle", "csv")
+                            Resize((32, 32)),
+                            RandomHorizontalFlip(),  # FLips the image w.r.t horizontal axis
+                            RandomRotation(10),  # Rotates the image to a specified angel
+                            RandomAffine(0, shear=10, scale=(0.8, 1.2)),
+                            # Performs actions like zooms, change shear angles.
+                            ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+                            ToTensor(),
+                            Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
+                        ]
+                    ),
+                    "ImageNet": Compose(
+                        [
 
-            train = pd.read_csv(filename_train)
-            test = pd.read_csv(filename_test)
+                            Resize(32),
+                            RandomHorizontalFlip(),
+                            ToTensor(),
+                            Normalize(mean=[0.485, 0.456, 0.406],
+                                      std=[0.229, 0.224, 0.225])
+                            # transforms.Resize((32, 32)),
+                            # transforms.ToTensor(),
+                            # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                        ]
+                    ),
+                    "WISDM-W": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32))),
+                    "Gowalla": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32))),
 
-            df = pd.concat([train, test], ignore_index=True)
-            x = np.array([ast.literal_eval(i) for i in df['X'].tolist()], dtype=np.float32)
-            y = np.array([i for i in df['Y'].to_numpy().astype(np.int32)])
+                }[dataset_name]
 
-            for i in range(len(x)):
-                row = x[i]
-                indexes = row[:, 0].argsort(kind='mergesort')
-                row = row[indexes]
-                x[i] = row
+            # import torchvision.datasets as datasets
+            # datasets.EMNIST
+            key = DATASET_INPUT_MAP[dataset_name]
 
-            last_timestamp = []
-            for i in range(len(x)):
+            def apply_transforms(batch):
+                """Apply transforms to the partition from FederatedDataset."""
 
-                last_timestamp.append(x[i, -1, 0])
+                batch[key] = [pytorch_transforms(img) for img in batch[key]]
+                # print("""bath key: {}""".format(batch[key]))
+                return batch
 
-            indexes = np.array(last_timestamp).argsort(kind='heapsort')
-
-            x = x[indexes]
-            y = y[indexes]
-
-            new_x = []
-            for i in range(len(x)):
-                row = x[i]
-                if dataset_name != 'Cologne':
-                    new_x.append(row[:, [0, 1, 2, 3]])
-                else:
-                    new_x.append(row[:, [1, 2]])
-
-            x = np.array(new_x)
-
-            p = np.unique(y, return_counts=True)
-            c = p[0]
-            total = np.sum(p[1])
-            p = p[1]/total
-
-            size = int(len(x) * 0.8)
-            x_train, x_test = x[:size], x[size:]
-            y_train, y_test = y[:size], y[size:]
-            unique_count = {i: 0 for i in range(self.args.num_classes[m])}
-            unique, count = np.unique(y, return_counts=True)
-            data_unique_count_dict = dict(zip(unique, count))
-            for class_ in data_unique_count_dict:
-                unique_count[class_] = data_unique_count_dict[class_]
-            unique_count = np.array(list(unique_count.values()))
-            print("Wisdm tamanho original dataset: ", len(x_train))
-
-            training_dataset = torch.utils.data.TensorDataset(torch.from_numpy(x_train).to(dtype=torch.float32), torch.from_numpy(y_train).to(dtype=torch.int32))
-            validation_dataset = torch.utils.data.TensorDataset(torch.from_numpy(x_test).to(dtype=torch.float32), torch.from_numpy(y_test).to(dtype=torch.int32))
-
-            random.seed(cid)
-            np.random.seed(cid)
-            torch.manual_seed(cid)
-
-            def seed_worker(worker_id):
-                np.random.seed(cid)
-                random.seed(cid)
-
-            g = torch.Generator()
-            g.manual_seed(cid)
-            np.random.seed(cid)
-            random.seed(cid)
-
-            trainLoader = DataLoader(training_dataset, batch_size, shuffle=True, worker_init_fn=seed_worker, generator=g)
-            testLoader = DataLoader(validation_dataset, batch_size, drop_last=False, shuffle=False)
-
-            if mode == "train":
-                return trainLoader, unique_count
-            else:
-                return testLoader
-
-        except Exception as e:
-            print("load Gowalla client base")
-            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
-
-    def load_imagenet(self, name, m, alpha, t, mode="train", batch_size=32, ):
-
-        try:
-            dir_path = "../dataset/" + name + "/" + "clients_" + str(self.args.num_clients) + "/alpha_" + str(alpha) + "/"
-            traindir = """../dataset/ImageNet/rawdata/ImageNet/train/"""
-            filename_train = dir_path + """train/idx_train_{}.pickle""".format(self.id)
-            filename_test = dir_path + "test/idx_test_{}.pickle""".format(self.id)
-
-            random.seed(self.id)
-            np.random.seed(self.id)
-            torch.manual_seed(self.id)
-            g = torch.Generator()
-            g.manual_seed(self.id)
-
-            transmforms = {'train': transforms.Compose(
-                    [
-
-                        transforms.RandomResizedCrop(64),
-                        transforms.RandomHorizontalFlip(),
-                        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
-                        transforms.ToTensor(),
-                        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-                        # transforms.Resize((32, 32)),  # resises the image so it can be perfect for our model.
-                        # transforms.RandomHorizontalFlip(),  # FLips the image w.r.t horizontal axis
-                        # transforms.RandomRotation(10),  # Rotates the image to a specified angel
-                        # transforms.RandomAffine(0, shear=10, scale=(0.8, 1.2)),
-                        # # Performs actions like zooms, change shear angles.
-                        # transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),  # Set the color params
-                        # transforms.ToTensor(),  # comvert the image to tensor so that it can work with torch
-                        # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-                    ]
-                ), 'test': transforms.Compose(
-                    [
-
-                        transforms.RandomResizedCrop(64),
-                        transforms.RandomHorizontalFlip(),
-                        transforms.ToTensor(),
-                        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-                        # transforms.Resize((32, 32)),
-                        # transforms.ToTensor(),
-                        # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-                    ]
-                )}[mode]
-
-            training_dataset = datasets.ImageFolder(
-                traindir,
-                transmforms
+            if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "WISDM-W", "Gowalla"]:
+                partition_train_test = partition_train_test.with_transform(apply_transforms)
+            trainloader = DataLoader(
+                partition_train_test["train"], batch_size=batch_size, shuffle=True
             )
-
-            validation_dataset = datasets.ImageFolder(
-                traindir,
-                transmforms
-            )
-
-            # np.random.seed(self.id)
-
-            dataset_image = []
-            dataset_samples = []
-            dataset_label = []
-            dataset_samples.extend(training_dataset.samples)
-            dataset_image.extend(training_dataset.imgs)
-            dataset_label.extend(training_dataset.targets)
-
-            with open(filename_train, 'rb') as handle:
-                idx_train = pickle.load(handle)
-
-            with open(filename_test, 'rb') as handle:
-                idx_test = pickle.load(handle)
-
-            # print("tipo: ", type(training_dataset.imgs), type(training_dataset.targets), type(training_dataset.samples))
-            imgs = training_dataset.imgs
-            x_train = []
-            x_test = []
-            y_train = []
-            y_test = []
-            for i in range(1):
-                x_train += training_dataset.samples
-                x_test += training_dataset.samples
-                y_train += training_dataset.targets
-                y_test += training_dataset.targets
-
-            x_train = np.array(x_train)
-            y_train = np.array(y_train)
-            x_test = np.array(x_test)
-            y_test = np.array(y_test)
-            x_train = x_train[idx_train]
-            y_train = y_train[idx_train]
-            x_test = x_test[idx_test]
-            y_test = y_test[idx_test]
-
-            training_dataset.samples = list(x_train)
-            training_dataset.targets = list(y_train)
-            validation_dataset.samples = list(x_test)
-            validation_dataset.targets = list(y_test)
-
-            y = np.array(list(y_train) + list(y_test))
-
-
-            # validation_dataset.imgs = list(imgs_test)
-
-            def seed_worker(worker_id):
-                np.random.seed(self.id)
-                random.seed(self.id)
-                torch.manual_seed(self.id)
-                g = torch.Generator()
-                g.manual_seed(self.id)
-
-            g = torch.Generator()
-            g.manual_seed(self.id)
-            random.seed(self.id)
-            np.random.seed(self.id)
-            torch.manual_seed(self.id)
-
-            unique_count = {i: 0 for i in range(self.args.num_classes[m])}
-            unique, count = np.unique(y, return_counts=True)
-            data_unique_count_dict = dict(zip(unique, count))
-            for class_ in data_unique_count_dict:
-                unique_count[class_] = data_unique_count_dict[class_]
-            unique_count = np.array(list(unique_count.values()))
-
-            trainLoader = DataLoader(training_dataset, batch_size, shuffle=True, worker_init_fn=seed_worker,
-                                     generator=g)
-            testLoader = DataLoader(dataset=validation_dataset, batch_size=32, shuffle=False)
-
-            if self.id == 10:
-
-                print("Cliente 10 rodada ", t, " alpha: ", alpha, " dataset: ", name, " value counts: ", pd.Series(y_test).value_counts())
-
-            if mode == "train":
-                return trainLoader, unique_count
-            else:
-                return testLoader
+            testloader = DataLoader(partition_train_test["test"], batch_size=batch_size)
+            return trainloader, testloader
 
         except Exception as e:
-            print("load ImageNet client base")
-            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
-
-    def load_train_data(self, m, t, batch_size=32):
-
-        try:
-            alpha = self.alpha[m]
-            if bool(self.args.concept_drift):
-                alpha = float(self.experiment_config_df.query("""Dataset == '{}' and Round == {}""".format(self.dataset[m], t))["Alpha"])
-                self.current_alpha[m] = alpha
-            if self.dataset[m] in ["WISDM-W", "WISDM-P"]:
-                return self.load_wisdm(m=m, alpha=alpha, name=self.dataset[m],  mode='train')
-            elif self.dataset[m] in ["Gowalla"]:
-                return self.load_gowalla(m=m, alpha=alpha, name=self.dataset[m],  mode='train')
-            elif "ImageNet" in self.dataset[m]:
-                return self.load_imagenet(self.dataset[m], m=m, alpha=alpha, t=t, mode='train')
-            if self.dataset[m] == "GTSRB":
-                return read_gtsrb(name=self.dataset[m], args=self.args, m=m, cid=self.id, t=t, mode='train')
-            else:
-                return read_client_data_v2(m, self.dataset[m], self.id, batch_size=batch_size, args=self.args, mode="train")
-        except Exception as e:
-            print("load train data")
-            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
-
-    def load_test_data(self, m, t, batch_size=None):
-        try:
-            alpha = self.alpha[m]
-            if bool(self.args.concept_drift):
-                alpha = float(
-                    self.experiment_config_df.query("""Dataset == '{}' and Round == {}""".format(self.dataset[m], t))[
-                        "Alpha"])
-                self.current_alpha[m] = alpha
-            if self.dataset[m] in ["WISDM-W", "WISDM-P"]:
-                return self.load_wisdm(m=m, name=self.dataset[m], alpha=alpha, mode='test')
-            elif self.dataset[m] in ["Gowalla"]:
-                return self.load_gowalla(m=m, name=self.dataset[m], alpha=alpha, mode='test')
-            elif "ImageNet" in self.dataset[m]:
-                return self.load_imagenet(name=self.dataset[m], m=m, alpha=alpha, t=t, mode='test')
-            if self.dataset[m] == "GTSRB":
-                return read_gtsrb(name=self.dataset[m], m=m, cid=self.id, args=self.args, t=t, mode='test')
-            else:
-                return read_client_data_v2(m, self.dataset[m], self.id, batch_size=batch_size, args=self.args, mode="test")
-        except Exception as e:
-            print("load test data")
-            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
+            print("load_data error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
         
     def set_parameters(self, m, model):
         for new_param, old_param in zip(model.parameters(), self.model[m].parameters()):
@@ -646,13 +416,14 @@ class Client(object):
                 test_weighted_fscore,
                 self.current_alpha[m])
 
-    def train_metrics(self, m, t):
+    def train_metrics(self, m, global_model, t):
 
         g = torch.Generator()
         g.manual_seed(t)
         random.seed(t)
         np.random.seed(t)
         torch.manual_seed(t)
+        self.set_parameters(m, global_model)
         if bool(self.args.concept_drift):
             alpha = float(
                 self.experiment_config_df.query("""Dataset == '{}' and Round == {}""".format(self.dataset[m], t))[

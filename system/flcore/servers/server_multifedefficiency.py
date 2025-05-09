@@ -890,21 +890,21 @@ class MultiFedEfficiency(Server):
         cd = bool(self.args.concept_drift)
         if cd:
             result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/{}/""".format(cd,
-                                                                                                                        self.fraction_new_clients,
-                                                                                                                        self.round_new_clients,
-                                                                                                                        self.num_clients,
-                                                                                                                       self.alpha,
-                                                                                                                        self.alpha_end,
-                                                                                                                       self.dataset,
-                                                                                                                        self.rounds_concept_drift[
+                                                                                                                                                                                                    self.fraction_new_clients,
+                                                                                                                                                                                                    self.round_new_clients,
+                                                                                                                                                                                                    self.num_clients,
+                                                                                                                                                                                                    self.alpha,
+                                                                                                                                                                                                    self.alpha_end,
+                                                                                                                                                                                                    self.dataset,
+                                                                                                                                                                                                    self.rounds_concept_drift[
                                                                                                                             0],
-                                                                                                                        self.rounds_concept_drift[
+                                                                                                                                                                                                    self.rounds_concept_drift[
                                                                                                                             1],
-                                                                                                                       self.models_names,
-                                                                                                                       self.args.join_ratio,
-                                                                                                                       self.args.global_rounds,
-                                                                                                                       self.local_epochs,
-                                                                                                                        train_test)
+                                                                                                                                                                                                    self.models_names,
+                                                                                                                                                                                                    self.args.join_ratio,
+                                                                                                                                                                                                    self.args.number_of_rounds,
+                                                                                                                                                                                                    self.local_epochs,
+                                                                                                                                                                                                    train_test)
         elif len(self.alpha) == 1:
             result_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/alpha_end_{}/{}/concept_drift_rounds_{}_{}/{}/fc_{}/rounds_{}/epochs_{}/{}/""".format(
                 cd,
@@ -919,7 +919,7 @@ class MultiFedEfficiency(Server):
                 0,
                 [self.models_names[0]],
                 self.args.join_ratio,
-                self.args.global_rounds,
+                self.args.number_of_rounds,
                 self.local_epochs,
                 train_test)
         else:
@@ -936,7 +936,7 @@ class MultiFedEfficiency(Server):
                 0,
                 self.models_names,
                 self.args.join_ratio,
-                self.args.global_rounds,
+                self.args.number_of_rounds,
                 self.local_epochs,
                 train_test)
 
