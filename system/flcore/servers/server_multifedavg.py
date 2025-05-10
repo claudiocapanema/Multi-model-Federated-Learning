@@ -22,6 +22,7 @@ import sys
 import os
 from flcore.servers.utils.download_dataset import download_datasets
 from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, weighted_loss_avg
+from flcore.clients.utils.models_utils import get_weights
 
 # Define metric aggregation function
 def weighted_average(metrics):
@@ -43,7 +44,7 @@ def weighted_average(metrics):
 def weighted_average_fit(metrics):
     try:
         # Multiply accuracy of each client by number of examples used
-        print(f"metricas recebidas: {metrics}")
+        # print(f"metricas recebidas: {metrics}")
         accuracies = [num_examples * m["train_accuracy"] for num_examples, m in metrics]
         balanced_accuracies = [num_examples * m["train_balanced_accuracy"] for num_examples, m in metrics]
         loss = [num_examples * m["train_loss"] for num_examples, m in metrics]
@@ -102,22 +103,23 @@ class MultiFedAvg:
                                                  range(self.ME)}
             self.selected_clients_m = []
             self.selected_clients_m_ids_random = [[] for me in range(self.ME)]
-            self.set_clients(MultiFedAvgClient)
+
             print("Dowenload datasets")
             download_datasets(self.dataset, self.alpha, self.total_clients)
             # Concept drift parameters
             self.experiment_id = args.experiment_id
+            self.set_clients()
             # self.concept_drift_config = global_concept_dirft_config(self.ME, self.number_of_rounds, self.alpha, self.experiment_id, 0)
 
         except Exception as e:
             print("__init__ error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def set_clients(self, clientObj):
+    def set_clients(self):
 
         try:
             for i in range(self.total_clients):
-                client = clientObj(self.args,
+                client = MultiFedAvgClient(self.args,
                                 id=i,
                                    model=copy.deepcopy(self.global_model))
                 self.clients.append(client)
@@ -129,6 +131,9 @@ class MultiFedAvg:
     def train(self):
         try:
             self._get_models_size()
+            parameters_aggregated_mefl = {me: [] for me in range(self.ME)}
+            for me in range(self.ME):
+                parameters_aggregated_mefl[me] = get_weights(self.global_model[me])
             for t in range(1, self.number_of_rounds + 1):
                 s_t = time.time()
                 self.selected_clients = self.select_clients(t)
@@ -138,17 +143,17 @@ class MultiFedAvg:
                 for me in range(len(self.selected_clients)):
 
                     for i in range(len(self.selected_clients[me])):
-                        fit_results.append(self.clients[self.selected_clients[me][i]].fit(me, t, self.global_model[me]))
+                        fit_results.append(self.clients[self.selected_clients[me][i]].fit(me, t, parameters_aggregated_mefl[me]))
 
-                self.aggregate_fit(server_round=t, results=fit_results, failures=[])
+                parameters_aggregated_mefl, metrics_aggregated_mefl = self.aggregate_fit(server_round=t, results=fit_results, failures=[])
 
-                self.evaluate(t)
+                self.evaluate(t, parameters_aggregated_mefl)
 
         except Exception as e:
             print("configure_fit error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def evaluate(self, t):
+    def evaluate(self, t, parameters_aggregated_mefl):
 
         try:
             evaluate_results = []
@@ -156,11 +161,9 @@ class MultiFedAvg:
 
                 for i in range(len(self.clients)):
 
+                    evaluate_results.append(self.clients[i].evaluate(me, t, parameters_aggregated_mefl[me]))
 
-                    print("idd ", self.clients[i], me, len(self.global_model))
-                    evaluate_results.append(self.clients[i].evaluate(me, t, self.global_model[me]))
-
-            self.aggregate_evaluate(server_round=t, results=evaluate_results, failures=[])
+            loss_aggregated_mefl, metrics_aggregated_mefl = self.aggregate_evaluate(server_round=t, results=evaluate_results, failures=[])
 
         except Exception as e:
             print("evaluate error")
@@ -177,10 +180,14 @@ class MultiFedAvg:
 
             self.selected_clients_m = [[] for me in range(self.ME)]
 
+            trained_models = []
+
             results_mefl = {me: [] for me in range(self.ME)}
             for i in range(len(results)):
                 parameter, num_examples, result = results[i]
                 me = result["me"]
+                if me not in trained_models:
+                    trained_models.append(me)
                 client_id = result["client_id"]
                 self.selected_clients_m[me].append(client_id)
                 results_mefl[me].append(results[i])
@@ -191,7 +198,7 @@ class MultiFedAvg:
             weights_results_mefl = {me: [] for me in range(self.ME)}
             parameters_aggregated_mefl = {me: [] for me in range(self.ME)}
 
-            for me in range(self.ME):
+            for me in trained_models:
                 # Convert results
                 weights_results = [
                     (parameters, num_examples)
@@ -203,19 +210,17 @@ class MultiFedAvg:
                 elif len(weights_results) == 1:
                     aggregated_ndarrays_mefl[me] = results_mefl[me][1].parameters
 
-            for me in range(self.ME):
-                print(f"tamanho para modelo {me} rodada {server_round} {len(aggregated_ndarrays_mefl[me])}")
+            for me in trained_models:
                 parameters_aggregated_mefl[me] = aggregated_ndarrays_mefl[me]
 
             # Aggregate custom metrics if aggregation fn was provided
             metrics_aggregated_mefl = {me: [] for me in range(self.ME)}
-            for me in range(self.ME):
+            for me in trained_models:
                 if self.fit_metrics_aggregation_fn:
                     fit_metrics = [(num_examples, metrics) for _, num_examples, metrics in results_mefl[me]]
                     metrics_aggregated_mefl[me] = self.fit_metrics_aggregation_fn(fit_metrics)
 
             print("""finalizou aggregated fit""")
-            print(f"finalizou aggregated fit {server_round} {metrics_aggregated_mefl}")
 
             self.parameters_aggregated_mefl = parameters_aggregated_mefl
             self.metrics_aggregated_mefl = metrics_aggregated_mefl

@@ -25,6 +25,7 @@ import warnings
 import numpy as np
 import logging
 from flcore.servers.server_multifedavg import MultiFedAvg
+from flcore.servers.server_hmultifedavg import HMultiFedAvg
 # from flcore.servers.serveravg_with_fedpredict import MultiFedAvgWithFedPredict
 # from flcore.servers.server_fedfairmmfl import FedFairMMFL
 # from flcore.servers.serveravg_rr import MultiFedAvgRR
@@ -129,32 +130,33 @@ def run(args):
         model = load_model(model_name, dataset, args.strategy, args.device)
 
         print(model)
-
-        # select algorithm
-        if args.strategy == "MultiFedAvg":
-            server = MultiFedAvg
-
-        # elif args.strategy == "MultiFedEfficiency":
-        #     server = MultiFedEfficiency
-        #
-        # elif args.strategy == "MultiFedAvg+FP":
-        #     server = MultiFedAvgWithFedPredict
-        #
-        # elif args.strategy == "FedFairMMFL":
-        #     server = FedFairMMFL
-        # elif args.strategy == "MultiFedAvgRR":
-        #     server = MultiFedAvgRR
-
-        else:
-            print(args.strategy)
-            raise NotImplementedError
-
         models.append(model)
 
-        server = server(args, models)
-        server.train()
+    # select algorithm
+    if args.strategy == "MultiFedAvg":
+        server = MultiFedAvg
+    elif args.strategy == "HMultiFedAvg":
+        server = HMultiFedAvg
 
-        time_list.append(time.time()-start)
+    # elif args.strategy == "MultiFedEfficiency":
+    #     server = MultiFedEfficiency
+    #
+    # elif args.strategy == "MultiFedAvg+FP":
+    #     server = MultiFedAvgWithFedPredict
+    #
+    # elif args.strategy == "FedFairMMFL":
+    #     server = FedFairMMFL
+    # elif args.strategy == "MultiFedAvgRR":
+    #     server = MultiFedAvgRR
+
+    else:
+        print(args.strategy)
+        raise NotImplementedError
+
+    server = server(args, models)
+    server.train()
+
+    time_list.append(time.time()-start)
 
     print(f"\nAverage time cost: {round(np.average(time_list), 2)}s.")
     
@@ -253,8 +255,8 @@ if __name__ == "__main__":
     else:
         log_name = args.strategy
 
-    result_path = """../results/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/log_{}.txt""".format(args.total_clients,
-                                                                                                            args.alpha,
+    result_path = """results/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/log_{}.txt""".format(args.total_clients,
+                                                                                                            [float(i) for i in args.alpha],
                                                                                                             args.dataset,
                                                                                                             args.model,
                                                                                                             args.fraction_fit,

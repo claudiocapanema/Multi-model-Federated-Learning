@@ -67,13 +67,13 @@ class MultiFedAvgClient:
                 dataset_name=self.args.dataset[me],
                 alpha=self.alpha[me],
                 data_sampling_percentage=self.args.data_percentage,
-                partition_id=self.args.client_id,
+                partition_id=self.client_id,
                 num_partitions=self.args.total_clients + 1,
                 batch_size=self.args.batch_size,
             )
             self.recent_trainloader[me] = copy.deepcopy(self.trainloader[me])
             self.optimizer[me] = self._get_optimizer(dataset_name=self.args.dataset[me], me=me)
-            print("""leu dados cid: {} dataset: {} size:  {}""".format(self.args.client_id, self.args.dataset[me],
+            print("""leu dados cid: {} dataset: {} size:  {}""".format(self.client_id, self.args.dataset[me],
                                                                              len(self.trainloader[me].dataset)))
 
     def set_parameters(self, m, model):
@@ -141,7 +141,6 @@ class MultiFedAvgClient:
             metrics["Dataset size"] = len(self.valloader[me].dataset)
             metrics["me"] = me
             metrics["Alpha"] = self.alpha[me]
-            print("""eval cliente fim {} {}""".format(metrics["me"], metrics))
             tuple_me = (loss, len(self.valloader[me].dataset), metrics)
             return loss, len(self.valloader[me].dataset), tuple_me
         except Exception as e:
