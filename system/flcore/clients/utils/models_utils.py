@@ -146,8 +146,9 @@ def get_weights_fedkd(net):
 
 def set_weights(net, parameters):
     try:
-        for new_param, old_param in zip(parameters.parameters(), net.parameters()):
-            old_param.data = new_param.data.clone()
+        params_dict = zip(net.state_dict().keys(), parameters)
+        state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
+        net.load_state_dict(state_dict, strict=True)
     except Exception as e:
         logger.error("set_weights error")
         logger.error(f"tipo {type(net)}")
