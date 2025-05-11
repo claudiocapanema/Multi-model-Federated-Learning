@@ -131,9 +131,9 @@ class MultiFedAvg:
     def train(self):
         try:
             self._get_models_size()
-            parameters_aggregated_mefl = {me: [] for me in range(self.ME)}
+            self.parameters_aggregated_mefl = {me: [] for me in range(self.ME)}
             for me in range(self.ME):
-                parameters_aggregated_mefl[me] = get_weights(self.global_model[me])
+                self.parameters_aggregated_mefl[me] = get_weights(self.global_model[me])
             for t in range(1, self.number_of_rounds + 1):
                 s_t = time.time()
                 self.selected_clients = self.select_clients(t)
@@ -143,11 +143,11 @@ class MultiFedAvg:
                 for me in range(len(self.selected_clients)):
 
                     for i in range(len(self.selected_clients[me])):
-                        fit_results.append(self.clients[self.selected_clients[me][i]].fit(me, t, parameters_aggregated_mefl[me]))
+                        fit_results.append(self.clients[self.selected_clients[me][i]].fit(me, t, self.parameters_aggregated_mefl[me]))
 
-                parameters_aggregated_mefl, metrics_aggregated_mefl = self.aggregate_fit(server_round=t, results=fit_results, failures=[])
+                self.parameters_aggregated_mefl, metrics_aggregated_mefl = self.aggregate_fit(server_round=t, results=fit_results, failures=[])
 
-                self.evaluate(t, parameters_aggregated_mefl)
+                self.evaluate(t, self.parameters_aggregated_mefl)
 
         except Exception as e:
             print("configure_fit error")
@@ -196,7 +196,7 @@ class MultiFedAvg:
             aggregated_ndarrays_mefl = {me: None for me in range(self.ME)}
             aggregated_ndarrays_mefl = {me: [] for me in range(self.ME)}
             weights_results_mefl = {me: [] for me in range(self.ME)}
-            parameters_aggregated_mefl = {me: [] for me in range(self.ME)}
+            # parameters_aggregated_mefl = {me: [] for me in range(self.ME)}
 
             for me in trained_models:
                 # Convert results
@@ -211,7 +211,7 @@ class MultiFedAvg:
                     aggregated_ndarrays_mefl[me] = results_mefl[me][1].parameters
 
             for me in trained_models:
-                parameters_aggregated_mefl[me] = aggregated_ndarrays_mefl[me]
+                self.parameters_aggregated_mefl[me] = aggregated_ndarrays_mefl[me]
 
             # Aggregate custom metrics if aggregation fn was provided
             metrics_aggregated_mefl = {me: [] for me in range(self.ME)}
@@ -222,10 +222,10 @@ class MultiFedAvg:
 
             print("""finalizou aggregated fit""")
 
-            self.parameters_aggregated_mefl = parameters_aggregated_mefl
+            self.parameters_aggregated_mefl = self.parameters_aggregated_mefl
             self.metrics_aggregated_mefl = metrics_aggregated_mefl
 
-            return parameters_aggregated_mefl, metrics_aggregated_mefl
+            return self.parameters_aggregated_mefl, metrics_aggregated_mefl
         except Exception as e:
             print("aggregate_fit error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))

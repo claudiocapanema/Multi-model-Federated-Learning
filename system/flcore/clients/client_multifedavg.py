@@ -99,6 +99,7 @@ class MultiFedAvgClient:
             np.random.seed(t)
             torch.manual_seed(t)
             self.trainloader[me] = self.recent_trainloader[me]
+            print("rodada weights ", t)
             set_weights(self.model[me], global_model)
             self.optimizer[me] = self._get_optimizer(dataset_name=self.args.dataset[me], me=me)
             results = train(

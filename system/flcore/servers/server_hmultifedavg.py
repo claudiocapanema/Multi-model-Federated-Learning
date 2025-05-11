@@ -81,8 +81,8 @@ class HMultiFedAvg(MultiFedAvg):
             selected_clients = [i.client_id for i in selected_clients]
 
             middle = int(self.number_of_rounds * 0.5)
-            heterogeneous_models = np.argwhere(self.homogeneity_degree <= 0.32)
-            homogeneous_models = np.argwhere(self.homogeneity_degree > 0.32)
+            heterogeneous_models = np.argwhere(self.homogeneity_degree <= 0.32).flatten()
+            homogeneous_models = np.argwhere(self.homogeneity_degree > 0.32).flatten()
             equal_number_of_clients = int(len(selected_clients) / self.ME)
             if t >= middle and len(heterogeneous_models) > 0:
                 if self.alternated_model_index is None:
@@ -98,6 +98,7 @@ class HMultiFedAvg(MultiFedAvg):
 
                 if self.alternated_model_index is not None:
                     me = heterogeneous_models[self.alternated_model_index]
+                    print("antes: ", equal_number_of_clients, len(heterogeneous_models), me, heterogeneous_models, training_intensity)
                     training_intensity[me] = int(equal_number_of_clients * len(heterogeneous_models))
 
                 sc = []
