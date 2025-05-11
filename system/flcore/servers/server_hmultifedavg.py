@@ -101,6 +101,7 @@ class HMultiFedAvg(MultiFedAvg):
                     print("antes: ", equal_number_of_clients, len(heterogeneous_models), me, heterogeneous_models, training_intensity)
                     training_intensity[me] = int(equal_number_of_clients * len(heterogeneous_models))
 
+
                 sc = []
                 i = 0
                 for me in range(self.ME):
