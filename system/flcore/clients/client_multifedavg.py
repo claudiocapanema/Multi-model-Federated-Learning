@@ -32,7 +32,9 @@ class MultiFedAvgClient:
         np.random.seed(id)
         torch.manual_seed(id)
         self.args = args
-        self.batch_size = 10
+        self.batch_size = []
+        for dataset in args.dataset:
+            self.batch_size.append({"WISDM-W": 16, "ImageNet10": 10, "Gowalla": 10}[dataset])
         self.model = model
         self.alpha = [float(i) for i in args.alpha]
         self.initial_alpha = self.alpha
@@ -70,7 +72,7 @@ class MultiFedAvgClient:
                 data_sampling_percentage=self.args.data_percentage,
                 partition_id=self.client_id,
                 num_partitions=self.args.total_clients + 1,
-                batch_size=self.batch_size,
+                batch_size=self.batch_size[me],
             )
             self.recent_trainloader[me] = copy.deepcopy(self.trainloader[me])
             self.optimizer[me] = self._get_optimizer(dataset_name=self.args.dataset[me], me=me)

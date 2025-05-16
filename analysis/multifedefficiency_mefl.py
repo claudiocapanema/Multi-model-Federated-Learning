@@ -117,10 +117,10 @@ if __name__ == "__main__":
     # alphas = [1.0, 1.0]
     # alphas = [10.0, 0.1]
     # dataset = ["WISDM-W", "CIFAR10"]
-    dataset = ["WISDM-W", "ImageNet10", "CIFAR10"]
+    dataset = ["WISDM-W", "ImageNet10", "Gowalla"]
     # dataset = ["EMNIST", "CIFAR10"]
     # models_names = ["cnn_c"]
-    model_name = ["gru", "CNN", "CNN_3"]
+    model_name = ["gru", "CNN", "lstm"]
     fraction_fit = 0.3
     number_of_rounds = 100
     local_epochs = 1
