@@ -28,7 +28,8 @@ def download_datasets(datasets_name: list, alphas: list, num_partitions: int):
                 logger.info("Downloading {}".format(dataset_name))
                 dataset = load_dataset({"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "MNIST": "ylecun/mnist",
                              "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas",
-                             "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"}[
+                             "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
+                            , "ImageNet10": "claudiogsc/ImageNet-10_household_objects"}[
                         dataset_name])
                 dataset.save_to_disk(filename)
             else:

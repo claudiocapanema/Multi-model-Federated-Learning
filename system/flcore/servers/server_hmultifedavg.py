@@ -77,10 +77,22 @@ class HMultiFedAvg(MultiFedAvg):
     def select_clients(self, t):
 
         try:
+            g = torch.Generator()
+            g.manual_seed(t)
+            random.seed(t)
+            np.random.seed(t)
+            torch.manual_seed(t)
             selected_clients = list(np.random.choice(self.clients, self.num_training_clients, replace=False))
             selected_clients = [i.client_id for i in selected_clients]
 
-            middle = int(self.number_of_rounds * 0.5)
+            if self.experiment_id == 1:
+                middle = int(self.number_of_rounds * 0.5)
+            elif self.experiment_id == 2:
+                middle = int(1)
+            elif self.experiment_id == 3:
+                middle = int(self.number_of_rounds * 0.3)
+            elif self.experiment_id == 4:
+                middle = int(self.number_of_rounds * 0.7)
             heterogeneous_models = np.argwhere(self.homogeneity_degree <= 0.32).flatten()
             homogeneous_models = np.argwhere(self.homogeneity_degree > 0.32).flatten()
             equal_number_of_clients = int(len(selected_clients) / self.ME)

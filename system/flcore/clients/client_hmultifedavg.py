@@ -21,8 +21,8 @@ import copy
 import os
 import torch
 import numpy as np
-from flcore.clients.client_multifedavg import MultiFedAvgClient
-from flcore.clients.utils.models_utils import load_model, get_weights, load_data, set_weights, test, train
+from .client_multifedavg import MultiFedAvgClient
+from .utils.models_utils import load_model, get_weights, load_data, set_weights, test, train
 
 
 

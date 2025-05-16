@@ -16,6 +16,8 @@ import copy
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 import csv
 import time
+import random
+import torch
 import numpy as np
 from flcore.clients.client_multifedavg import MultiFedAvgClient
 import sys
@@ -109,6 +111,7 @@ class MultiFedAvg:
             # Concept drift parameters
             self.experiment_id = args.experiment_id
             self.set_clients()
+
             # self.concept_drift_config = global_concept_dirft_config(self.ME, self.number_of_rounds, self.alpha, self.experiment_id, 0)
 
         except Exception as e:
@@ -282,6 +285,11 @@ class MultiFedAvg:
     def select_clients(self, t):
 
         try:
+            g = torch.Generator()
+            g.manual_seed(t)
+            random.seed(t)
+            np.random.seed(t)
+            torch.manual_seed(t)
             selected_clients = list(np.random.choice(self.clients, self.num_training_clients, replace=False))
             selected_clients = [i.client_id for i in selected_clients]
 
@@ -432,7 +440,8 @@ class MultiFedAvg:
 
     def get_result_path(self, train_test):
 
-        result_path = """results/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/{}/""".format(
+        result_path = """results/experiment_id_{}/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/{}/""".format(
+            self.experiment_id,
             self.total_clients,
             self.alpha,
             self.dataset,

@@ -31,7 +31,7 @@ from flcore.servers.server_hmultifedavg import HMultiFedAvg
 # from flcore.servers.serveravg_rr import MultiFedAvgRR
 # from flcore.servers.server_multifedefficiency import MultiFedEfficiency
 
-from flcore.clients.utils.models import CNN, CNN_3, CNNDistillation, GRU, LSTM
+from flcore.clients.utils.models import CNN, CNN_3, CNNDistillation, GRU, LSTM, TinyImageNetCNN
 
 logger = logging.getLogger()
 logger.setLevel(logging.ERROR)
@@ -50,7 +50,8 @@ emb_dim=32
 def load_model(model_name, dataset, strategy, device):
     try:
         num_classes = {'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'Tiny-ImageNet': 200,
-         'ImageNet100': 15, 'ImageNet': 15, "ImageNet_v2": 15, "Gowalla": 7}[dataset]
+         'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7}[dataset]
+        out_channel = 32
         if model_name == 'CNN':
             if dataset in ['MNIST']:
                 input_shape = 1
@@ -67,11 +68,18 @@ def load_model(model_name, dataset, strategy, device):
             elif dataset in ["ImageNet"]:
                 input_shape=3
                 mid_dim=1600
+            elif dataset in ["ImageNet10"]:
+                input_shape=3
+                # mid_dim=21632
+                # out_channel = 64
+                input_shape = 3
+                mid_dim = 1600
+                # return TinyImageNetCNN()
             elif dataset == "CIFAR10":
                 input_shape = 3
                 mid_dim = 400*4
                 logger.info("""leu cifar com {} {} {}""".format(input_shape, mid_dim, num_classes))
-            return CNN(input_shape=input_shape, num_classes=num_classes, mid_dim=mid_dim)
+            return CNN(input_shape=input_shape, out_channel=out_channel, num_classes=num_classes, mid_dim=mid_dim)
         elif model_name == 'CNN_3':
             if dataset in ['MNIST']:
                 input_shape = 1
@@ -89,6 +97,10 @@ def load_model(model_name, dataset, strategy, device):
                 input_shape = 3
                 mid_dim = 16
                 logger.info("""leu imagenet com {} {} {}""".format(input_shape, mid_dim, num_classes))
+            elif dataset == "ImageNet10":
+                input_shape = 3
+                mid_dim = 16
+                logger.info("""leu imagenet10 com {} {} {}""".format(input_shape, mid_dim, num_classes))
             elif dataset == "CIFAR10":
                 input_shape = 3
                 mid_dim = 16
@@ -255,7 +267,8 @@ if __name__ == "__main__":
     else:
         log_name = args.strategy
 
-    result_path = """results/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/log_{}.txt""".format(args.total_clients,
+    result_path = """results/experiment_id_{}/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/log_{}.txt""".format(args.experiment_id,
+                                                                                                                       args.total_clients,
                                                                                                             [float(i) for i in args.alpha],
                                                                                                             args.dataset,
                                                                                                             args.model,

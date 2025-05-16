@@ -42,13 +42,13 @@ logger = logging.getLogger(__name__)  # Create logger for the module
 #         return self.fc3(x)
 
 class CNN(nn.Module):
-    def __init__(self, input_shape=1, mid_dim=256, num_classes=10):
+    def __init__(self, input_shape=1, out_channel=32, mid_dim=256, num_classes=10):
         try:
             self.mid_dim = mid_dim
             super(CNN, self).__init__()
             self.conv1 = nn.Sequential(
                 nn.Conv2d(input_shape,
-                          32,
+                          out_channel,
                           kernel_size=5,
                           padding=0,
                           stride=1,
@@ -57,8 +57,8 @@ class CNN(nn.Module):
                 nn.MaxPool2d(kernel_size=(2, 2))
             )
             self.conv2 = nn.Sequential(
-                nn.Conv2d(32,
-                          64,
+                nn.Conv2d(out_channel,
+                          out_channel * 2,
                           kernel_size=5,
                           padding=0,
                           stride=1,
@@ -72,8 +72,8 @@ class CNN(nn.Module):
             )
             self.fc = nn.Linear(512, num_classes)
         except Exception as e:
-            logger.info("CNN")
-            logger.info('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+            print("CNN")
+            print('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def forward(self, x):
         try:
@@ -84,8 +84,55 @@ class CNN(nn.Module):
             out = self.fc(out)
             return out
         except Exception as e:
-            logger.info("""CNN forward {}""".format(self.mid_dim))
-            logger.info('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+            print("""CNN forward {}""".format(self.mid_dim))
+            print('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+import torch.nn as nn
+import torch.nn.functional as F
+
+class TinyImageNetCNN(nn.Module):
+    def __init__(self, num_classes=10):
+        try:
+            super(TinyImageNetCNN, self).__init__()
+            self.features = nn.Sequential(
+                nn.Conv2d(3, 64, kernel_size=3, padding=1),
+                nn.BatchNorm2d(64),
+                nn.ReLU(),
+                nn.MaxPool2d(2),  # 32x32
+
+                nn.Conv2d(64, 128, kernel_size=3, padding=1),
+                nn.BatchNorm2d(128),
+                nn.ReLU(),
+                nn.MaxPool2d(2),  # 16x16
+
+                nn.Conv2d(128, 256, kernel_size=3, padding=1),
+                nn.BatchNorm2d(256),
+                nn.ReLU(),
+                nn.MaxPool2d(2),  # 8x8
+            )
+
+            self.classifier = nn.Sequential(
+                nn.Flatten(),
+                nn.Linear(256 * 8 * 8, 1024),
+                nn.ReLU(),
+                nn.Dropout(0.5),
+                nn.Linear(1024, num_classes)
+            )
+
+        except Exception as e:
+            print("CNN tiny init error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+    def forward(self, x):
+
+        try:
+            x = self.features(x)
+            x = self.classifier(x)
+            return x
+        except Exception as e:
+            print("CNN tiny forward error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
 
 class CNN_3(nn.Module):
     def __init__(self, input_shape=1, mid_dim=256, num_classes=10):
@@ -118,8 +165,8 @@ class CNN_3(nn.Module):
 
         except Exception as e:
 
-            logger.info("CNN_3 init")
-            logger.info('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+            print("CNN_3 init")
+            print('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def forward(self, x):
         try:
@@ -132,8 +179,8 @@ class CNN_3(nn.Module):
             out = self.fc2(out)
             return out
         except Exception as e:
-            logger.info("CNN_3 forward")
-            logger.info('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+            print("CNN_3 forward")
+            print('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 class CNN_3_proto(torch.nn.Module):
     def __init__(self, input_shape, mid_dim=64, num_classes=10):
@@ -197,8 +244,8 @@ class CNN_3_proto(torch.nn.Module):
             self.fc = torch.nn.Linear(512, num_classes)
 
         except Exception as e:
-            logger.info("CNN_3_proto")
-            logger.info('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+            print("CNN_3_proto")
+            print('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def forward(self, x):
         try:
@@ -206,8 +253,8 @@ class CNN_3_proto(torch.nn.Module):
             out = self.fc(proto)
             return out, proto
         except Exception as e:
-            logger.info("CNN_3_proto")
-            logger.info('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+            print("CNN_3_proto")
+            print('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 class CNN_student(nn.Module):
     def __init__(self, input_shape=1, mid_dim=256, num_classes=10):
@@ -243,8 +290,8 @@ class CNN_student(nn.Module):
             #     nn.ReLU(inplace=True))
             self.out = nn.Linear(512, num_classes)
         except Exception as e:
-            logger.info("CNN student")
-            logger.info('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+            print("CNN student")
+            print('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def forward(self, x):
         try:
@@ -252,8 +299,8 @@ class CNN_student(nn.Module):
             out = self.out(proto)
             return out, proto
         except Exception as e:
-            logger.info("CNN student forward")
-            logger.info('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+            print("CNN student forward")
+            print('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 class CNNDistillation(nn.Module):
     def __init__(self, input_shape=1, mid_dim=256, num_classes=10, dataset='CIFAR10'):
@@ -276,8 +323,8 @@ class CNNDistillation(nn.Module):
                 mid_dim = 4
             self.teacher = CNN_3_proto(input_shape=input_shape, mid_dim=mid_dim, num_classes=num_classes)
         except Exception as e:
-            logger.info("CNNDistillation")
-            logger.info('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+            print("CNNDistillation")
+            print('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def forward(self, x):
         try:
@@ -285,8 +332,8 @@ class CNNDistillation(nn.Module):
             out_teacher, proto_teacher = self.teacher(x)
             return out_student, proto_student, out_teacher, proto_teacher
         except Exception as e:
-            logger.info("CNNDistillation forward")
-            logger.info('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+            print("CNNDistillation forward")
+            print('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 class LSTM(torch.nn.Module):
     def __init__(self, input_shape, device, num_layers=1, hidden_size=2, sequence_length=28, num_classes=10):
@@ -302,12 +349,12 @@ class LSTM(torch.nn.Module):
             self.output_size = num_classes
             self.time_length = sequence_length
 
-            self.embedding_category = nn.Embedding(num_embeddings=7, embedding_dim=6)
-            self.embedding_hour = nn.Embedding(num_embeddings=48, embedding_dim=15)
-            # self.embedding_distance = nn.Embedding(num_embeddings=51, embedding_dim=15)
-            # self.embedding_duration = nn.Embedding(num_embeddings=49, embedding_dim=15)
+            self.embedding_category = nn.Embedding(num_embeddings=7, embedding_dim=2)
+            self.embedding_hour = nn.Embedding(num_embeddings=48, embedding_dim=2)
+            # self.embedding_distance = nn.Embedding(num_embeddings=51, embedding_dim=2)
+            # self.embedding_duration = nn.Embedding(num_embeddings=49, embedding_dim=2)
 
-            self.lstm = nn.LSTM(23, self.hidden_size, self.num_layers, batch_first=True)
+            self.lstm = nn.LSTM(6, self.hidden_size, self.num_layers, batch_first=False)
             self.dp = nn.Dropout(0.5)
             self.fc = nn.Linear(self.time_length * self.hidden_size, self.output_size, bias=True)
         except Exception as e:
@@ -380,8 +427,8 @@ class GRU(torch.nn.Module):
             self.dp = nn.Dropout(0.5)
             self.fc = nn.Linear(self.time_length * self.hidden_size, self.output_size, bias=True)
         except Exception as e:
-            logger.info("GRU init")
-            logger.info('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
+            print("GRU init")
+            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
 
     def forward(self, x):
         try:
@@ -394,5 +441,5 @@ class GRU(torch.nn.Module):
             out = self.fc(x)
             return out
         except Exception as e:
-            logger.info("GRU forward")
-            logger.info('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
+            print("GRU forward")
+            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)

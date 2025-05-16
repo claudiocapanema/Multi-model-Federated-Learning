@@ -8,14 +8,14 @@ import torch.nn.functional as F
 from flwr_datasets import FederatedDataset
 from flwr_datasets.partitioner import IidPartitioner, DirichletPartitioner
 from torch.utils.data import DataLoader
-from torchvision.transforms import Compose, Resize, RandomHorizontalFlip, RandomResizedCrop, RandomAffine, ColorJitter,  Normalize, ToTensor, RandomRotation, Lambda
+from torchvision.transforms import Compose, Resize, RandomHorizontalFlip, RandomResizedCrop, RandomAffine, ColorJitter,  Normalize, ToTensor, RandomRotation, Lambda, Grayscale, GaussianBlur, RandomInvert, AutoAugment, AutoAugmentPolicy, RandomAutocontrast, RandomGrayscale, ElasticTransform, RandomCrop, RandAugment
 from sklearn import metrics
 from sklearn.preprocessing import label_binarize
 import numpy as np
 import sys
-from flcore.clients.utils.models import CNN, CNN_3, CNNDistillation, GRU, LSTM
+from .models import CNN, CNN_3, CNNDistillation, GRU, LSTM, TinyImageNetCNN
 import  datasets as dt
-from flcore.clients.utils.custom_federated_dataset import CustomFederatedDataset
+from .custom_federated_dataset import CustomFederatedDataset
 
 
 import logging
@@ -55,15 +55,16 @@ def fedpredict_client_weight_predictions_torch(output: torch.Tensor, t: int, cur
         return output
 
     except Exception as e:
-        logger.error("FedPredict client weight prediction")
-        logger.error("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+        print("FedPredict client weight prediction")
+        print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-DATASET_INPUT_MAP = {"CIFAR10": "img", "MNIST": "image", "EMNIST": "image", "GTSRB": "image", "Gowalla": "sequence", "WISDM-W": "sequence", "ImageNet": "image"}
+DATASET_INPUT_MAP = {"CIFAR10": "img", "MNIST": "image", "EMNIST": "image", "GTSRB": "image", "Gowalla": "sequence",
+                     "WISDM-W": "sequence", "ImageNet": "image", "ImageNet10": "image"}
 
 def load_model(model_name, dataset, strategy, device):
     try:
         num_classes = {'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'Tiny-ImageNet': 200,
-         'ImageNet100': 15, 'ImageNet': 15, "ImageNet_v2": 15, "Gowalla": 7}[dataset]
+         'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7}[dataset]
         if model_name == 'CNN':
             if dataset in ['MNIST']:
                 input_shape = 1
@@ -77,7 +78,10 @@ def load_model(model_name, dataset, strategy, device):
                 input_shape = 3
                 mid_dim = 36*4
                 logger.info("""leu gtsrb com {} {} {}""".format(input_shape, mid_dim, num_classes))
-            elif dataset in ["ImageNet"]:
+            elif dataset == "ImageNet":
+                input_shape=3
+                mid_dim=1600
+            elif dataset == "ImageNet10":
                 input_shape=3
                 mid_dim=1600
             elif dataset == "CIFAR10":
@@ -102,6 +106,11 @@ def load_model(model_name, dataset, strategy, device):
                 input_shape = 3
                 mid_dim = 16
                 logger.info("""leu imagenet com {} {} {}""".format(input_shape, mid_dim, num_classes))
+            elif dataset == "ImageNet10":
+                input_shape = 3
+                mid_dim = 16
+                return TinyImageNetCNN()
+                logger.info("""leu imagenet10 com {} {} {}""".format(input_shape, mid_dim, num_classes))
             elif dataset == "CIFAR10":
                 input_shape = 3
                 mid_dim = 16
@@ -123,8 +132,8 @@ def load_model(model_name, dataset, strategy, device):
         raise ValueError("""Model not found for model {} and dataset {}""".format(model_name, dataset))
 
     except Exception as e:
-        logger.error("""load_model error""")
-        logger.error("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+        print("""load_model error""")
+        print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 
 fds = None
@@ -133,15 +142,15 @@ def get_weights(net):
     try:
         return [val.cpu().numpy() for _, val in net.state_dict().items()]
     except Exception as e:
-        logger.error("get_weights error")
-        logger.error("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+        print("get_weights error")
+        print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 def get_weights_fedkd(net):
     try:
         return [val.cpu().numpy() for _, val in net.student.state_dict().items()]
     except Exception as e:
-        logger.error("get_weights_fedkd error")
-        logger.error("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+        print("get_weights_fedkd error")
+        print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 
 def set_weights(net, parameters):
@@ -152,9 +161,9 @@ def set_weights(net, parameters):
         # for new_param, old_param in zip(parameters, net.parameters()):
         #     old_param.data = new_param.data.clone()
     except Exception as e:
-        logger.error("set_weights error")
-        logger.error(f"tipo {type(net)}")
-        logger.error("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+        print("set_weights error")
+        print(f"tipo {type(net)}")
+        print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
         exit()
 
 def set_weights_fedkd(net, parameters):
@@ -163,8 +172,8 @@ def set_weights_fedkd(net, parameters):
         state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
         net.student.load_state_dict(state_dict, strict=True)
     except Exception as e:
-        logger.error("set_weights_fedkd error")
-        logger.error("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+        print("set_weights_fedkd error")
+        print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 
 fds = {}  # Cache FederatedDataset
@@ -181,26 +190,28 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
             if dataset_name not in fds:
                 partitioner = DirichletPartitioner(num_partitions=num_partitions, partition_by="label",
 
-                                                   alpha=alpha, min_partition_size=10,
+                                                   alpha=alpha, min_partition_size=50, seed=1,
 
                                                    self_balancing=True)
                 fds[dataset_name] = FederatedDataset(
                     dataset={"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "MNIST": "ylecun/mnist",
                              "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas",
-                             "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"}[dataset_name],
+                             "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
+                             , "ImageNet10": "claudiogsc/ImageNet-10_household_objects"}[dataset_name],
                     partitioners={"train": partitioner},
                     seed=42
                 )
         else:
             # dts = dt.load_from_disk(f"datasets/{dataset_name}")
             partitioner = DirichletPartitioner(num_partitions=num_partitions, partition_by="label",
-                                               alpha=alpha, min_partition_size=10,
+                                               alpha=alpha, min_partition_size=50, seed=1,
                                                self_balancing=True)
             logger.info("dataset from volume")
             fd = CustomFederatedDataset(
                 dataset={"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "MNIST": "ylecun/mnist",
                          "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas",
-                         "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"}[
+                         "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
+                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects"}[
                     dataset_name],
                 partitioners={"train": partitioner},
                 path=f"datasets/{dataset_name}",
@@ -224,66 +235,121 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
         test_size = 1 - data_sampling_percentage
         partition_train_test = partition.train_test_split(test_size=test_size, seed=42)
 
-        if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "WISDM-W", "Gowalla"]:
-            pytorch_transforms = {"CIFAR10": Compose(
-                [ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
-                "MNIST": Compose([ToTensor(), RandomRotation(10),
-                                                   Normalize([0.5], [0.5])]),
-                "EMNIST": Compose([ToTensor(), RandomRotation(10),
-                                  Normalize([0.5], [0.5])]),
-                "GTSRB": Compose(
-                            [
-
-                                Resize((32, 32)),
-                                RandomHorizontalFlip(),  # FLips the image w.r.t horizontal axis
-                                RandomRotation(10),  # Rotates the image to a specified angel
-                                RandomAffine(0, shear=10, scale=(0.8, 1.2)),
-                                # Performs actions like zooms, change shear angles.
-                                ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
-                                ToTensor(),
-                                Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
-                            ]
-                        ),
-                "ImageNet": Compose(
-                        [
-
-                            Resize(32),
-                            RandomHorizontalFlip(),
-                            ToTensor(),
-                            Normalize(mean=[0.485, 0.456, 0.406],
-                                         std=[0.229, 0.224, 0.225])
-                            # transforms.Resize((32, 32)),
-                            # transforms.ToTensor(),
-                            # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-                        ]
-                    ),
-                "WISDM-W": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32))),
-                "Gowalla": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32))),
-
-            }[dataset_name]
+        if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla"]:
+            pytorch_transforms_train = get_transform(dataset_name, "train")
+            pytorch_transforms_test = get_transform(dataset_name, "test")
 
         # import torchvision.datasets as datasets
         # datasets.EMNIST
         key = DATASET_INPUT_MAP[dataset_name]
 
-        def apply_transforms(batch):
+        def apply_transforms_train(batch):
             """Apply transforms to the partition from FederatedDataset."""
 
-            batch[key] = [pytorch_transforms(img) for img in batch[key]]
+            batch[key] = [pytorch_transforms_train(img) for img in batch[key]]
             # logger.info("""bath key: {}""".format(batch[key]))
             return batch
 
-        if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "WISDM-W", "Gowalla"]:
-            partition_train_test = partition_train_test.with_transform(apply_transforms)
+        def apply_transforms_test(batch):
+            """Apply transforms to the partition from FederatedDataset."""
+
+            batch[key] = [pytorch_transforms_test(img) for img in batch[key]]
+            # logger.info("""bath key: {}""".format(batch[key]))
+            return batch
+
+        if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla"]:
+            partition_train = partition_train_test["train"].with_transform(apply_transforms_train)
+            partition_test = partition_train_test["test"].with_transform(apply_transforms_test)
+
+        def seed_worker(worker_id):
+            np.random.seed(partition_id)
+            random.seed(partition_id)
+
+        g = torch.Generator()
+        g.manual_seed(partition_id)
         trainloader = DataLoader(
-            partition_train_test["train"], batch_size=batch_size, shuffle=True
+            partition_train, batch_size=batch_size, shuffle=True, worker_init_fn=seed_worker, generator=g
         )
-        testloader = DataLoader(partition_train_test["test"], batch_size=batch_size)
+        testloader = DataLoader(partition_test, batch_size=batch_size)
         return trainloader, testloader
 
     except Exception as e:
-        logger.error("load_data error")
-        logger.error("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+        print("load_data error")
+        print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+def get_transform(dataset_name, train_test):
+    pytorch_transforms = {"CIFAR10": {"train":
+                                          Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
+                                      "test": Compose(
+                                          [ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])},
+                          "MNIST": Compose([ToTensor(), RandomRotation(10),
+                                            Normalize([0.5], [0.5])]),
+                          "EMNIST": Compose([ToTensor(), RandomRotation(10),
+                                             Normalize([0.5], [0.5])]),
+                          "GTSRB": Compose(
+                              [
+
+                                  Resize((32, 32)),
+                                  RandomHorizontalFlip(),  # FLips the image w.r.t horizontal axis
+                                  RandomRotation(10),  # Rotates the image to a specified angel
+                                  RandomAffine(0, shear=10, scale=(0.8, 1.2)),
+                                  # Performs actions like zooms, change shear angles.
+                                  ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+                                  ToTensor(),
+                                  Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
+                              ]
+                          ),
+                          "ImageNet": Compose(
+                              [
+
+                                  Resize(32),
+                                  RandomHorizontalFlip(),
+                                  ToTensor(),
+                                  Normalize(mean=[0.485, 0.456, 0.406],
+                                            std=[0.229, 0.224, 0.225])
+                                  # transforms.Resize((32, 32)),
+                                  # transforms.ToTensor(),
+                                  # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                              ]
+                          ),
+                          "ImageNet10": {"train":
+                              Compose(
+                                  [
+
+                                      Resize(32),
+                                      ToTensor(),
+                                      Normalize(mean=[0.485, 0.456, 0.406],
+                                                std=[0.229, 0.224, 0.225]),
+                                      # transforms.Resize((32, 32)),
+                                      # transforms.ToTensor(),
+                                      # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                                  ]
+                              ),
+                              "test":
+                                  Compose(
+                                      [
+                                          Resize(32),
+                                          ToTensor(),
+                                          Normalize(mean=[0.485, 0.456, 0.406],
+                                                    std=[0.229, 0.224, 0.225]),
+                                          # transforms.Resize((32, 32)),
+                                          # transforms.ToTensor(),
+                                          # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                                      ]
+                                  )
+                          }
+                          # Compose([AutoAugment(policy=AutoAugmentPolicy.CIFAR10), Resize(32), ToTensor(),
+                          #             Normalize(mean=[0.485, 0.456, 0.406],
+                          #                          std=[0.229, 0.224, 0.225])])
+        ,
+                          "WISDM-W": {"train": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32))),
+                                      "test": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32)))},
+                          "Gowalla": {"train": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32))),
+                                      "test": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32)))}
+
+                          }[dataset_name][train_test]
+
+    return pytorch_transforms
 
 def train(model, trainloader, valloader, optimizer, epochs, learning_rate, device, client_id, t, dataset_name, n_classes, concept_drift_window=0):
     try:
@@ -309,7 +375,7 @@ def train(model, trainloader, valloader, optimizer, epochs, learning_rate, devic
 
                 optimizer.zero_grad()
                 outputs = model(x)
-                # logger.info("""saida: {} true: {}""".format(outputs, labels))
+                # print("""saida: {} true: {}""".format(outputs, labels))
                 loss = criterion(outputs, labels)
                 loss.backward()
                 loss_total += loss.item() * labels.shape[0]
@@ -326,7 +392,7 @@ def train(model, trainloader, valloader, optimizer, epochs, learning_rate, devic
         balanced_accuracy = float(metrics.balanced_accuracy_score(y_true, y_prob))
 
         train_metrics = {"Train accuracy": accuracy, "Train balanced accuracy": balanced_accuracy, "Train loss": loss, "Train round (t)": t}
-        logger.info(train_metrics)
+        # print(train_metrics)
 
         val_loss, test_metrics = test(model, valloader, device, client_id, t, dataset_name, n_classes)
         results = {
@@ -341,8 +407,8 @@ def train(model, trainloader, valloader, optimizer, epochs, learning_rate, devic
         return results
 
     except Exception as e:
-        logger.error("train error")
-        logger.error("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+        print("train error")
+        print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 def train_fedkd(model, trainloader, valloader, epochs, learning_rate, device, client_id, t, dataset_name, n_classes):
     """Train the utils on the training set."""
@@ -414,8 +480,8 @@ def train_fedkd(model, trainloader, valloader, epochs, learning_rate, device, cl
         return results
 
     except Exception as e:
-        logger.error("""Error on train_fedkd""")
-        logger.error('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+        print("""Error on train_fedkd""")
+        print('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 
 def test(model, testloader, device, client_id, t, dataset_name, n_classes, concept_drift_window=0):
@@ -459,8 +525,8 @@ def test(model, testloader, device, client_id, t, dataset_name, n_classes, conce
         return loss, test_metrics
 
     except Exception as e:
-        logger.error(" error")
-        logger.error("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+        print(" error")
+        print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 def test_fedkd(model, testloader, device, client_id, t, dataset_name, n_classes):
         try:
@@ -502,8 +568,8 @@ def test_fedkd(model, testloader, device, client_id, t, dataset_name, n_classes)
             # logger.info("""metricas cliente {} valores {}""".format(client_id, test_metrics))
             return loss, test_metrics
         except Exception as e:
-            logger.error("Error test_fedkd")
-            logger.error('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+            print("Error test_fedkd")
+            print('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 def test_fedpredict(model, testloader, device, client_id, t, dataset_name, n_classes, s, p, concept_drift_window=0):
     try:
@@ -550,8 +616,8 @@ def test_fedpredict(model, testloader, device, client_id, t, dataset_name, n_cla
         return loss, test_metrics
 
     except Exception as e:
-        logger.error(" error")
-        logger.error("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+        print(" error")
+        print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 
 def test_fedkd_fedpredict(lt, model, testloader, device, client_id, t, dataset_name, n_classes):
@@ -596,5 +662,5 @@ def test_fedkd_fedpredict(lt, model, testloader, device, client_id, t, dataset_n
         # logger.info("""metricas cliente {} valores {}""".format(client_id, test_metrics))
         return loss, test_metrics
     except Exception as e:
-        logger.error("Error test_fedkd_fedpredict")
-        logger.error('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+        print("Error test_fedkd_fedpredict")
+        print('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
