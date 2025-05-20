@@ -348,21 +348,21 @@ def idmax(df, n_solutions):
 
 
 if __name__ == "__main__":
-    experiment_id = 1
+    experiment_id = 2
     total_clients = 30
     # alphas = [10.0, 10.0]
-    alphas = [0.1, 0.1, 0.1]
-    # alphas = [1.0, 1.0, 1.0]
+    # alphas = [1.0, 0.1, 0.1]
+    alphas = [0.1, 0.1]
     # alphas = [1.0, 1.0]
-    # alphas = [0.1, 0.1]
     # alphas = [10.0, 0.1]
-    # dataset = ["WISDM-W", "ImageNet"]
-    dataset = ["WISDM-W", "ImageNet", "CIFAR10"]
+    # dataset = ["WISDM-W", "CIFAR10"]
+    # dataset = ["WISDM-W", "ImageNet10", "Gowalla"]
+    dataset = ["WISDM-W", "ImageNet10"]
     # dataset = ["EMNIST", "CIFAR10"]
     # models_names = ["cnn_c"]
-    model_name = ["gru", "CNN", "CNN_3"]
-    # model_name = ["gru", "CNN"]
-    fraction_fit = 0.7
+    # model_name = ["gru", "CNN", "lstm"]
+    model_name = ["gru", "CNN"]
+    fraction_fit = 0.3
     number_of_rounds = 100
     local_epochs = 1
     round_new_clients = 0

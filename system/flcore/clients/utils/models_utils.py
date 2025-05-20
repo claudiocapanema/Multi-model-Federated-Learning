@@ -190,7 +190,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
             if dataset_name not in fds:
                 partitioner = DirichletPartitioner(num_partitions=num_partitions, partition_by="label",
 
-                                                   alpha=alpha, min_partition_size=50, seed=1,
+                                                   alpha=alpha, min_partition_size=10, seed=1,
 
                                                    self_balancing=True)
                 fds[dataset_name] = FederatedDataset(
@@ -204,7 +204,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
         else:
             # dts = dt.load_from_disk(f"datasets/{dataset_name}")
             partitioner = DirichletPartitioner(num_partitions=num_partitions, partition_by="label",
-                                               alpha=alpha, min_partition_size=50, seed=1,
+                                               alpha=alpha, min_partition_size=10, seed=1,
                                                self_balancing=True)
             logger.info("dataset from volume")
             fd = CustomFederatedDataset(

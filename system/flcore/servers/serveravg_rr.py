@@ -31,12 +31,13 @@ class MultiFedAvgRR(MultiFedAvg):
         step = t % self.M
         np.random.seed(seed)
         if self.random_join_ratio:
-            self.current_num_join_clients = \
-            np.random.choice(range(self.num_join_clients, self.num_clients + 1), 1, replace=False)[0]
+            selected_clients = list(np.random.choice(self.clients, self.num_training_clients, replace=False))
+            selected_clients = [i.client_id for i in selected_clients]
+            self.current_num_join_clients = self.num_training_clients
         else:
-            self.current_num_join_clients = self.num_join_clients
+            self.current_num_join_clients = self.num_training_clients
         selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
-        selected_clients = [i.id for i in selected_clients]
+        selected_clients = [i.client_id for i in selected_clients]
 
         n = len(selected_clients) // self.M
         sc = np.array_split(selected_clients, self.M)

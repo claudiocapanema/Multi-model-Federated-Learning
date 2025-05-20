@@ -350,11 +350,11 @@ class LSTM(torch.nn.Module):
             self.time_length = sequence_length
 
             self.embedding_category = nn.Embedding(num_embeddings=7, embedding_dim=2)
-            self.embedding_hour = nn.Embedding(num_embeddings=48, embedding_dim=2)
+            self.embedding_hour = nn.Embedding(num_embeddings=48, embedding_dim=3)
             # self.embedding_distance = nn.Embedding(num_embeddings=51, embedding_dim=2)
             # self.embedding_duration = nn.Embedding(num_embeddings=49, embedding_dim=2)
 
-            self.lstm = nn.LSTM(6, self.hidden_size, self.num_layers, batch_first=False)
+            self.lstm = nn.LSTM(7, self.hidden_size, self.num_layers, batch_first=False)
             self.dp = nn.Dropout(0.5)
             self.fc = nn.Linear(self.time_length * self.hidden_size, self.output_size, bias=True)
         except Exception as e:
@@ -380,6 +380,8 @@ class LSTM(torch.nn.Module):
             # print("valores: ", hour)
             category_embbeded = self.embedding_category(category)
             hour_embedded = self.embedding_hour(hour)
+            distance = distance / 60
+            duration = duration / 60
             # distance_embedded = self.embedding_distance(distance)
             # duration_embedded = self.embedding_duration(duration)
 

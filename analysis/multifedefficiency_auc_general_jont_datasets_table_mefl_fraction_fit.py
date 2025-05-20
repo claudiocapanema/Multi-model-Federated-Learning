@@ -38,12 +38,11 @@ def read_data(read_solutions, read_dataset_order):
                 df["Solution"] = np.array([solution] * len(df))
                 df["Accuracy (%)"] = df["Accuracy"] * 100
                 df["Balanced accuracy (%)"] = df["Balanced accuracy"] * 100
-                df["Dataset"] = np.array([dataset.replace("WISDM-W", "WISDM").replace("ImageNet10", "ImageNet-10")] * len(df))
+                df["Dataset"] = np.array(["All datasets"] * len(df))
                 df["Table"] = np.array([solution_strategy_version[solution]["Table"]] * len(df))
                 df["Strategy"] = np.array([solution_strategy_version[solution]["Strategy"]] * len(df))
                 df["Version"] = np.array([solution_strategy_version[solution]["Version"]] * len(df))
                 df["Alpha"] = np.array([0.1] * len(df))
-                # df["Efficiency"] = np.array(df["# training clients"])
 
                 if df_concat is None:
                     df_concat = df
@@ -70,12 +69,13 @@ def group_by(df, metric):
 def table(df, write_path, metric, t=None):
     datasets = df["Dataset"].unique().tolist()
     alphas = sorted(df["Alpha"].unique().tolist())
+    fraction_fit = sorted(df["Fraction fit"].unique().tolist())
     columns = df["Table"].unique().tolist()
     n_strategies = str(len(columns))
 
     print(columns)
 
-    model_report = {i: {} for i in alphas}
+    model_report = {i: {} for i in fraction_fit}
     if t is not None:
         df = df[df['Round (t)'].isin(t)]
 
@@ -98,24 +98,26 @@ def table(df, write_path, metric, t=None):
     ci = 0.95
 
     # for alpha in model_report:
-    models_datasets_dict = {dt: {} for dt in datasets}
-    for column in columns:
-        for dt in datasets:
-            # models_datasets_dict[dt][column] = t_distribution((filter(df_test, dt,
-            #                                                           alpha=float(alpha), strategy=column)[
-            #     metric]).tolist(), ci)
-            filtered = df_test.query(f"Dataset == '{dt}' and Table == '{column}'")
-            size = filtered.shape[0]
-            re = group_by(filtered, metric=metric)
-            models_datasets_dict[dt][column] = re / size
-
-    model_metrics = []
-
-    for dt in datasets:
+    models_datasets_dict = {dt: {column: {} for column in columns} for dt in datasets}
+    for ff in fraction_fit:
         for column in columns:
-            model_metrics.append(str(round(models_datasets_dict[dt][column], 2)))
+            for dt in datasets:
+                # models_datasets_dict[dt][column] = t_distribution((filter(df_test, dt,
+                #                                                           alpha=float(alpha), strategy=column)[
+                #     metric]).tolist(), ci)
+                filtered = df_test.query(f"Dataset == '{dt}' and Table == '{column}'")
+                filtered = filtered[filtered['Fraction fit'] == ff]
+                size = filtered.shape[0]
+                re = group_by(filtered, metric=metric)
+                models_datasets_dict[dt][column][ff] = re / size
 
-    models_dict[0.1] = model_metrics
+        model_metrics = []
+
+        for dt in datasets:
+            for column in columns:
+                model_metrics.append(str(round(models_datasets_dict[dt][column][ff], 2)))
+
+        models_dict[ff] = model_metrics
 
     print(models_dict)
     print(index)
@@ -145,7 +147,7 @@ def table(df, write_path, metric, t=None):
     print("melhorias")
     print(df_accuracy_improvements)
 
-    indexes = alphas
+    indexes = fraction_fit
     for i in range(df_accuracy_improvements.shape[0]):
         row = df_accuracy_improvements.iloc[i]
         for index in indexes:
@@ -187,9 +189,9 @@ def table(df, write_path, metric, t=None):
 
     Path(write_path).mkdir(parents=True, exist_ok=True)
     if t is not None:
-        filename = """{}latex_round_auc_general_{}_{}.txt""".format(write_path, [min(t), max(t)], metric)
+        filename = """{}latex_round_auc_general_joint_datasets_{}_{}_fraction_fit.txt""".format(write_path, t, metric)
     else:
-        filename = """{}latex_auc_general_{}.txt""".format(write_path, metric)
+        filename = """{}latex_auc_general_joint_datasets_{}_fraction_fit.txt""".format(write_path, metric)
     pd.DataFrame({'latex': [latex]}).to_csv(filename, header=False, index=False)
 
     improvements(df_table, datasets, metric)
@@ -351,16 +353,19 @@ def idmax(df, n_solutions):
 if __name__ == "__main__":
     experiment_id = 2
     total_clients = 30
-    # alphas = [1.0, 0.1, 0.1]
-    alphas = [0.1, 0.1, 1.0]
+    # alphas = [10.0, 10.0]
+    alphas = [0.1, 0.1, 0.1]
     # alphas = [0.1, 0.1]
+    # alphas = [1.0, 1.0]
+    # alphas = [10.0, 0.1]
+    # dataset = ["WISDM-W", "CIFAR10"]
     dataset = ["WISDM-W", "ImageNet10", "Gowalla"]
     # dataset = ["WISDM-W", "ImageNet10"]
     # dataset = ["EMNIST", "CIFAR10"]
     # models_names = ["cnn_c"]
     model_name = ["gru", "CNN", "lstm"]
     # model_name = ["gru", "CNN"]
-    fraction_fit = 0.3
+    fraction_fit = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
     number_of_rounds = 100
     local_epochs = 1
     round_new_clients = 0
@@ -372,21 +377,22 @@ if __name__ == "__main__":
     read_dataset_order = []
     for solution in solutions:
         for dt in dataset:
-            algo = dt + "_" + solution
+            for ff in fraction_fit:
+                algo = dt + "_" + solution
 
-            read_path = """../system/results/experiment_id_{}/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/{}/""".format(
-                experiment_id,
-                total_clients,
-                alphas,
-                dataset,
-                model_name,
-                fraction_fit,
-                number_of_rounds,
-                local_epochs,
-                train_test)
-            read_dataset_order.append(dt)
+                read_path = """../system/results/experiment_id_{}/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/{}/""".format(
+                    experiment_id,
+                    total_clients,
+                    alphas,
+                    dataset,
+                    model_name,
+                    ff,
+                    number_of_rounds,
+                    local_epochs,
+                    train_test)
+                read_dataset_order.append(dt)
 
-            read_solutions[solution].append("""{}{}_{}.csv""".format(read_path, dt, solution))
+                read_solutions[solution].append("""{}{}_{}.csv""".format(read_path, dt, solution))
 
     write_path = """plots/MEFL/experiment_id_{}/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(
         experiment_id,
@@ -404,6 +410,4 @@ if __name__ == "__main__":
 
     table(df, write_path, "Balanced accuracy (%)", t=None)
     table(df, write_path, "Accuracy (%)", t=None)
-    table(df, write_path, "Accuracy (%)", t=[i for i in range(1, 31)])
-    table(df, write_path, "Accuracy (%)", t=[i for i in range(1, 51)])
-    table(df, write_path, "Accuracy (%)", t=[i for i in range(70, 101)])
+    table(df, write_path, "Accuracy (%)", t=[39,40])

@@ -35,7 +35,7 @@ def read_data(read_solutions, read_dataset_order):
                 df["Solution"] = np.array([solution] * len(df))
                 df["Accuracy (%)"] = df["Accuracy"] * 100
                 df["Balanced accuracy (%)"] = df["Balanced accuracy"] * 100
-                df["Dataset"] = np.array([dataset.replace("WISDM-W", "WISDM").replace("ImageNet", "ImageNet-15")] * len(df))
+                df["Dataset"] = np.array([dataset.replace("WISDM-W", "WISDM").replace("ImageNet10", "ImageNet-10")] * len(df))
                 df["Strategy"] = np.array([solution_strategy_version[solution]["Strategy"]] * len(df))
                 df["Version"] = np.array([solution_strategy_version[solution]["Version"]] * len(df))
 
@@ -70,7 +70,7 @@ def line(df, base_dir, x, y, hue=None, style=None, ci=None, hue_order=None, y_ma
                   hue=hue, hue_order=hue_order, ci=ci, title="", tipo=None, y_lim=True, y_max=y_max)
         axs[j].set_title(r"""Dataset: {}""".format(datasets[j]), size=10)
 
-        if j == 1:
+        if j > 0:
             axs[j].get_legend().remove()
 
     # lines_labels = [axs[0].get_legend_handles_labels()]
@@ -113,14 +113,17 @@ if __name__ == "__main__":
     experiment_id = 2
     total_clients = 30
     # alphas = [10.0, 10.0]
-    alphas = [0.1, 0.1, 0.1]
+    # alphas = [1.0, 0.1, 0.1]
+    alphas = [0.1, 0.1]
     # alphas = [1.0, 1.0]
     # alphas = [10.0, 0.1]
     # dataset = ["WISDM-W", "CIFAR10"]
-    dataset = ["WISDM-W", "ImageNet10", "Gowalla"]
+    # dataset = ["WISDM-W", "ImageNet10", "Gowalla"]
+    dataset = ["WISDM-W", "ImageNet10"]
     # dataset = ["EMNIST", "CIFAR10"]
     # models_names = ["cnn_c"]
-    model_name = ["gru", "CNN", "lstm"]
+    # model_name = ["gru", "CNN", "lstm"]
+    model_name = ["gru", "CNN"]
     fraction_fit = 0.3
     number_of_rounds = 100
     local_epochs = 1
