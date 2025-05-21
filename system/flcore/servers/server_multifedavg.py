@@ -211,7 +211,7 @@ class MultiFedAvg:
                 if len(weights_results) > 1:
                     aggregated_ndarrays_mefl[me] = aggregate(weights_results)
                 elif len(weights_results) == 1:
-                    aggregated_ndarrays_mefl[me] = results_mefl[me][1].parameters
+                    aggregated_ndarrays_mefl[me] = results_mefl[me][0][0]
 
             for me in trained_models:
                 self.parameters_aggregated_mefl[me] = aggregated_ndarrays_mefl[me]

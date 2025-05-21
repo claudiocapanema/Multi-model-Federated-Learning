@@ -14,10 +14,9 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
-
+import sys
 import time
 import numpy as np
-from flcore.clients.clientavg import clientAVG
 from flcore.servers.server_multifedavg import MultiFedAvg
 from threading import Thread
 
@@ -27,34 +26,39 @@ class MultiFedAvgRR(MultiFedAvg):
         super().__init__(args, times)
 
     def select_clients(self, t):
-        seed = t // self.M
-        step = t % self.M
-        np.random.seed(seed)
-        if self.random_join_ratio:
+
+        try:
+            seed = t // self.ME
+            step = t % self.ME
+            np.random.seed(seed)
             selected_clients = list(np.random.choice(self.clients, self.num_training_clients, replace=False))
             selected_clients = [i.client_id for i in selected_clients]
             self.current_num_join_clients = self.num_training_clients
-        else:
-            self.current_num_join_clients = self.num_training_clients
-        selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
-        selected_clients = [i.client_id for i in selected_clients]
 
-        n = len(selected_clients) // self.M
-        sc = np.array_split(selected_clients, self.M)
-        new_selected_clients = [[] for i in range(len(sc))]
-        if step > 0:
-            for i in range(len(sc)):
-                if i + step >= len(sc):
-                    diff = len(sc) - i - step
-                else:
-                    diff = i + step
-                new_selected_clients[i] = sc[diff]
-        # sc = [np.array(selected_clients[0:6])]
-        # sc.append(np.array(selected_clients[6:]))
+            n = len(selected_clients) // self.ME
+            sc = np.array_split(selected_clients, self.ME)
+            new_selected_clients = [[] for i in range(len(sc))]
+            if step > 0:
+                for i in range(len(sc)):
+                    if i + step >= len(sc):
+                        diff = len(sc) - i - step
+                    else:
+                        diff = i + step
+                    new_selected_clients[i] = sc[diff]
+            # sc = [np.array(selected_clients[0:6])]
+            # sc.append(np.array(selected_clients[6:]))
 
-            sc = np.array(new_selected_clients)
+                sc = np.array(new_selected_clients)
 
-        print("Selecionados: ", t, "\n", sc)
-        print("----------")
+            self.n_trained_clients = sum([len(i) for i in sc])
 
-        return sc
+            print("Selecionados: ", t, "\n", sc)
+            print("----------")
+
+            return sc
+
+        except Exception as e:
+            print("select_clients error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+

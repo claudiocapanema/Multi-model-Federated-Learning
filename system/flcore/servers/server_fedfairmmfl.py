@@ -16,8 +16,8 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 import time
+import sys
 import numpy as np
-from flcore.clients.clientavg import clientAVG
 from flcore.servers.server_multifedavg import MultiFedAvg
 from threading import Thread
 
@@ -26,32 +26,36 @@ class FedFairMMFL(MultiFedAvg):
     def __init__(self, args, times):
         super().__init__(args, times)
 
-        self.fairness_weight = args.fairness_weight
+        self.fairness_weight = 2
 
     def select_clients(self, t):
-        np.random.seed(t)
-        if t == 1:
-            return super().select_clients(t)
-        else:
-            if self.random_join_ratio:
-                self.current_num_join_clients = np.random.choice(range(self.num_join_clients, self.num_clients+1), 1, replace=False)[0]
-            else:
-                self.current_num_join_clients = self.num_join_clients
+        try:
             np.random.seed(t)
-            selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
-            selected_clients_m = [[] for i in range(self.M)]
+            if t == 1:
+                return super().select_clients(t)
+            else:
+                selected_clients = list(np.random.choice(self.clients, self.num_training_clients, replace=False))
+                selected_clients = [i for i in selected_clients]
 
-            for client in selected_clients:
-                client_losses = []
-                for metrics_m in client.train_metrics_list_dict:
-                    client_losses.append(metrics_m['Loss'] * metrics_m['Samples'])
-                client_losses = np.array(client_losses)
-                client_losses = (np.power(client_losses, self.fairness_weight - 1)) / np.sum(client_losses)
-                client_losses = client_losses / np.sum(client_losses)
-                print("probal: ", client_losses)
-                m = np.random.choice([i for i in range(self.M)], p=client_losses)
-                selected_clients_m[m].append(client.id)
+                selected_clients_me = []
+                for me in range(self.ME):
+                    selected_clients_me.append([])
 
-        print("Modelos clientes: ", selected_clients_m)
+                for client in selected_clients:
+                    client_losses = []
+                    for me in range(self.ME):
+                        client_losses.append(client.loss_ME[me] * len(client.trainloader[me].dataset))
+                    client_losses = np.array(client_losses)
+                    client_losses = (np.power(client_losses, self.fairness_weight - 1)) / np.sum(client_losses)
+                    client_losses = client_losses / np.sum(client_losses)
+                    print("probal: ", client_losses)
+                    m = np.random.choice([i for i in range(self.ME)], p=client_losses)
+                    selected_clients_me[m].append(client.client_id)
 
-        return selected_clients_m
+            print("Modelos clientes: ", selected_clients_me)
+
+            return selected_clients_me
+
+        except Exception as e:
+            print("select_clients error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))

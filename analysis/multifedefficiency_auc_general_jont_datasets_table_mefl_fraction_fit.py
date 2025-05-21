@@ -174,6 +174,11 @@ def table(df, write_path, metric, t=None):
 
         df_accuracy_improvements.iloc[i] = row
 
+    # print(df_accuracy_improvements.T)
+    # print(df_accuracy_improvements.T.columns)
+    # exit()
+    df_accuracy_improvements = df_accuracy_improvements.T
+
     latex = df_accuracy_improvements.to_latex().replace("\\\nEMNIST", "\\\n\hline\nEMNIST").replace("\\\nGTSRB",
                                                                                                     "\\\n\hline\nGTSRB").replace(
         "\\\nCIFAR-10", "\\\n\hline\nCIFAR-10").replace("\\bottomrule", "\\hline\n\\bottomrule").replace("\\midrule",
