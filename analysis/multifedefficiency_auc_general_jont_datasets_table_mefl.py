@@ -24,7 +24,8 @@ def read_data(read_solutions, read_dataset_order):
         "MultiFedAvg+FP": {"Strategy": "MultiFedAvg", "Version": "FP", "Table": "MultiFedAvg+FP"},
         "MultiFedAvg": {"Strategy": "MultiFedAvg", "Version": "Original", "Table": "MultiFedAvg"},
         "MultiFedAvgRR": {"Strategy": "MultiFedAvgRR", "Version": "Original", "Table": "MultiFedAvgRR"},
-        "HMultiFedAvg": {"Strategy": "HMultiFedAvg", "Version": "Original", "Table": "HMultiFedAvg"}
+        "HMultiFedAvg": {"Strategy": "HMultiFedAvg", "Version": "Original", "Table": "HMultiFedAvg"},
+        "FedFairMMFL": {"Strategy": "FedFairMMFL", "Version": "Original", "Table": "FedFairMMFL"}
     }
     hue_order = []
     for solution in read_solutions:
@@ -198,7 +199,7 @@ def table(df, write_path, metric, t=None):
 
 def improvements(df, datasets, metric):
     # , "FedKD+FP": "FedKD"
-    strategies = {"HMultiFedAvg": "MultiFedAvg"}
+    strategies = {"HMultiFedAvg": "MultiFedAvg", "FedFairMMFL": "MultiFedAvg", "MultiFedAvgRR": "MultiFedAvg"}
     # strategies = {r"MultiFedAvg+FP": "MultiFedAvg"}
     columns = df.columns.tolist()
     improvements_dict = {'Dataset': [], 'Table': [], 'Original strategy': [], 'Alpha': [], metric: []}
@@ -278,7 +279,7 @@ def accuracy_improvement(df, datasets):
     # reference_solutions = {"MultiFedAvg+FP": "MultiFedAvg", "MultiFedAvgGlobalModelEval+FP": "MultiFedAvgGlobalModelEval"}
     # ,
     #                            "FedKD+FP": "FedKD"
-    reference_solutions = {"HMultiFedAvg": "MultiFedAvg"}
+    reference_solutions = {"HMultiFedAvg": "MultiFedAvg", "FedFairMMFL": "MultiFedAvg", "MultiFedAvgRR": "MultiFedAvg"}
 
     print(df_difference)
     # exit()
@@ -350,25 +351,24 @@ def idmax(df, n_solutions):
 if __name__ == "__main__":
     experiment_id = 2
     total_clients = 30
-    # alphas = [10.0, 10.0]
+    # alphas = [0.1, 0.1, 1.0]
+    # alphas = [0.1, 0.1, 0.1]
+    alphas = [0.1, 1.0, 0.1]
     # alphas = [1.0, 0.1, 0.1]
-    alphas = [0.1, 0.1]
-    # alphas = [1.0, 1.0]
-    # alphas = [10.0, 0.1]
-    # dataset = ["WISDM-W", "CIFAR10"]
-    # dataset = ["WISDM-W", "ImageNet10", "Gowalla"]
-    dataset = ["WISDM-W", "ImageNet10"]
+    # alphas = [0.1, 0.1]
+    dataset = ["WISDM-W", "ImageNet10", "Gowalla"]
+    # dataset = ["WISDM-W", "ImageNet10"]
     # dataset = ["EMNIST", "CIFAR10"]
     # models_names = ["cnn_c"]
-    # model_name = ["gru", "CNN", "lstm"]
-    model_name = ["gru", "CNN"]
+    model_name = ["gru", "CNN", "lstm"]
+    # model_name = ["gru", "CNN"]
     fraction_fit = 0.3
     number_of_rounds = 100
     local_epochs = 1
     round_new_clients = 0
     train_test = "test"
     # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
-    solutions = ["HMultiFedAvg", "MultiFedAvg"]
+    solutions = ["HMultiFedAvg", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
 
     read_solutions = {solution: [] for solution in solutions}
     read_dataset_order = []

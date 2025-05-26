@@ -195,7 +195,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                                                    self_balancing=True)
                 fds[dataset_name] = FederatedDataset(
                     dataset={"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "MNIST": "ylecun/mnist",
-                             "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas",
+                             "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
                              "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
                              , "ImageNet10": "claudiogsc/ImageNet-10_household_objects"}[dataset_name],
                     partitioners={"train": partitioner},
@@ -209,7 +209,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
             logger.info("dataset from volume")
             fd = CustomFederatedDataset(
                 dataset={"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "MNIST": "ylecun/mnist",
-                         "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas",
+                         "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
                          , "ImageNet10": "claudiogsc/ImageNet-10_household_objects"}[
                     dataset_name],

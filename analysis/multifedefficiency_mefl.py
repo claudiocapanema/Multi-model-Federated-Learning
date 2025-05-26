@@ -170,5 +170,5 @@ if __name__ == "__main__":
 
     line(df, write_path, x="Round (t)", y="Accuracy (%)", hue="Strategy", style="Version", hue_order=hue_order)
     line(df, write_path, x="Round (t)", y="Accuracy (%)", hue="Strategy", style="Version", hue_order=hue_order)
-    line(df, write_path, x="Round (t)", y="Loss", hue="Strategy", style="Version", hue_order=hue_order, y_max=0.2)
-    line(df, write_path, x="Round (t)", y="Loss", hue="Strategy", style="Version", hue_order=hue_order, y_max=0.2)
+    line(df, write_path, x="Round (t)", y="Loss", hue="Strategy", style="Version", hue_order=hue_order, y_max=1)
+    line(df, write_path, x="Round (t)", y="Loss", hue="Strategy", style="Version", hue_order=hue_order, y_max=1)

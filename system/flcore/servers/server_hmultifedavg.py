@@ -93,8 +93,8 @@ class HMultiFedAvg(MultiFedAvg):
                 middle = int(self.number_of_rounds * 0.3)
             elif self.experiment_id == 4:
                 middle = int(self.number_of_rounds * 0.7)
-            heterogeneous_models = np.argwhere(self.homogeneity_degree <= 0.32).flatten()
-            homogeneous_models = np.argwhere(self.homogeneity_degree > 0.32).flatten()
+            heterogeneous_models = np.argwhere(self.homogeneity_degree <= 0.36).flatten()
+            homogeneous_models = np.argwhere(self.homogeneity_degree > 0.36).flatten()
             equal_number_of_clients = int(len(selected_clients) / self.ME)
             if t >= middle and len(heterogeneous_models) > 0:
                 if self.alternated_model_index is None:

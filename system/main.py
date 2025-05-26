@@ -26,10 +26,8 @@ import numpy as np
 import logging
 from flcore.servers.server_multifedavg import MultiFedAvg
 from flcore.servers.server_hmultifedavg import HMultiFedAvg
-# from flcore.servers.serveravg_with_fedpredict import MultiFedAvgWithFedPredict
-# from flcore.servers.server_fedfairmmfl import FedFairMMFL
-# from flcore.servers.serveravg_rr import MultiFedAvgRR
-# from flcore.servers.server_multifedefficiency import MultiFedEfficiency
+from flcore.servers.server_multifedavgrr import MultiFedAvgRR
+from flcore.servers.server_fedfairmmfl import FedFairMMFL
 
 from flcore.clients.utils.models import CNN, CNN_3, CNNDistillation, GRU, LSTM, TinyImageNetCNN
 
@@ -117,7 +115,7 @@ def load_model(model_name, dataset, strategy, device):
 
         elif model_name == "lstm":
             if dataset in ["Gowalla"]:
-                return LSTM(4, device=device, num_layers=1, hidden_size=1, sequence_length=10, num_classes=num_classes)
+                return LSTM(6, device=device, num_layers=1, hidden_size=1, sequence_length=4, num_classes=num_classes)
 
         raise ValueError("""Model not found for model {} and dataset {}""".format(model_name, dataset))
 
@@ -149,6 +147,10 @@ def run(args):
         server = MultiFedAvg
     elif args.strategy == "HMultiFedAvg":
         server = HMultiFedAvg
+    elif args.strategy == "MultiFedAvgRR":
+        server = MultiFedAvgRR
+    elif args.strategy == "FedFairMMFL":
+        server = FedFairMMFL
 
     # elif args.strategy == "MultiFedEfficiency":
     #     server = MultiFedEfficiency
