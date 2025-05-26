@@ -191,7 +191,7 @@ def table(df, write_path, metric, t=None):
         "&  \\", "& - \\").replace(" - " + r"\textbf", " " + r"\textbf").replace("_{dc}", r"_{\text{dc}}").replace(
         "\multirow[t]{" + n_strategies + "}{*}{EMNIST}", "EMNIST").replace(
         "\multirow[t]{" + n_strategies + "}{*}{CIFAR10}", "CIFAR10").replace(
-        "\multirow[t]{" + n_strategies + "}{*}{GTSRB}", "GTSRB").replace("\cline{1-4}", "\hline").replace("\cline{1-5}", "\hline").replace("\multirow[t]", "\multirow")
+        "\multirow[t]{" + n_strategies + "}{*}{GTSRB}", "GTSRB").replace("\cline{1-4}", "\hline").replace("\cline{1-5}", "\hline").replace("\multirow[t]", "\multirow").replace("0.200000", str(int(30*0.2))).replace("0.300000", str(int(30*0.3))).replace("0.400000", str(int(30*0.4))).replace("0.500000", str(int(30*0.5))).replace("0.600000", str(int(30*0.6))).replace("0.700000", str(int(30*0.7))).replace("0.800000", str(int(30*0.8))).replace("0.900000", str(int(30*0.9)))
 
     Path(write_path).mkdir(parents=True, exist_ok=True)
     if t is not None:
