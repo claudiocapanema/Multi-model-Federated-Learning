@@ -3,11 +3,28 @@ import numpy as np
 import pandas as pd
 import scipy.stats as st
 from numpy import trapz
+import sys
 
 import copy
 
 from base_plots import bar_plot, line_plot, ecdf_plot
 import matplotlib.pyplot as plt
+import json
+
+def get_std(df):
+
+    df2 = df[["Accuracy (%)", "training clients and models", "Round (t)"]]
+    df2["n"] = [len(json.loads(i)) for i in df["training clients and models"].tolist()]
+    df2 = df2.query("n > 0")
+    accs = df2["Accuracy (%)"].tolist()
+    rounds = df2["Round (t)"].tolist()
+    negative_oscillations = []
+    for i in range(1,len(accs)):
+        diff = accs[i] - accs[i-1]
+        if diff < 0:
+            negative_oscillations.append(diff)
+
+    return pd.DataFrame({"# negative oscillations": [len(negative_oscillations)] * len(df), "Amplitude": [sum(negative_oscillations)] * len(df)})
 
 def read_data(read_solutions, read_dataset_order):
     df_concat = None
@@ -45,6 +62,9 @@ def read_data(read_solutions, read_dataset_order):
                 df["Version"] = np.array([solution_strategy_version[solution]["Version"]] * len(df))
                 df["Alpha"] = np.array([0.1] * len(df))
                 # df["Efficiency"] = np.array(df["# training clients"])
+                std = get_std(df)
+                df["# negative oscillations"] = std["# negative oscillations"].to_numpy()
+                df["Amplitude"] = std["Amplitude"].to_numpy()
 
                 if df_concat is None:
                     df_concat = df
@@ -55,8 +75,8 @@ def read_data(read_solutions, read_dataset_order):
                 if strategy not in hue_order:
                     hue_order.append(strategy)
             except Exception as e:
-                print("\n######### \nFaltando", paths[i])
-                print(e)
+                print("read_data error")
+                print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     return df_concat, hue_order
 
@@ -352,8 +372,8 @@ def idmax(df, n_solutions):
 if __name__ == "__main__":
     experiment_id = 2
     total_clients = 30
-    # alphas = [0.1, 0.1, 1.0]
-    alphas = [0.1, 0.1, 0.1]
+    alphas = [0.1, 0.1, 1.0]
+    # alphas = [0.1, 0.1, 0.1]
     # alphas = [0.1, 1.0, 0.1]
     # alphas = [1.0, 0.1, 0.1]
     # alphas = [0.1, 0.1]
@@ -405,8 +425,11 @@ if __name__ == "__main__":
 
     df, hue_order = read_data(read_solutions, read_dataset_order)
 
-    table(df, write_path, "Balanced accuracy (%)", t=None)
+    pd.set_option('display.max_rows', None)
+    print(df[["Strategy", "Dataset", "# negative oscillations", "Amplitude"]].drop_duplicates())
+
+    # table(df, write_path, "Balanced accuracy (%)", t=None)
     table(df, write_path, "Accuracy (%)", t=None)
-    table(df, write_path, "Accuracy (%)", t=[i for i in range(1, 31)])
-    table(df, write_path, "Accuracy (%)", t=[i for i in range(1, 51)])
-    table(df, write_path, "Accuracy (%)", t=[i for i in range(70, 101)])
+    # table(df, write_path, "Accuracy (%)", t=[i for i in range(1, 31)])
+    # table(df, write_path, "Accuracy (%)", t=[i for i in range(1, 51)])
+    # table(df, write_path, "Accuracy (%)", t=[i for i in range(70, 101)])

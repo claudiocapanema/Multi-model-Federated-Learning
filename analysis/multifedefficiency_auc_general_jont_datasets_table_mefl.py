@@ -193,7 +193,7 @@ def table(df, write_path, metric, t=None):
     pd.DataFrame({'latex': [latex]}).to_csv(filename, header=False, index=False)
 
     improvements(df_table, datasets, metric)
-
+    print(filename)
     #  df.to_latex().replace("\}", "}").replace("\{", "{").replace("\\\nRecall", "\\\n\hline\nRecall").replace("\\\nF-score", "\\\n\hline\nF1-score")
 
 
@@ -352,8 +352,8 @@ if __name__ == "__main__":
     experiment_id = 2
     total_clients = 30
     # alphas = [0.1, 0.1, 1.0]
-    # alphas = [0.1, 0.1, 0.1]
-    alphas = [0.1, 1.0, 0.1]
+    alphas = [0.1, 0.1, 0.1]
+    # alphas = [0.1, 1.0, 0.1]
     # alphas = [1.0, 0.1, 0.1]
     # alphas = [0.1, 0.1]
     dataset = ["WISDM-W", "ImageNet10", "Gowalla"]

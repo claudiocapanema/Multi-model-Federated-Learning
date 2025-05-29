@@ -22,6 +22,7 @@ def get_std(df):
     for i in range(1,len(accs)):
         diff = accs[i] - accs[i-1]
         if diff < 0:
+            diff = abs(diff)
             negative_oscillations.append(diff)
 
     return pd.DataFrame({"negative oscillations": [len(negative_oscillations)] * len(df), "Amplitude": [sum(negative_oscillations)] * len(df)})
@@ -349,7 +350,7 @@ def select_mean(index, column_values, columns, n_solutions):
     select_max = False
     print(column_values)
 
-    if column in ["Accuracy (%)", "Amplitude"]:
+    if column in ["Accuracy (%)"]:
         select_max = True
 
     for i in range(len(column_values)):
@@ -400,8 +401,8 @@ def idmax(df, n_solutions):
 if __name__ == "__main__":
     experiment_id = 2
     total_clients = 30
-    # alphas = [0.1, 0.1, 1.0]
-    alphas = [0.1, 0.1, 0.1]
+    alphas = [0.1, 0.1, 1.0]
+    # alphas = [0.1, 0.1, 0.1]
     # alphas = [0.1, 1.0, 0.1]
     # alphas = [1.0, 0.1, 0.1]
     # alphas = [0.1, 0.1]
@@ -455,7 +456,7 @@ if __name__ == "__main__":
 
     pd.set_option('display.max_rows', None)
     print(df[["Strategy", "Dataset", "negative oscillations", "Amplitude"]].drop_duplicates())
-    metrics = ["Accuracy (%)", "negative oscillations", "Amplitude"]
+    metrics = ["negative oscillations", "Amplitude"]
     # table(df, write_path, metrics, t=None)
     table(df, write_path, metrics, t=None)
     # table(df, write_path, metrics, t=[i for i in range(1, 31)])
