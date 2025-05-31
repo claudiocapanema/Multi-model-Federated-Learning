@@ -211,7 +211,7 @@ def table(df, write_path, metrics, t=None):
         "&  \\", "& - \\").replace(" - " + r"\textbf", " " + r"\textbf").replace("_{dc}", r"_{\text{dc}}").replace(
         "\multirow[t]{" + n_strategies + "}{*}{EMNIST}", "EMNIST").replace(
         "\multirow[t]{" + n_strategies + "}{*}{CIFAR10}", "CIFAR10").replace(
-        "\multirow[t]{" + n_strategies + "}{*}{GTSRB}", "GTSRB").replace("\cline{1-4}", "\hline").replace("\cline{1-5}", "\hline").replace("\multirow[t]", "\multirow")
+        "\multirow[t]{" + n_strategies + "}{*}{GTSRB}", "GTSRB").replace("\cline{1-4}", "\hline").replace("\cline{1-5}", "\hline").replace("\multirow[t]", "\multirow").replace("HMultiFedAvg", "MultiFedAvg-MDH").replace("\cline{1-3}", "\hline")
 
     Path(write_path).mkdir(parents=True, exist_ok=True)
     if t is not None:
@@ -400,7 +400,7 @@ if __name__ == "__main__":
     # models_names = ["cnn_c"]
     model_name = ["gru", "CNN", "lstm"]
     # model_name = ["gru", "CNN"]
-    fraction_fit = 0.3
+    fraction_fit = 0.4
     number_of_rounds = 100
     local_epochs = 1
     round_new_clients = 0
