@@ -9,9 +9,13 @@ This project extends [PFLlib (Personalized Federated Learning Algorithm Library)
 You can execute a simulation with only one command line. The command below executes an experiment with three models.
 ```bash
 
-python main.py --num_clients=60 --global_rounds=25 --algorithm="MultiFedAvg" --dataset="ImageNet" --dataset="WISDM-W" --dataset="Gowalla" --model="cnn_a" --model="gru" --model="lstm" --join_ratio=0.3 --alpha=0.1 --alpha=0.1 --alpha=0.1
+python main.py --total_clients=30 --number_of_rounds=100 --strategy="MultiFedAvg" --dataset="WISDM-W" --dataset="ImageNet10"  --dataset="Gowalla" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.4 --alpha=0.1 --alpha=0.1 --alpha=1.0 --experiment_id=2
 
 ```
+
+## Available strategies
+
+The available strategies are: MultifedAvg, MultiFedAvgRR, FedFairMMFL, and MultiFedAvg-MDH.
 
 ### Citing
 
