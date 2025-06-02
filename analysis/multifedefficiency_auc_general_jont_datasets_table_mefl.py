@@ -351,8 +351,8 @@ def idmax(df, n_solutions):
 if __name__ == "__main__":
     experiment_id = 2
     total_clients = 30
-    alphas = [0.1, 0.1, 1.0]
-    # alphas = [0.1, 0.1, 0.1]
+    # alphas = [0.1, 0.1, 1.0]
+    alphas = [0.1, 0.1, 0.1]
     # alphas = [0.1, 1.0, 0.1]
     # alphas = [1.0, 0.1, 0.1]
     # alphas = [0.1, 0.1]
