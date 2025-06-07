@@ -16,6 +16,8 @@ import sys
 from .models import CNN, CNN_3, CNNDistillation, GRU, LSTM, TinyImageNetCNN
 import  datasets as dt
 from .custom_federated_dataset import CustomFederatedDataset
+from torch.utils.data import Dataset
+from collections import Counter
 
 
 import logging
@@ -59,7 +61,7 @@ def fedpredict_client_weight_predictions_torch(output: torch.Tensor, t: int, cur
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 DATASET_INPUT_MAP = {"CIFAR10": "img", "MNIST": "image", "EMNIST": "image", "GTSRB": "image", "Gowalla": "sequence",
-                     "WISDM-W": "sequence", "ImageNet": "image", "ImageNet10": "image"}
+                     "WISDM-W": "sequence", "ImageNet": "image", "ImageNet10": "image", "wikitext": "sequence"}
 
 def load_model(model_name, dataset, strategy, device):
     try:
@@ -175,6 +177,59 @@ def set_weights_fedkd(net, parameters):
         print("set_weights_fedkd error")
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
+def wikitext_preprocess(dataset):
+    def tokenize(text_lines):
+        text = " <eos> ".join(text_lines).lower()
+        tokens = text.split()
+        return tokens
+
+    full_train_tokens = tokenize(dataset['train']['text'])
+    valid_tokens_raw = tokenize(dataset['validation']['text'])
+    test_tokens_raw = tokenize(dataset['test']['text'])
+
+    # 2. Construir vocabulário com as 100 palavras mais frequentes
+    counter = Counter(full_train_tokens)
+    most_common_words = [word for word, _ in counter.most_common(100)]
+    vocab = {word: idx for idx, word in enumerate(most_common_words)}
+    vocab_size = len(vocab)
+    print(f"Vocabulário: {vocab_size} palavras (as 100 mais frequentes)")
+
+    # 3. Filtrar os tokens que estão no vocabulário
+    def filter_tokens(tokens, vocab):
+        filtered = [vocab[t] for t in tokens if t in vocab]
+        return filtered
+
+    train_tokens = filter_tokens(full_train_tokens, vocab)
+    valid_tokens = filter_tokens(valid_tokens_raw, vocab)
+    test_tokens = filter_tokens(test_tokens_raw, vocab)
+
+    # 4. Dataset para prever a próxima palavra
+    class NextWordDataset(Dataset):
+        def __init__(self, data, seq_len):
+            self.data = data
+            self.seq_len = seq_len
+
+        def __len__(self):
+            return len(self.data) - self.seq_len
+
+        def __getitem__(self, idx):
+            x = self.data[idx:idx + self.seq_len]
+            y = self.data[idx + self.seq_len]
+            return {"text": torch.tensor(x, dtype=torch.long), "label": torch.tensor(y, dtype=torch.long)}
+
+    seq_len = 30
+    batch_size = 256
+
+    train_dataset = NextWordDataset(train_tokens, seq_len)
+    valid_dataset = NextWordDataset(valid_tokens, seq_len)
+    test_dataset = NextWordDataset(test_tokens, seq_len)
+
+    # train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    # valid_loader = DataLoader(valid_dataset, batch_size=batch_size)
+    # test_loader = DataLoader(test_dataset, batch_size=batch_size)
+
+    return train_dataset, test_dataset
+
 
 fds = {}  # Cache FederatedDataset
 
@@ -182,7 +237,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
               data_sampling_percentage: int, get_from_volume: bool = True):
     try:
         # Only initialize `FederatedDataset` once
-        logger.info(
+        print(
             """Loading {} {} {} {} {} {} data.""".format(dataset_name, partition_id, num_partitions, batch_size, data_sampling_percentage, alpha))
         global fds
         if not get_from_volume:
@@ -193,11 +248,11 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                                                    alpha=alpha, min_partition_size=10, seed=1,
 
                                                    self_balancing=True)
-                fds[dataset_name] = FederatedDataset(
+                fds[dataset_name] = CustomFederatedDataset(
                     dataset={"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "MNIST": "ylecun/mnist",
-                             "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
-                             "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
-                             , "ImageNet10": "claudiogsc/ImageNet-10_household_objects"}[dataset_name],
+                         "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
+                         "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
+                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-30-Words-100'}[dataset_name],
                     partitioners={"train": partitioner},
                     seed=42
                 )
@@ -206,19 +261,19 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
             partitioner = DirichletPartitioner(num_partitions=num_partitions, partition_by="label",
                                                alpha=alpha, min_partition_size=10, seed=1,
                                                self_balancing=True)
-            logger.info("dataset from volume")
+            print("dataset from volume")
             fd = CustomFederatedDataset(
                 dataset={"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "MNIST": "ylecun/mnist",
                          "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
-                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects"}[
+                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-30-Words-100'}[
                     dataset_name],
                 partitioners={"train": partitioner},
                 path=f"datasets/{dataset_name}",
                 seed=42
             )
             fds[dataset_name] = fd
-
+            print("passou dataset")
         attempts = 0
         while True:
             attempts += 1
@@ -231,11 +286,11 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                 logger.info("""Tried to load dataset {} for the {} time for the client {} error""".format(dataset_name, attempts, partition_id))
                 logger.info("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
                 time.sleep(1)
-        # Divide data on each node: 80% train, 20% test
         test_size = 1 - data_sampling_percentage
         partition_train_test = partition.train_test_split(test_size=test_size, seed=42)
+        if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla", "wikitext"]:
+            # Divide data on each node: 80% train, 20% test
 
-        if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla"]:
             pytorch_transforms_train = get_transform(dataset_name, "train")
             pytorch_transforms_test = get_transform(dataset_name, "test")
 
@@ -257,7 +312,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
             # logger.info("""bath key: {}""".format(batch[key]))
             return batch
 
-        if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla"]:
+        if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla", "wikitext"]:
             partition_train = partition_train_test["train"].with_transform(apply_transforms_train)
             partition_test = partition_train_test["test"].with_transform(apply_transforms_test)
 
@@ -345,6 +400,8 @@ def get_transform(dataset_name, train_test):
                           "WISDM-W": {"train": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32))),
                                       "test": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32)))},
                           "Gowalla": {"train": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32))),
+                                      "test": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32)))},
+                          "wikitext": {"train": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32))),
                                       "test": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32)))}
 
                           }[dataset_name][train_test]

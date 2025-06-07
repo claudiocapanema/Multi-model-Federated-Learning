@@ -115,7 +115,7 @@ class MultiFedAvg:
             # self.concept_drift_config = global_concept_dirft_config(self.ME, self.number_of_rounds, self.alpha, self.experiment_id, 0)
 
         except Exception as e:
-            print("__init__ error")
+            print("__init__ server error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def set_clients(self):

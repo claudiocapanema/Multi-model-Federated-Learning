@@ -25,11 +25,11 @@ import warnings
 import numpy as np
 import logging
 from flcore.servers.server_multifedavg import MultiFedAvg
-from flcore.servers.server_hmultifedavg import HMultiFedAvg
+from flcore.servers.server_multifedavg_mdh import MultiFedAvgMDH
 from flcore.servers.server_multifedavgrr import MultiFedAvgRR
 from flcore.servers.server_fedfairmmfl import FedFairMMFL
 
-from flcore.clients.utils.models import CNN, CNN_3, CNNDistillation, GRU, LSTM, TinyImageNetCNN
+from flcore.clients.utils.models import CNN, CNN_3, CNNDistillation, GRU, LSTM, TinyImageNetCNN, LSTMNextWord
 
 logger = logging.getLogger()
 logger.setLevel(logging.ERROR)
@@ -41,14 +41,14 @@ np.random.seed(0)
 torch.manual_seed(0)
 
 # hyper-params for Text tasks
-vocab_size = 98635   #98635 for AG_News and 399198 for Sogou_News
+# vocab_size = 98635   #98635 for AG_News and 399198 for Sogou_News
 max_len=200
 emb_dim=32
 
 def load_model(model_name, dataset, strategy, device):
     try:
         num_classes = {'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'Tiny-ImageNet': 200,
-         'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7}[dataset]
+         'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 100}[dataset]
         out_channel = 32
         if model_name == 'CNN':
             if dataset in ['MNIST']:
@@ -116,6 +116,8 @@ def load_model(model_name, dataset, strategy, device):
         elif model_name == "lstm":
             if dataset in ["Gowalla"]:
                 return LSTM(6, device=device, num_layers=1, hidden_size=1, sequence_length=4, num_classes=num_classes)
+            elif dataset in ["wikitext"]:
+                return LSTMNextWord(vocab_size=num_classes, embed_dim=3, hidden_dim=6)
 
         raise ValueError("""Model not found for model {} and dataset {}""".format(model_name, dataset))
 
@@ -145,8 +147,8 @@ def run(args):
     # select algorithm
     if args.strategy == "MultiFedAvg":
         server = MultiFedAvg
-    elif args.strategy == "HMultiFedAvg":
-        server = HMultiFedAvg
+    elif args.strategy == "MultiFedAvg-MDH":
+        server = MultiFedAvgMDH
     elif args.strategy == "MultiFedAvgRR":
         server = MultiFedAvgRR
     elif args.strategy == "FedFairMMFL":

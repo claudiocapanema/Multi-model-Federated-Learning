@@ -35,7 +35,7 @@ class MultiFedAvgClient:
             self.args = args
             self.batch_size = []
             for dataset in args.dataset:
-                self.batch_size.append({"WISDM-W": 16, "ImageNet10": 10, "Gowalla": 64}[dataset])
+                self.batch_size.append({"WISDM-W": 16, "ImageNet10": 10, "Gowalla": 64, "wikitext": 128}[dataset])
             self.model = model
             self.alpha = [float(i) for i in args.alpha]
             self.initial_alpha = self.alpha
@@ -57,7 +57,7 @@ class MultiFedAvgClient:
             self.models_size = self._get_models_size()
             self.n_classes = [
                 {'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'ImageNet': 15,
-                 "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7}[dataset] for dataset in
+                 "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 100}[dataset] for dataset in
                 self.args.dataset]
             self.loss_ME = [10] * self.ME
             # Concept drift parameters
@@ -82,21 +82,14 @@ class MultiFedAvgClient:
                                                                                  len(self.trainloader[me].dataset)))
 
                 classes = []
+                print("modelo: ", me)
                 for batch in self.trainloader[me]:
                     labels = batch["label"]
                     classes += labels.numpy().tolist()
                 # print("oi ", classes)
-                print("classes : ", np.unique(classes, return_counts=True))
-
-                if me == 2:
-                    for batch in self.trainloader[me]:
-                        pass
-
-            #         print("x ", batch["sequence"])
-            #
-            # exit()
+                # print("classes : ", np.unique(classes, return_counts=True))
         except Exception as e:
-            print("__init__ error")
+            print("__init__ client error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def set_parameters(self, m, model):
@@ -121,7 +114,7 @@ class MultiFedAvgClient:
             random.seed(t)
             np.random.seed(t)
             torch.manual_seed(t)
-            self.trainloader[me] = self.recent_trainloader[me]
+            # self.trainloader[me] = self.recent_trainloader[me]
             set_weights(self.model[me], global_model)
             self.optimizer[me] = self._get_optimizer(dataset_name=self.args.dataset[me], me=me)
             results = train(
@@ -198,7 +191,8 @@ class MultiFedAvgClient:
                     'ImageNet': torch.optim.SGD(self.model[me].parameters(), lr=0.1),
                     'ImageNet10': torch.optim.SGD(self.model[me].parameters(), lr=0.01),
                     "ImageNet_v2": torch.optim.Adam(self.model[me].parameters(), lr=0.01),
-                    "Gowalla": torch.optim.RMSprop(self.model[me].parameters(), lr=0.001)}[dataset_name]
+                    "Gowalla": torch.optim.RMSprop(self.model[me].parameters(), lr=0.001),
+                    "wikitext": torch.optim.RMSprop(self.model[me].parameters(), lr=0.001)}[dataset_name]
         except Exception as e:
             print("_get_optimizer error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))

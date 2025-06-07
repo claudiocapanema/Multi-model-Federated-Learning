@@ -422,6 +422,28 @@ class LSTM(torch.nn.Module):
             print("LSTM forward")
             print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
 
+class LSTMNextWord(nn.Module):
+    def __init__(self, vocab_size, embed_dim, hidden_dim):
+        super().__init__()
+        try:
+            self.embedding = nn.Embedding(vocab_size, embed_dim)
+            self.lstm = nn.LSTM(embed_dim, hidden_dim, batch_first=True)
+            self.fc = nn.Linear(hidden_dim, vocab_size)
+        except Exception as e:
+            print("LSTMNextWord forward")
+            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
+
+    def forward(self, x):
+        try:
+            emb = self.embedding(x)
+            out, _ = self.lstm(emb)
+            last_out = out[:, -1, :]
+            logits = self.fc(last_out)
+            return logits
+        except Exception as e:
+            print("LSTMNextWord forward")
+            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
+
 class GRU(torch.nn.Module):
     def __init__(self, input_shape, num_layers=1, hidden_size=2, sequence_length=28, num_classes=10):
         super().__init__()

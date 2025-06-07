@@ -27,16 +27,17 @@ def download_datasets(datasets_name: list, alphas: list, num_partitions: int):
             if dataset_name not in fds and not os.path.isdir(filename):
                 logger.info("Downloading {}".format(dataset_name))
                 dataset = load_dataset({"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "MNIST": "ylecun/mnist",
-                             "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
-                             "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
-                            , "ImageNet10": "claudiogsc/ImageNet-10_household_objects"}[
+                         "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
+                         "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
+                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-30-Words-100'}[
                         dataset_name])
-                dataset["train"] = dataset["train"].shuffle(seed=42).select(range(100000))
-                dataset["test"] = dataset["test"].shuffle(seed=42).select(range(20000))
+                if dataset_name in ["Gowalla"]:
+                    dataset["train"] = dataset["train"].shuffle(seed=42).select(range(100000))
+                    dataset["test"] = dataset["test"].shuffle(seed=42).select(range(20000))
                 dataset.save_to_disk(filename)
             else:
                 logger.info("Found {}".format(dataset_name))
 
     except Exception as e:
-        logger.error("load_data error")
-        logger.error("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+        print("load_data error")
+        print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
