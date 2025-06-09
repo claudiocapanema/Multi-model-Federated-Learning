@@ -435,7 +435,7 @@ class LSTMNextWord(nn.Module):
 
     def forward(self, x):
         try:
-            emb = self.embedding(x)
+            emb = self.embedding(x.int())
             out, _ = self.lstm(emb)
             last_out = out[:, -1, :]
             logits = self.fc(last_out)

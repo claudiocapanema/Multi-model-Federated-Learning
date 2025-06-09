@@ -192,7 +192,7 @@ class MultiFedAvgClient:
                     'ImageNet10': torch.optim.SGD(self.model[me].parameters(), lr=0.01),
                     "ImageNet_v2": torch.optim.Adam(self.model[me].parameters(), lr=0.01),
                     "Gowalla": torch.optim.RMSprop(self.model[me].parameters(), lr=0.001),
-                    "wikitext": torch.optim.RMSprop(self.model[me].parameters(), lr=0.001)}[dataset_name]
+                    "wikitext": torch.optim.RMSprop(self.model[me].parameters(), lr=0.01)}[dataset_name]
         except Exception as e:
             print("_get_optimizer error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
