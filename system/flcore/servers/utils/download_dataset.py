@@ -29,11 +29,14 @@ def download_datasets(datasets_name: list, alphas: list, num_partitions: int):
                 dataset = load_dataset({"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "MNIST": "ylecun/mnist",
                          "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
-                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-30-Words-100'}[
+                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-10-Words-30'}[
                         dataset_name])
                 if dataset_name in ["Gowalla"]:
                     dataset["train"] = dataset["train"].shuffle(seed=42).select(range(100000))
                     dataset["test"] = dataset["test"].shuffle(seed=42).select(range(20000))
+                elif dataset_name in ["wikitext"]:
+                    dataset["train"] = dataset["train"].shuffle(seed=42).select(range(480000))
+                    dataset["test"] = dataset["test"].shuffle(seed=42).select(range(12000))
                 dataset.save_to_disk(filename)
             else:
                 logger.info("Found {}".format(dataset_name))

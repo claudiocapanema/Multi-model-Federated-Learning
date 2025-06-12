@@ -35,7 +35,7 @@ class MultiFedAvgClient:
             self.args = args
             self.batch_size = []
             for dataset in args.dataset:
-                self.batch_size.append({"WISDM-W": 16, "ImageNet10": 10, "Gowalla": 64, "wikitext": 128}[dataset])
+                self.batch_size.append({"WISDM-W": 16, "ImageNet10": 10, "Gowalla": 64, "wikitext": 460}[dataset])
             self.model = model
             self.alpha = [float(i) for i in args.alpha]
             self.initial_alpha = self.alpha
@@ -57,7 +57,7 @@ class MultiFedAvgClient:
             self.models_size = self._get_models_size()
             self.n_classes = [
                 {'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'ImageNet': 15,
-                 "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 100}[dataset] for dataset in
+                 "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30}[dataset] for dataset in
                 self.args.dataset]
             self.loss_ME = [10] * self.ME
             # Concept drift parameters

@@ -41,7 +41,7 @@ def read_data(read_solutions, read_dataset_order):
         "MultiFedAvg+FP": {"Strategy": "MultiFedAvg", "Version": "FP", "Table": "MultiFedAvg+FP"},
         "MultiFedAvg": {"Strategy": "MultiFedAvg", "Version": "Original", "Table": "MultiFedAvg"},
         "MultiFedAvgRR": {"Strategy": "MultiFedAvgRR", "Version": "Original", "Table": "MultiFedAvgRR"},
-        "HMultiFedAvg": {"Strategy": "HMultiFedAvg", "Version": "Original", "Table": "HMultiFedAvg"},
+        "MultiFedAvg-MDH": {"Strategy": "MultiFedAvg-MDH", "Version": "Original", "Table": "MultiFedAvg-MDH"},
         "FedFairMMFL": {"Strategy": "FedFairMMFL", "Version": "Original", "Table": "FedFairMMFL"}
     }
     hue_order = []
@@ -204,7 +204,7 @@ def table(df, write_path, metric, t=None):
         "&  \\", "& - \\").replace(" - " + r"\textbf", " " + r"\textbf").replace("_{dc}", r"_{\text{dc}}").replace(
         "\multirow[t]{" + n_strategies + "}{*}{EMNIST}", "EMNIST").replace(
         "\multirow[t]{" + n_strategies + "}{*}{CIFAR10}", "CIFAR10").replace(
-        "\multirow[t]{" + n_strategies + "}{*}{GTSRB}", "GTSRB").replace("\cline{1-4}", "\hline").replace("\cline{1-5}", "\hline").replace("\multirow[t]", "\multirow").replace("HMultiFedAvg", "MultiFedAvg-MDH").replace("\cline{1-3}", "\hline")
+        "\multirow[t]{" + n_strategies + "}{*}{GTSRB}", "GTSRB").replace("\cline{1-4}", "\hline").replace("\cline{1-5}", "\hline").replace("\multirow[t]", "\multirow").replace("MultiFedAvg-MDH", "MultiFedAvg-MDH").replace("\cline{1-3}", "\hline")
 
     Path(write_path).mkdir(parents=True, exist_ok=True)
     if t is not None:
@@ -220,7 +220,7 @@ def table(df, write_path, metric, t=None):
 
 def improvements(df, datasets, metric):
     # , "FedKD+FP": "FedKD"
-    strategies = {"HMultiFedAvg": "MultiFedAvg", "FedFairMMFL": "MultiFedAvg", "MultiFedAvgRR": "MultiFedAvg"}
+    strategies = {"MultiFedAvg-MDH": "MultiFedAvg", "FedFairMMFL": "MultiFedAvg", "MultiFedAvgRR": "MultiFedAvg"}
     # strategies = {r"MultiFedAvg+FP": "MultiFedAvg"}
     columns = df.columns.tolist()
     improvements_dict = {'Dataset': [], 'Table': [], 'Original strategy': [], 'Alpha': [], metric: []}
@@ -300,7 +300,7 @@ def accuracy_improvement(df, datasets):
     # reference_solutions = {"MultiFedAvg+FP": "MultiFedAvg", "MultiFedAvgGlobalModelEval+FP": "MultiFedAvgGlobalModelEval"}
     # ,
     #                            "FedKD+FP": "FedKD"
-    reference_solutions = {"HMultiFedAvg": "MultiFedAvg", "FedFairMMFL": "MultiFedAvg", "MultiFedAvgRR": "MultiFedAvg"}
+    reference_solutions = {"MultiFedAvg-MDH": "MultiFedAvg", "FedFairMMFL": "MultiFedAvg", "MultiFedAvgRR": "MultiFedAvg"}
 
     print(df_difference)
     # exit()
@@ -377,19 +377,19 @@ if __name__ == "__main__":
     # alphas = [0.1, 1.0, 0.1]
     # alphas = [1.0, 0.1, 0.1]
     # alphas = [0.1, 0.1]
-    dataset = ["WISDM-W", "ImageNet10", "Gowalla"]
+    dataset = ["WISDM-W", "ImageNet10", "wikitext"]
     # dataset = ["WISDM-W", "ImageNet10"]
     # dataset = ["EMNIST", "CIFAR10"]
     # models_names = ["cnn_c"]
     model_name = ["gru", "CNN", "lstm"]
     # model_name = ["gru", "CNN"]
-    fraction_fit = 0.4
+    fraction_fit = 0.3
     number_of_rounds = 100
     local_epochs = 1
     round_new_clients = 0
     train_test = "test"
     # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
-    solutions = ["HMultiFedAvg", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
+    solutions = ["MultiFedAvg-MDH", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
 
     read_solutions = {solution: [] for solution in solutions}
     read_dataset_order = []

@@ -66,7 +66,7 @@ DATASET_INPUT_MAP = {"CIFAR10": "img", "MNIST": "image", "EMNIST": "image", "GTS
 def load_model(model_name, dataset, strategy, device):
     try:
         num_classes = {'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'Tiny-ImageNet': 200,
-         'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7}[dataset]
+         'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30}[dataset]
         if model_name == 'CNN':
             if dataset in ['MNIST']:
                 input_shape = 1
@@ -252,7 +252,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                     dataset={"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "MNIST": "ylecun/mnist",
                          "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
-                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-30-Words-100'}[dataset_name],
+                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-10-Words-25'}[dataset_name],
                     partitioners={"train": partitioner},
                     seed=42
                 )
@@ -266,7 +266,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                 dataset={"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "MNIST": "ylecun/mnist",
                          "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
-                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-30-Words-100'}[
+                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-10-Words-25'}[
                     dataset_name],
                 partitioners={"train": partitioner},
                 path=f"datasets/{dataset_name}",

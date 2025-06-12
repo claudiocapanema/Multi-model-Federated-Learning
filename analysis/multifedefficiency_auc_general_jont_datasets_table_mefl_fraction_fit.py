@@ -24,7 +24,7 @@ def read_data(read_solutions, read_dataset_order):
         "MultiFedAvg+FP": {"Strategy": "MultiFedAvg", "Version": "FP", "Table": "MultiFedAvg+FP"},
         "MultiFedAvg": {"Strategy": "MultiFedAvg", "Version": "Original", "Table": "MultiFedAvg"},
         "MultiFedAvgRR": {"Strategy": "MultiFedAvgRR", "Version": "Original", "Table": "MultiFedAvgRR"},
-        "HMultiFedAvg": {"Strategy": "HMultiFedAvg", "Version": "Original", "Table": "HMultiFedAvg"},
+        "MultiFedAvg-MDH": {"Strategy": "MultiFedAvg-MDH", "Version": "Original", "Table": "MultiFedAvg-MDH"},
         "FedFairMMFL": {"Strategy": "FedFairMMFL", "Version": "Original", "Table": "FedFairMMFL"},
     }
     hue_order = []
@@ -207,7 +207,7 @@ def table(df, write_path, metric, t=None):
 
 def improvements(df, datasets, metric):
     # , "FedKD+FP": "FedKD"
-    strategies = {"HMultiFedAvg": "MultiFedAvg", "MultiFedAvgRR": "MultiFedAvg", "FedFairMMFL": "MultiFedAvg"}
+    strategies = {"MultiFedAvg-MDH": "MultiFedAvg", "MultiFedAvgRR": "MultiFedAvg", "FedFairMMFL": "MultiFedAvg"}
     # strategies = {r"MultiFedAvg+FP": "MultiFedAvg"}
     columns = df.columns.tolist()
     improvements_dict = {'Dataset': [], 'Table': [], 'Original strategy': [], 'Alpha': [], metric: []}
@@ -287,7 +287,7 @@ def accuracy_improvement(df, datasets):
     # reference_solutions = {"MultiFedAvg+FP": "MultiFedAvg", "MultiFedAvgGlobalModelEval+FP": "MultiFedAvgGlobalModelEval"}
     # ,
     #                            "FedKD+FP": "FedKD"
-    reference_solutions = {"HMultiFedAvg": "MultiFedAvg", "MultiFedAvgRR": "MultiFedAvg", "FedFairMMFL": "MultiFedAvg"}
+    reference_solutions = {"MultiFedAvg-MDH": "MultiFedAvg", "MultiFedAvgRR": "MultiFedAvg", "FedFairMMFL": "MultiFedAvg"}
 
     print(df_difference)
     # exit()
@@ -377,8 +377,8 @@ if __name__ == "__main__":
     round_new_clients = 0
     train_test = "test"
     # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
-    # solutions = ["HMultiFedAvg", "MultiFedAvg"]
-    solutions = ["HMultiFedAvg", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
+    # solutions = ["MultiFedAvg-MDH", "MultiFedAvg"]
+    solutions = ["MultiFedAvg-MDH", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
 
     read_solutions = {solution: [] for solution in solutions}
     read_dataset_order = []

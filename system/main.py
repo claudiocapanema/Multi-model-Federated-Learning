@@ -48,7 +48,7 @@ emb_dim=32
 def load_model(model_name, dataset, strategy, device):
     try:
         num_classes = {'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'Tiny-ImageNet': 200,
-         'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 100}[dataset]
+         'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30}[dataset]
         out_channel = 32
         if model_name == 'CNN':
             if dataset in ['MNIST']:

@@ -21,7 +21,7 @@ def read_data(read_solutions, read_dataset_order):
         "MultiFedAvg+FP": {"Strategy": "MultiFedAvg", "Version": "FP", "Table": "MultiFedAvg+FP"},
         "MultiFedAvg": {"Strategy": "MultiFedAvg", "Version": "Original", "Table": "MultiFedAvg"},
         "MultiFedAvgRR": {"Strategy": "MultiFedAvgRR", "Version": "Original", "Table": "MultiFedAvgRR"},
-        "HMultiFedAvg": {"Strategy": "HMultiFedAvg", "Version": "Original", "Table": "HMultiFedAvg"}
+        "MultiFedAvg-MDH": {"Strategy": "MultiFedAvg-MDH", "Version": "Original", "Table": "MultiFedAvg-MDH"}
     }
     hue_order = []
     for solution in read_solutions:
@@ -59,7 +59,7 @@ def line(df, base_dir, x, y, hue=None, style=None, ci=None, hue_order=None, y_ma
     datasets = df["Dataset"].unique().tolist()
 
     fig, axs = plt.subplots(len(datasets), sharex='all', figsize=(9, 6))
-    hue_order = ["HMultiFedAvg", "MultiFedAvg"]
+    hue_order = ["MultiFedAvg-MDH", "MultiFedAvg"]
 
     for j in range(len(datasets)):
 
@@ -119,7 +119,7 @@ if __name__ == "__main__":
     alphas = [0.1, 0.1, 0.1]
     # alphas = [10.0, 0.1]
     # dataset = ["WISDM-W", "CIFAR10"]
-    dataset = ["WISDM-W", "ImageNet10", "Gowalla"]
+    dataset = ["WISDM-W", "ImageNet10", "wikitext"]
     # dataset = ["WISDM-W", "ImageNet10"]
     # dataset = ["EMNIST", "CIFAR10"]
     # models_names = ["cnn_c"]
@@ -131,7 +131,7 @@ if __name__ == "__main__":
     round_new_clients = 0
     train_test = "test"
     # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
-    solutions = ["HMultiFedAvg", "MultiFedAvg"]
+    solutions = ["MultiFedAvg-MDH", "MultiFedAvg"]
 
     read_solutions = {solution: [] for solution in solutions}
     read_dataset_order = []
