@@ -31,7 +31,7 @@ logging.basicConfig(level=logging.INFO)  # Configure logging
 logger = logging.getLogger(__name__)  # Create logger for the module
 
 
-class HMultiFedAvgClient(MultiFedAvgClient):
+class MultiFedAvgMDHClient(MultiFedAvgClient):
     def __init__(self, args, id, model):
         try:
             super().__init__(args, id, model)
@@ -48,7 +48,7 @@ class HMultiFedAvgClient(MultiFedAvgClient):
             self.num_examples, self.p_ME, self.fc_ME, self.il_ME = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id,
                                                                            self.n_classes)
         except Exception as e:
-            logger.error("HMultiFedAvgClient __init__ error")
+            logger.error("MultiFedAvgMDHClient __init__ error")
             logger.error("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 

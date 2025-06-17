@@ -417,4 +417,4 @@ if __name__ == "__main__":
 
     table(df, write_path, "Balanced accuracy (%)", t=None)
     table(df, write_path, "Accuracy (%)", t=None)
-    table(df, write_path, "Accuracy (%)", t=[39,40])
+    # table(df, write_path, "Accuracy (%)", t=[39,40])

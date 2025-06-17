@@ -32,8 +32,8 @@ def download_datasets(datasets_name: list, alphas: list, num_partitions: int):
                          , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-10-Words-30'}[
                         dataset_name])
                 if dataset_name in ["Gowalla"]:
-                    dataset["train"] = dataset["train"].shuffle(seed=42).select(range(100000))
-                    dataset["test"] = dataset["test"].shuffle(seed=42).select(range(20000))
+                    dataset["train"] = dataset["train"].shuffle(seed=42).select(range(120000))
+                    dataset["test"] = dataset["test"].shuffle(seed=42).select(range(30000))
                 elif dataset_name in ["wikitext"]:
                     dataset["train"] = dataset["train"].shuffle(seed=42).select(range(480000))
                     dataset["test"] = dataset["test"].shuffle(seed=42).select(range(12000))

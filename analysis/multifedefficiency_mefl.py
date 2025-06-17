@@ -119,7 +119,7 @@ if __name__ == "__main__":
     alphas = [0.1, 0.1, 0.1]
     # alphas = [10.0, 0.1]
     # dataset = ["WISDM-W", "CIFAR10"]
-    dataset = ["WISDM-W", "ImageNet10", "wikitext"]
+    dataset = ["WISDM-W", "ImageNet10", "Gowalla"]
     # dataset = ["WISDM-W", "ImageNet10"]
     # dataset = ["EMNIST", "CIFAR10"]
     # models_names = ["cnn_c"]

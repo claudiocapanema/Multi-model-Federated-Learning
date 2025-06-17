@@ -23,7 +23,7 @@ import random
 import os
 
 import pandas as pd
-from flcore.clients.client_hmultifedavg import HMultiFedAvgClient, MultiFedAvgClient
+from flcore.clients.client_multifedavgmdh import MultiFedAvgMDHClient, MultiFedAvgClient
 from flcore.servers.server_multifedavg import MultiFedAvg
 from threading import Thread
 
@@ -67,7 +67,7 @@ class MultiFedAvgMDH(MultiFedAvg):
 
         try:
             for i in range(self.total_clients):
-                client = HMultiFedAvgClient(self.args, id=i, model=copy.deepcopy(self.global_model))
+                client = MultiFedAvgMDHClient(self.args, id=i, model=copy.deepcopy(self.global_model))
                 self.clients.append(client)
 
         except Exception as e:
