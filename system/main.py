@@ -28,6 +28,7 @@ from flcore.servers.server_multifedavg import MultiFedAvg
 from flcore.servers.server_multifedavg_mdh import MultiFedAvgMDH
 from flcore.servers.server_multifedavgrr import MultiFedAvgRR
 from flcore.servers.server_fedfairmmfl import FedFairMMFL
+from flcore.servers.server_multifedavg_with_multifedpredict import MultiFedAvgWithMultiFedPredict
 
 from flcore.clients.utils.models import CNN, CNN_3, CNNDistillation, GRU, LSTM, TinyImageNetCNN, LSTMNextWord
 
@@ -153,6 +154,8 @@ def run(args):
         server = MultiFedAvgRR
     elif args.strategy == "FedFairMMFL":
         server = FedFairMMFL
+    elif args.strategy == "MultiFedAvg+MFP":
+        server = MultiFedAvgWithMultiFedPredict
 
     # elif args.strategy == "MultiFedEfficiency":
     #     server = MultiFedEfficiency

@@ -18,11 +18,25 @@
 import copy
 import time
 import numpy as np
-from flcore.clients.clientavg_with_fedpredict import ClientAvgWithFedPredict
+from flcore.clients.client_multifedavg_with_multifedpredict import ClientMultiFedAvgWithMultiFedPredict
 from flcore.servers.server_multifedavg import MultiFedAvg
 from threading import Thread
+import sys
 
 
-class MultiFedAvgWithFedPredict(MultiFedAvg):
+class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
     def __init__(self, args, times):
         super().__init__(args, times)
+
+    def set_clients(self):
+
+        try:
+            for i in range(self.total_clients):
+                client = ClientMultiFedAvgWithMultiFedPredict(self.args,
+                                id=i,
+                                   model=copy.deepcopy(self.global_model))
+                self.clients.append(client)
+
+        except Exception as e:
+            print("set_clients error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
