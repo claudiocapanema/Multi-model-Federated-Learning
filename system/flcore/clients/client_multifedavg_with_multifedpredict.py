@@ -22,6 +22,7 @@ import numpy as np
 import time
 from sklearn.preprocessing import label_binarize
 from sklearn import metrics
+import sys
 from flcore.clients.client_multifedavg import MultiFedAvgClient
 from fedpredict import fedpredict_client_torch
 from .utils.models_utils import load_model, get_weights, load_data, set_weights, test, train
@@ -29,8 +30,16 @@ from .utils.models_utils import load_model, get_weights, load_data, set_weights,
 
 class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
     def __init__(self, args, id, model):
-        super().__init__(args, id,  model)
-        self.global_model = copy.deepcopy(self.model)
+        try:
+            super().__init__(args, id,  model)
+            self.global_model = copy.deepcopy(self.model)
+            print("quntidade de modelos: ", len(model), type(model))
+            self.model_shape_mefl = []
+            for me in range(self.ME):
+                self.model_shape_mefl.append([param.shape for name, param in model[me].named_parameters()])
+        except Exception as e:
+            print("__init__ error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def fit(self, me, t, global_model):
         """Train the model with data of this client."""
@@ -51,9 +60,10 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             torch.manual_seed(t)
             tuple_me = {}
             nt = t - self.lt[me]
-            set_weights(self.global_model[me], global_model)
-            combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=self.global_model[me],
-                                                     t=t, T=100, nt=nt, device=self.device)
+            # if nt > 0:
+            #     set_weights(self.global_model[me], global_model)
+            combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
+                                                     t=t, T=100, nt=nt, device=self.device, global_model_original_shape=self.model_shape_mefl[me])
             loss, metrics = test(combined_model, self.valloader[me], self.device, self.client_id, t,
                                  self.args.dataset[me], self.n_classes[me], self.concept_drift_window[me])
             metrics["Model size"] = self.models_size[me]

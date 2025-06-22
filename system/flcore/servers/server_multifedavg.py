@@ -161,10 +161,12 @@ class MultiFedAvg:
         try:
             evaluate_results = []
             for me in range(self.ME):
-
+                client_evaluate_list = []
                 for i in range(len(self.clients)):
 
                     evaluate_results.append(self.clients[i].evaluate(me, t, parameters_aggregated_mefl[me]))
+
+
 
             loss_aggregated_mefl, metrics_aggregated_mefl = self.aggregate_evaluate(server_round=t, results=evaluate_results, failures=[])
 
