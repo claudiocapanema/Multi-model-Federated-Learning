@@ -82,7 +82,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
                     clients_evaluate_list.append(client_dict)
                 clients_compressed_parameters = fedpredict_server(global_model_parameters=parameters_aggregated_mefl[me], client_evaluate_list=clients_evaluate_list,
                                      t=t, T=self.number_of_rounds, df=0, model_shape=self.model_shape_mefl[me],
-                                     compression="dls")
+                                     compression="dls_compredict")
 
                 for i in range(len(self.clients)):
                     evaluate_results.append(self.clients[i].evaluate(me, t, clients_compressed_parameters[i]["parameters"]))
