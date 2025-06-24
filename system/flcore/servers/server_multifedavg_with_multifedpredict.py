@@ -21,13 +21,21 @@ import numpy as np
 from flcore.clients.client_multifedavg_with_multifedpredict import ClientMultiFedAvgWithMultiFedPredict
 from flcore.servers.server_multifedavg import MultiFedAvg
 import sys
-from fedpredict import fedpredict_server
+from fedpredict import fedpredict_server, fedpredict_layerwise_similarity
 
 
 class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
     def __init__(self, args, times):
         super().__init__(args, times)
+        self.compression = "dls_compredict"
+        self.similarity_list_per_layer = {me: {} for me in range(self.ME)}
+        self.initial_similarity = 0
+        self.current_similarity = 0
         self.model_shape_mefl = [None] * self.ME
+        self.similarity_between_layers_per_round = {me: {} for me in range(self.ME)}
+        self.similarity_between_layers_per_round_and_client = {me: {} for me in range(self.ME)}
+        self.mean_similarity_per_round = {me: {} for me in range(self.ME)}
+        self.df = [0] * self.ME
 
     def set_clients(self):
 
@@ -58,6 +66,42 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
                 for me in range(self.ME):
                     self.model_shape_mefl[me] = [i.shape for i in parameters_aggregated_mefl[me]]
 
+            clients_parameters_mefl = {me: [] for me in range(self.ME)}
+            for i in range(len(results)):
+                parameter, num_examples, result = results[i]
+                me = result["me"]
+                clients_parameters_mefl[me].append(results[i][0])
+
+            flag = False
+            if server_round == 1:
+                flag = True
+            print("Flag: ", flag)
+            for me in range(self.ME):
+                if "dls" in self.compression:
+                    if flag:
+                        self.similarity_between_layers_per_round_and_client[me][server_round], \
+                        self.similarity_between_layers_per_round[me][server_round], self.mean_similarity_per_round[me][
+                            server_round], self.similarity_list_per_layer[me] = fedpredict_layerwise_similarity(
+                            parameters_aggregated_mefl[me], clients_parameters_mefl[me], self.similarity_list_per_layer[me])
+                        self.df[me] = max(0, abs(np.mean(self.similarity_list_per_layer[me][0]) - np.mean(
+                            self.similarity_list_per_layer[me][len(parameters_aggregated_mefl[me]) - 2])))
+                    else:
+                        self.similarity_between_layers_per_round_and_client[me][server_round], \
+                        self.similarity_between_layers_per_round[me][
+                            server_round], self.mean_similarity_per_round[me][
+                            server_round], self.similarity_list_per_layer[me] = \
+                        self.similarity_between_layers_per_round_and_client[me][server_round - 1], \
+                        self.similarity_between_layers_per_round[me][
+                            server_round - 1], self.mean_similarity_per_round[me][
+                            server_round - 1], self.similarity_list_per_layer[me]
+                else:
+                    self.similarity_between_layers_per_round[me][server_round] = []
+                    self.mean_similarity_per_round[me][server_round] = 0
+                    self.similarity_between_layers_per_round_and_client[me][server_round] = []
+                    self.df[me] = 1
+
+            print(f"df: {self.df}")
+
             return parameters_aggregated_mefl, metrics_aggregated_mefl
 
 
@@ -80,9 +124,9 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
                     client_dict["nt"] = t - self.clients[i].lt[me]
                     client_dict["lt"] = self.clients[i].lt[me]
                     clients_evaluate_list.append(client_dict)
-                clients_compressed_parameters = fedpredict_server(global_model_parameters=parameters_aggregated_mefl[me], client_evaluate_list=clients_evaluate_list,
-                                     t=t, T=self.number_of_rounds, df=0, model_shape=self.model_shape_mefl[me],
-                                     compression="dls_compredict")
+                clients_compressed_parameters = fedpredict_server(
+                    global_model_parameters=parameters_aggregated_mefl[me], client_evaluate_list=clients_evaluate_list,
+                    t=t, T=self.number_of_rounds, df=self.df, compression="sparsification")
 
                 for i in range(len(self.clients)):
                     evaluate_results.append(self.clients[i].evaluate(me, t, clients_compressed_parameters[i]["parameters"]))
