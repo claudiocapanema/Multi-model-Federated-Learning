@@ -83,8 +83,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
                         self.similarity_between_layers_per_round[me][server_round], self.mean_similarity_per_round[me][
                             server_round], self.similarity_list_per_layer[me] = fedpredict_layerwise_similarity(
                             parameters_aggregated_mefl[me], clients_parameters_mefl[me], self.similarity_list_per_layer[me])
-                        self.df[me] = max(0, abs(np.mean(self.similarity_list_per_layer[me][0]) - np.mean(
-                            self.similarity_list_per_layer[me][len(parameters_aggregated_mefl[me]) - 2])))
+                        self.df[me] = float(max(0, abs(np.mean(self.similarity_list_per_layer[me][0]) - np.mean(
+                            self.similarity_list_per_layer[me][len(parameters_aggregated_mefl[me]) - 2]))))
                     else:
                         self.similarity_between_layers_per_round_and_client[me][server_round], \
                         self.similarity_between_layers_per_round[me][
@@ -126,7 +126,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
                     clients_evaluate_list.append(client_dict)
                 clients_compressed_parameters = fedpredict_server(
                     global_model_parameters=parameters_aggregated_mefl[me], client_evaluate_list=clients_evaluate_list,
-                    t=t, T=self.number_of_rounds, df=self.df, compression="sparsification")
+                    t=t, T=self.number_of_rounds, df=self.df[me], compression="dls_compredict")
 
                 for i in range(len(self.clients)):
                     evaluate_results.append(self.clients[i].evaluate(me, t, clients_compressed_parameters[i]["parameters"]))

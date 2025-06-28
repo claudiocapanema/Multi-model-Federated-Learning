@@ -147,9 +147,9 @@ class MultiFedAvg:
 
                     for i in range(len(self.selected_clients[me])):
                         fit_results.append(self.clients[self.selected_clients[me][i]].fit(me, t, self.parameters_aggregated_mefl[me]))
-
+                print("antes ag")
                 self.parameters_aggregated_mefl, metrics_aggregated_mefl = self.aggregate_fit(server_round=t, results=fit_results, failures=[])
-
+                print("passou agg")
                 self.evaluate(t, self.parameters_aggregated_mefl)
 
         except Exception as e:

@@ -166,7 +166,6 @@ def set_weights(net, parameters):
         print("set_weights error")
         print(f"tipo {type(net)}")
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
-        exit()
 
 def set_weights_fedkd(net, parameters):
     try:
@@ -582,7 +581,7 @@ def test(model, testloader, device, client_id, t, dataset_name, n_classes, conce
         return loss, test_metrics
 
     except Exception as e:
-        print(" error")
+        print("test error")
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 def test_fedkd(model, testloader, device, client_id, t, dataset_name, n_classes):
@@ -673,7 +672,7 @@ def test_fedpredict(model, testloader, device, client_id, t, dataset_name, n_cla
         return loss, test_metrics
 
     except Exception as e:
-        print(" error")
+        print("teest fedpredict error")
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 
