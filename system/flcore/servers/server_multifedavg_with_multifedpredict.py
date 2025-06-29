@@ -15,6 +15,7 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
+import os
 import copy
 import time
 import numpy as np
@@ -22,12 +23,18 @@ from flcore.clients.client_multifedavg_with_multifedpredict import ClientMultiFe
 from flcore.servers.server_multifedavg import MultiFedAvg
 import sys
 from fedpredict import fedpredict_server, fedpredict_layerwise_similarity
+import flwr
+from flwr.common import (
+    EvaluateIns,
+    ndarrays_to_parameters,
+    parameters_to_ndarrays,
+)
 
 
 class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
     def __init__(self, args, times):
         super().__init__(args, times)
-        self.compression = "dls_compredict"
+        self.compression = "fedkd"
         self.similarity_list_per_layer = {me: {} for me in range(self.ME)}
         self.initial_similarity = 0
         self.current_similarity = 0
@@ -115,6 +122,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
 
         try:
             evaluate_results = []
+            print("inicio s")
             for me in range(self.ME):
                 clients_evaluate_list = []
                 for i in range(len(self.clients)):
@@ -123,17 +131,80 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
                     client_dict["cid"] = self.clients[i].client_id
                     client_dict["nt"] = t - self.clients[i].lt[me]
                     client_dict["lt"] = self.clients[i].lt[me]
-                    clients_evaluate_list.append(client_dict)
+                    clients_evaluate_list.append((self.clients[i], EvaluateIns(ndarrays_to_parameters(parameters_aggregated_mefl[me]), client_dict)))
                 clients_compressed_parameters = fedpredict_server(
                     global_model_parameters=parameters_aggregated_mefl[me], client_evaluate_list=clients_evaluate_list,
-                    t=t, T=self.number_of_rounds, df=self.df[me], compression="dls_compredict")
-
+                    t=t, T=self.number_of_rounds, df=self.df[me], compression=self.compression, fl_framework="flwr")
                 for i in range(len(self.clients)):
-                    evaluate_results.append(self.clients[i].evaluate(me, t, clients_compressed_parameters[i]["parameters"]))
+                    evaluate_results.append(self.clients[i].evaluate(me, t, parameters_to_ndarrays(clients_compressed_parameters[i][1].parameters)))
 
             loss_aggregated_mefl, metrics_aggregated_mefl = self.aggregate_evaluate(server_round=t,
                                                                                     results=evaluate_results,
                                                                                     failures=[])
         except Exception as e:
             print("evaluate error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+    def _get_results(self, train_test, mode, me):
+
+        try:
+            algo = self.dataset[me] + "_" + self.strategy_name
+
+            result_path = self.get_result_path(train_test)
+
+            if not os.path.exists(result_path):
+                os.makedirs(result_path)
+
+            compression = self.compression
+            if len(compression) > 0:
+                compression = "_" + compression
+            file_path = result_path + "{}{}.csv".format(algo, compression)
+
+            if train_test == 'test':
+
+                header = self.test_metrics_names
+                # print(self.rs_test_acc[me])
+                # print(self.rs_test_auc[me])
+                # print(self.rs_train_loss[me])
+                list_of_metrics = []
+                for metric in self.results_test_metrics[me]:
+                    # print(me, len(self.results_test_metrics[me][metric]))
+                    length = len(self.results_test_metrics[me][metric])
+                    list_of_metrics.append(self.results_test_metrics[me][metric])
+
+                data = []
+                for i in range(length):
+                    row = []
+                    for j in range(len(list_of_metrics)):
+                        row.append(list_of_metrics[j][i])
+
+                    data.append(row)
+
+            else:
+                if mode == '':
+                    header = self.train_metrics_names
+                    list_of_metrics = []
+                    for metric in self.results_train_metrics[me]:
+                        # print(me, len(self.results_train_metrics[me][metric]))
+                        length = len(self.results_train_metrics[me][metric])
+                        list_of_metrics.append(self.results_train_metrics[me][metric])
+
+                    data = []
+                    # print("""tamanho: {}    {}""".format(length, list_of_metrics))
+                    for i in range(length):
+                        row = []
+                        for j in range(len(list_of_metrics)):
+                            if len(list_of_metrics[j]) > 0:
+                                row.append(list_of_metrics[j][i])
+                            else:
+                                row.append(0)
+
+                        data.append(row)
+
+            # print("File path: " + file_path)
+            print(data)
+
+            return file_path, header, data
+        except Exception as e:
+            print("get_results error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))

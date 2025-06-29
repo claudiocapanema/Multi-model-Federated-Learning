@@ -26,6 +26,7 @@ import sys
 from flcore.clients.client_multifedavg import MultiFedAvgClient
 from fedpredict import fedpredict_client_torch
 from .utils.models_utils import load_model, get_weights, load_data, set_weights, test, train
+import pickle
 
 
 class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
@@ -62,6 +63,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             nt = t - self.lt[me]
             # if nt > 0:
             #     set_weights(self.global_model[me], global_model)
+            # global_model = pickle.loads(global_model)
             combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
                                                      t=t, T=100, nt=nt, device=self.device, global_model_original_shape=self.model_shape_mefl[me])
             loss, metrics = test(combined_model, self.valloader[me], self.device, self.client_id, t,
