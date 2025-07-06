@@ -34,7 +34,7 @@ from flwr.common import (
 class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
     def __init__(self, args, times):
         super().__init__(args, times)
-        self.compression = "fedkd"
+        self.compression = "sparsification"
         self.similarity_list_per_layer = {me: {} for me in range(self.ME)}
         self.initial_similarity = 0
         self.current_similarity = 0
@@ -88,10 +88,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
                     if flag:
                         self.similarity_between_layers_per_round_and_client[me][server_round], \
                         self.similarity_between_layers_per_round[me][server_round], self.mean_similarity_per_round[me][
-                            server_round], self.similarity_list_per_layer[me] = fedpredict_layerwise_similarity(
+                            server_round], self.similarity_list_per_layer[me], self.df[me] = fedpredict_layerwise_similarity(
                             parameters_aggregated_mefl[me], clients_parameters_mefl[me], self.similarity_list_per_layer[me])
-                        self.df[me] = float(max(0, abs(np.mean(self.similarity_list_per_layer[me][0]) - np.mean(
-                            self.similarity_list_per_layer[me][len(parameters_aggregated_mefl[me]) - 2]))))
                     else:
                         self.similarity_between_layers_per_round_and_client[me][server_round], \
                         self.similarity_between_layers_per_round[me][
@@ -137,6 +135,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
                     t=t, T=self.number_of_rounds, df=self.df[me], compression=self.compression, fl_framework="flwr")
                 for i in range(len(self.clients)):
                     evaluate_results.append(self.clients[i].evaluate(me, t, parameters_to_ndarrays(clients_compressed_parameters[i][1].parameters)))
+                    # evaluate_results.append(self.clients[i].evaluate(me, t,
+                    #     clients_compressed_parameters[i][1].config["parameters"]))
 
             loss_aggregated_mefl, metrics_aggregated_mefl = self.aggregate_evaluate(server_round=t,
                                                                                     results=evaluate_results,

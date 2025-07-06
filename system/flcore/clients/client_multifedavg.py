@@ -35,7 +35,7 @@ class MultiFedAvgClient:
             self.args = args
             self.batch_size = []
             for dataset in args.dataset:
-                self.batch_size.append({"WISDM-W": 16, "ImageNet10": 10, "Gowalla": 64, "wikitext": 460}[dataset])
+                self.batch_size.append({"CIFAR10": 32, "WISDM-W": 16, "ImageNet10": 10, "Gowalla": 64, "wikitext": 460}[dataset])
             self.model = model
             self.alpha = [float(i) for i in args.alpha]
             self.initial_alpha = self.alpha

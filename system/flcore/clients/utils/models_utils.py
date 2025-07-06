@@ -232,6 +232,82 @@ def wikitext_preprocess(dataset):
 
 fds = {}  # Cache FederatedDataset
 
+def get_transform(dataset_name, train_test):
+    pytorch_transforms = {"CIFAR10": {"train":
+                                          Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
+                                      "test": Compose(
+                                          [ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])},
+                          "MNIST": Compose([ToTensor(), RandomRotation(10),
+                                            Normalize([0.5], [0.5])]),
+                          "EMNIST": Compose([ToTensor(), RandomRotation(10),
+                                             Normalize([0.5], [0.5])]),
+                          "GTSRB": Compose(
+                              [
+
+                                  Resize((32, 32)),
+                                  RandomHorizontalFlip(),  # FLips the image w.r.t horizontal axis
+                                  RandomRotation(10),  # Rotates the image to a specified angel
+                                  RandomAffine(0, shear=10, scale=(0.8, 1.2)),
+                                  # Performs actions like zooms, change shear angles.
+                                  ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+                                  ToTensor(),
+                                  Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
+                              ]
+                          ),
+                          "ImageNet": Compose(
+                              [
+
+                                  Resize(32),
+                                  RandomHorizontalFlip(),
+                                  ToTensor(),
+                                  Normalize(mean=[0.485, 0.456, 0.406],
+                                            std=[0.229, 0.224, 0.225])
+                                  # transforms.Resize((32, 32)),
+                                  # transforms.ToTensor(),
+                                  # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                              ]
+                          ),
+                          "ImageNet10": {"train":
+                              Compose(
+                                  [
+
+                                      Resize(32),
+                                      ToTensor(),
+                                      Normalize(mean=[0.485, 0.456, 0.406],
+                                                std=[0.229, 0.224, 0.225]),
+                                      # transforms.Resize((32, 32)),
+                                      # transforms.ToTensor(),
+                                      # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                                  ]
+                              ),
+                              "test":
+                                  Compose(
+                                      [
+                                          Resize(32),
+                                          ToTensor(),
+                                          Normalize(mean=[0.485, 0.456, 0.406],
+                                                    std=[0.229, 0.224, 0.225]),
+                                          # transforms.Resize((32, 32)),
+                                          # transforms.ToTensor(),
+                                          # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                                      ]
+                                  )
+                          }
+                          # Compose([AutoAugment(policy=AutoAugmentPolicy.CIFAR10), Resize(32), ToTensor(),
+                          #             Normalize(mean=[0.485, 0.456, 0.406],
+                          #                          std=[0.229, 0.224, 0.225])])
+        ,
+                          "WISDM-W": {"train": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32))),
+                                      "test": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32)))},
+                          "Gowalla": {"train": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32))),
+                                      "test": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32)))},
+                          "wikitext": {"train": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32))),
+                                      "test": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32)))}
+
+                          }[dataset_name][train_test]
+
+    return pytorch_transforms
+
 def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions: int, batch_size: int,
               data_sampling_percentage: int, get_from_volume: bool = True):
     try:
@@ -330,82 +406,6 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
     except Exception as e:
         print("load_data error")
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
-
-def get_transform(dataset_name, train_test):
-    pytorch_transforms = {"CIFAR10": {"train":
-                                          Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
-                                      "test": Compose(
-                                          [ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])},
-                          "MNIST": Compose([ToTensor(), RandomRotation(10),
-                                            Normalize([0.5], [0.5])]),
-                          "EMNIST": Compose([ToTensor(), RandomRotation(10),
-                                             Normalize([0.5], [0.5])]),
-                          "GTSRB": Compose(
-                              [
-
-                                  Resize((32, 32)),
-                                  RandomHorizontalFlip(),  # FLips the image w.r.t horizontal axis
-                                  RandomRotation(10),  # Rotates the image to a specified angel
-                                  RandomAffine(0, shear=10, scale=(0.8, 1.2)),
-                                  # Performs actions like zooms, change shear angles.
-                                  ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
-                                  ToTensor(),
-                                  Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
-                              ]
-                          ),
-                          "ImageNet": Compose(
-                              [
-
-                                  Resize(32),
-                                  RandomHorizontalFlip(),
-                                  ToTensor(),
-                                  Normalize(mean=[0.485, 0.456, 0.406],
-                                            std=[0.229, 0.224, 0.225])
-                                  # transforms.Resize((32, 32)),
-                                  # transforms.ToTensor(),
-                                  # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-                              ]
-                          ),
-                          "ImageNet10": {"train":
-                              Compose(
-                                  [
-
-                                      Resize(32),
-                                      ToTensor(),
-                                      Normalize(mean=[0.485, 0.456, 0.406],
-                                                std=[0.229, 0.224, 0.225]),
-                                      # transforms.Resize((32, 32)),
-                                      # transforms.ToTensor(),
-                                      # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-                                  ]
-                              ),
-                              "test":
-                                  Compose(
-                                      [
-                                          Resize(32),
-                                          ToTensor(),
-                                          Normalize(mean=[0.485, 0.456, 0.406],
-                                                    std=[0.229, 0.224, 0.225]),
-                                          # transforms.Resize((32, 32)),
-                                          # transforms.ToTensor(),
-                                          # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-                                      ]
-                                  )
-                          }
-                          # Compose([AutoAugment(policy=AutoAugmentPolicy.CIFAR10), Resize(32), ToTensor(),
-                          #             Normalize(mean=[0.485, 0.456, 0.406],
-                          #                          std=[0.229, 0.224, 0.225])])
-        ,
-                          "WISDM-W": {"train": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32))),
-                                      "test": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32)))},
-                          "Gowalla": {"train": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32))),
-                                      "test": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32)))},
-                          "wikitext": {"train": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32))),
-                                      "test": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32)))}
-
-                          }[dataset_name][train_test]
-
-    return pytorch_transforms
 
 def train(model, trainloader, valloader, optimizer, epochs, learning_rate, device, client_id, t, dataset_name, n_classes, concept_drift_window=0):
     try:

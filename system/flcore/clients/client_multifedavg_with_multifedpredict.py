@@ -38,6 +38,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             self.model_shape_mefl = []
             for me in range(self.ME):
                 self.model_shape_mefl.append([param.shape for name, param in model[me].named_parameters()])
+            self.T = args.number_of_rounds
         except Exception as e:
             print("__init__ error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
@@ -65,7 +66,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             #     set_weights(self.global_model[me], global_model)
             # global_model = pickle.loads(global_model)
             combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
-                                                     t=t, T=100, nt=nt, device=self.device, global_model_original_shape=self.model_shape_mefl[me])
+                                                     t=t, T=self.T, nt=nt, device=self.device, global_model_original_shape=self.model_shape_mefl[me])
             loss, metrics = test(combined_model, self.valloader[me], self.device, self.client_id, t,
                                  self.args.dataset[me], self.n_classes[me], self.concept_drift_window[me])
             metrics["Model size"] = self.models_size[me]
