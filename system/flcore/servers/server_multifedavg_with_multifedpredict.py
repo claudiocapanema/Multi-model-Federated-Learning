@@ -34,7 +34,7 @@ from flwr.common import (
 class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
     def __init__(self, args, times):
         super().__init__(args, times)
-        self.compression = "dls"
+        self.compression = "sparsification"
         self.similarity_list_per_layer = {me: {} for me in range(self.ME)}
         self.initial_similarity = 0
         self.current_similarity = 0
@@ -130,9 +130,10 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
                     client_dict["nt"] = t - self.clients[i].lt[me]
                     client_dict["lt"] = self.clients[i].lt[me]
                     clients_evaluate_list.append((self.clients[i], EvaluateIns(ndarrays_to_parameters(parameters_aggregated_mefl[me]), client_dict)))
+                print(f"submetidos t: {t} T: {self.number_of_rounds} df: {self.df[me]}")
                 clients_compressed_parameters = fedpredict_server(
                     global_model_parameters=parameters_aggregated_mefl[me], client_evaluate_list=clients_evaluate_list,
-                    t=t, T=self.number_of_rounds, df=self.df[me], compression=self.compression, fl_framework="flwr")
+                    t=t, T=self.number_of_rounds, df=self.df[me], compression=self.compression, fl_framework="flwr", k=0.7)
                 for i in range(len(self.clients)):
                     evaluate_results.append(self.clients[i].evaluate(me, t, parameters_to_ndarrays(clients_compressed_parameters[i][1].parameters)))
                     # evaluate_results.append(self.clients[i].evaluate(me, t,
