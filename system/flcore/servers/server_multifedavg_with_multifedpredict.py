@@ -133,7 +133,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
                 print(f"submetidos t: {t} T: {self.number_of_rounds} df: {self.df[me]}")
                 clients_compressed_parameters = fedpredict_server(
                     global_model_parameters=parameters_aggregated_mefl[me], client_evaluate_list=clients_evaluate_list,
-                    t=t, T=self.number_of_rounds, df=self.df[me], compression=self.compression, fl_framework="flwr", k=0.7)
+                    t=t, T=self.number_of_rounds, df=self.df[me], compression=self.compression, fl_framework="flwr", k_ratio=0.3)
                 for i in range(len(self.clients)):
                     evaluate_results.append(self.clients[i].evaluate(me, t, parameters_to_ndarrays(clients_compressed_parameters[i][1].parameters)))
                     # evaluate_results.append(self.clients[i].evaluate(me, t,
