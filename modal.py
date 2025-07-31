@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as T
+from torchvision import transforms, models
+from torch.utils.data import Dataset, DataLoader, random_split
 
 # ======================
 # Configurações
@@ -13,7 +15,7 @@ import torchvision.transforms as T
 DATA_DIR = "/home/gustavo/Downloads/v1.0-mini"
 CAM_CHANNEL = "CAM_FRONT"
 LIDAR_CHANNEL = "LIDAR_TOP"
-CLASS_LABELS = ['car', 'pedestrian', 'truck']  # exemplo
+CLASS_LABELS = ['car', 'pedestrian', 'truck', 'animal', 'motorcycle', 'emergency']  # exemplo
 
 # ======================
 # Dataset personalizado
@@ -156,6 +158,7 @@ class MultiModalClassifier(nn.Module):
         self.image_branch = nn.Sequential(
             nn.Conv2d(3, 16, 3, stride=2),
             nn.ReLU(),
+            nn.Dropout3d(p=0.3),
             nn.Conv2d(16, 32, 3, stride=2),
             nn.ReLU(),
             nn.AdaptiveAvgPool2d((1, 1)),
@@ -164,11 +167,13 @@ class MultiModalClassifier(nn.Module):
         self.lidar_branch = nn.Sequential(
             nn.Linear(30000, 256),
             nn.ReLU(),
+            nn.Dropout3d(p=0.3),
             nn.Linear(256, 64)
         )
         self.classifier = nn.Sequential(
             nn.Linear(32 + 64, 64),
             nn.ReLU(),
+            nn.Dropout3d(p=0.3),
             nn.Linear(64, num_classes)
         )
 
@@ -187,27 +192,56 @@ def train():
         T.ToTensor()
     ])
     dataset = NuScenesMiniDataset(DATA_DIR, transform=transform)
+
+    # 2. Dividindo em treino e teste (70% / 30%)
+    print("Tamanho dataset: ", len(dataset))
+    train_size = int(0.7 * len(dataset))
+    test_size = len(dataset) - train_size
+    train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
+
+    # Dataloaders
+    train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=4)
+
     dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
 
-    model = MultiModalClassifier(num_classes=3)
+    model = MultiModalClassifier(num_classes=len(CLASS_LABELS))
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     criterion = nn.CrossEntropyLoss()
 
-    for epoch in range(5):
+    for epoch in range(40):
         model.train()
         total_loss = 0
-        for img, pc, label in dataloader:
+        correct = 0
+        y_true = []
+        y_prob = []
+        for img, pc, label in train_loader:
             img, pc, label = img.to(device), pc.to(device), label.to(device)
             optimizer.zero_grad()
             output = model(img, pc)
             loss = criterion(output, label)
+            correct += (torch.max(output.data, 1)[1] == label).sum().item()
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
+        accuracy = correct / len(dataloader.dataset)
         print(f"Epoch {epoch+1}: Loss = {total_loss / len(dataloader):.4f}")
+        print(f"Accuracy: {accuracy*100:.2f}%")
+
+        model.eval()
+        total, correct = 0, 0
+        with torch.no_grad():
+            for img, pc, label in test_loader:
+                img, pc, label = img.to(device), pc.to(device), label.to(device)
+                outputs = model(img, pc)
+                preds = outputs.argmax(1)
+                correct += (preds == label).sum().item()
+                total += label.size(0)
+
+        print(f"Test Accuracy = {100 * correct / total:.2f}%")
 
 if __name__ == "__main__":
     train()

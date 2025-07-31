@@ -34,7 +34,7 @@ from flwr.common import (
 class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
     def __init__(self, args, times):
         super().__init__(args, times)
-        self.compression = "sparsification"
+        self.compression = "fedkd"
         self.similarity_list_per_layer = {me: {} for me in range(self.ME)}
         self.initial_similarity = 0
         self.current_similarity = 0
