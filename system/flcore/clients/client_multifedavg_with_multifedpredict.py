@@ -65,6 +65,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             # if nt > 0:
             #     set_weights(self.global_model[me], global_model)
             # global_model = pickle.loads(global_model)
+            self.update_local_test_data(t, me)
             combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
                                                      t=t, T=self.T, nt=nt, device=self.device, global_model_original_shape=self.model_shape_mefl[me])
             loss, metrics = test(combined_model, self.valloader[me], self.device, self.client_id, t,

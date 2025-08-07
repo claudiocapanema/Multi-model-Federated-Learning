@@ -23,6 +23,166 @@ import torch
 import numpy as np
 from .utils.models_utils import load_model, get_weights, load_data, set_weights, test, train
 
+def label_shift_config(ME, n_rounds, alphas, experiment_id, seed=0):
+    try:
+        np.random.seed(seed)
+        if experiment_id > 0:
+            type_ = "no_drift"
+            if experiment_id == "label_shift#1":
+                ME_concept_drift_rounds = [[int(n_rounds * 0.4), int(n_rounds * 0.8)], [int(n_rounds * 0.4), int(n_rounds * 0.8)]]
+                new_alphas = [[10.0, 0.1], [0.1, 10.0]]
+                type_ = "label_shift"
+
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me]} for me in range(ME)}
+            elif experiment_id == "label_shift#2":
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.6)], [int(n_rounds * 0.3), int(n_rounds * 0.7)]]
+                new_alphas = [[10.0, 0.1], [0.1, 10.0]]
+                type_ = "label_shift"
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
+            elif experiment_id == "label_shift#3":
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)],
+                                           [int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)]]
+                new_alphas = [[10.0, 1.0, 0.1], [0.1, 1.0, 10.0]]
+                type_ = "label_shift"
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
+            elif experiment_id == "label_shift#4":
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)],
+                                           [int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)]]
+                new_alphas = [[0.1, 1.0, 10.0], [10.0, 1.0, 0.1]]
+                type_ = "label_shift"
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
+            elif experiment_id == "label_shift#4":
+                # Melhor
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)],
+                                           [int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)]]
+                new_alphas = [[0.1, 1.0, 10.0], [0.1, 1.0, 10.0]]
+                type_ = "label_shift"
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
+            elif experiment_id == "label_shift#5":
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)],
+                                           [int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)]]
+                new_alphas = [[10.0, 1.0, 0.1], [10.0, 1.0, 0.1]]
+                type_ = "label_shift"
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
+            else:
+                config = {}
+
+
+
+        else:
+            config = {}
+        # else:
+        #     config = {}
+        return config
+
+    except Exception as e:
+        print("label_shift_config error")
+        print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+def global_concept_drift_config(ME, n_rounds, alphas, experiment_id, seed=0):
+    try:
+        np.random.seed(seed)
+        if len(experiment_id) > 0:
+            type_ = "no_drift"
+            if experiment_id == "concept_drift#1":
+                ME_concept_drift_rounds = [[int(n_rounds * 0.4), int(n_rounds * 0.8)], [int(n_rounds * 0.4), int(n_rounds * 0.8)]]
+                new_alphas = [[10.0, 0.1], [0.1, 10.0]]
+                type_ = "concept_drift"
+
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me]} for me in range(ME)}
+            elif experiment_id == "concept_drift#2":
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.6)], [int(n_rounds * 0.3), int(n_rounds * 0.7)]]
+                new_alphas = [[10.0, 0.1], [0.1, 10.0]]
+                type_ = "concept_drift"
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
+            elif experiment_id == "concept_drift#3":
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)],
+                                           [int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)]]
+                new_alphas = [[10.0, 1.0, 0.1], [0.1, 1.0, 10.0]]
+                type_ = "concept_drift"
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
+            elif experiment_id == "concept_drift#4":
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)],
+                                           [int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)]]
+                new_alphas = [[0.1, 1.0, 10.0], [10.0, 1.0, 0.1]]
+                type_ = "concept_drift"
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
+            elif experiment_id == "concept_drift#6":
+                # Melhor
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)],
+                                           [int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)]]
+                new_alphas = [[0.1, 1.0, 10.0], [0.1, 1.0, 10.0]]
+                type_ = "concept_drift"
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
+            elif experiment_id == "concept_drift#7":
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)],
+                                           [int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)]]
+                new_alphas = [[10.0, 1.0, 0.1], [10.0, 1.0, 0.1]]
+                type_ = "concept_drift"
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
+            elif experiment_id == "concept_drift#8":
+                # CP real
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)],
+                                           [int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)]]
+                new_alphas = [[10.0, 10.0, 10.0], [10.0, 10.0, 10.0]]
+                type_ = "concept_drift"
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
+            elif experiment_id == "concept_drift#9":
+                # CP real
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)],
+                                           [int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)]]
+                new_alphas = [[0.1, 0.1, 0.1], [0.1, 0.1, 0.1]]
+                type_ = "concept_drift"
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
+            elif experiment_id == "concept_drift#10":
+                # CP real
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)],
+                                           [int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)]]
+                new_alphas = [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]
+                type_ = "concept_drift"
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
+            else:
+                config = {}
+
+
+
+        else:
+            config = {}
+        # else:
+        #     config = {}
+        return config
+
+    except Exception as e:
+        print("global_concept_drift_config error")
+        print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+def get_data_shift_config(ME, n_rounds, alphas, experiment_id):
+
+    try:
+
+        if "label_shift" in experiment_id:
+            return label_shift_config(ME, n_rounds, alphas, experiment_id)
+        elif "concept_drift" in experiment_id:
+            return global_concept_drift_config(ME, n_rounds, alphas, experiment_id)
+        else:
+            return {}
+
+    except Exception as e:
+        print("get_data_shift_config error")
+        print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 class MultiFedAvgClient:
     def __init__(self, args, id, model):
@@ -62,6 +222,7 @@ class MultiFedAvgClient:
             self.loss_ME = [10] * self.ME
             # Concept drift parameters
             self.experiment_id = self.args.experiment_id
+            self.data_shift_config = get_data_shift_config(self.ME, self.number_of_rounds, self.alpha, self.experiment_id)
             self.concept_drift_window = [0] * self.ME
 
             self.concept_drift_config = {}
@@ -116,6 +277,10 @@ class MultiFedAvgClient:
             torch.manual_seed(t)
             # self.trainloader[me] = self.recent_trainloader[me]
             set_weights(self.model[me], global_model)
+
+            # Update alpha to simulate data shift
+            self.update_local_train_data(t, me)
+
             self.optimizer[me] = self._get_optimizer(dataset_name=self.args.dataset[me], me=me)
             results = train(
                 self.model[me],
@@ -150,6 +315,7 @@ class MultiFedAvgClient:
             torch.manual_seed(t)
             tuple_me = {}
             nt = t - self.lt[me]
+            self.update_local_test_data(t, me)
             set_weights(self.model[me], global_model)
             loss, metrics = test(self.model[me], self.valloader[me], self.device, self.client_id, t,
                                  self.args.dataset[me], self.n_classes[me], self.concept_drift_window[me])
@@ -161,6 +327,78 @@ class MultiFedAvgClient:
             return loss, len(self.valloader[me].dataset), tuple_me
         except Exception as e:
             print("evaluate error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+    def update_local_train_data(self, t, me):
+
+        try:
+            alpha_me = self._get_current_alpha(t, me)
+            if self.data_shift_config != {}:
+                if self.alpha[me] != alpha_me or (
+                        t in self.data_shift_config[me]["data_shift_rounds"] and self.data_shift_config[me][
+                    "type"] in ["label_shift"]):
+                    self.alpha[me] = alpha_me
+                    index = 0
+                    self.recent_trainloader[me], self.valloader[me] = load_data(
+                        dataset_name=self.args.dataset[me],
+                        alpha=self.alpha[me],
+                        data_sampling_percentage=self.args.data_percentage,
+                        partition_id=int((self.args.client_id + index) % self.args.total_clients),
+                        num_partitions=self.args.total_clients + 1,
+                        batch_size=self.args.batch_size,
+                    )
+                elif t in self.data_shift_config[me]["data_shift_rounds"] and self.data_shift_config[me]["type"] in [
+                    "concept_drift"]:
+                    self.concept_drift_window[me] += 1
+
+        except Exception as e:
+            print(f"update_local_train_data error {self.data_shift_config}")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+    def update_local_test_data(self, t, me):
+
+        try:
+            if self.data_shift_config != {}:
+                alpha_me = self._get_current_alpha(t, me)
+                if self.alpha[me] != alpha_me or (t in self.data_shift_config[me][
+                    "data_shift_rounds"] and self.data_shift_config[me]["type"] in ["label_shift"]):
+                    self.alpha[me] = alpha_me
+                    index = 0
+                    self.recent_trainloader[me], self.valloader[me] = load_data(
+                        dataset_name=self.args.dataset[me],
+                        alpha=self.alpha[me],
+                        data_sampling_percentage=self.args.data_percentage,
+                        partition_id=int((self.args.client_id + index) % self.args.total_clients),
+                        num_partitions=self.args.total_clients + 1,
+                        batch_size=self.args.batch_size,
+                    )
+                elif t in self.data_shift_config[me][
+                    "data_shift_rounds"] and self.data_shift_config[me]["type"] in ["concept_drift"] and t - self.lt[
+                    me] > 0:
+                    self.concept_drift_window[me] += 1
+
+        except Exception as e:
+            print(f"update_local_train_data error {self.data_shift_config}")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+    def _get_current_alpha(self, server_round, me):
+
+        try:
+            if self.data_shift_config == {}:
+                return self.alpha[me]
+            else:
+                config = self.data_shift_config[me]
+                alpha = None
+                for i, round_ in enumerate(config["data_shift_rounds"]):
+                    if server_round >= round_:
+                        alpha = config["new_alphas"][i]
+
+                if alpha is None:
+                    alpha = self.alpha[me]
+
+                return alpha
+        except Exception as e:
+            print(f"_get_current_alpha error {self.data_shift_config}")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def _get_models_size(self):

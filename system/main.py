@@ -216,7 +216,7 @@ if __name__ == "__main__":
         "--alpha", action="append", help="Dirichlet alpha"
     )
     parser.add_argument(
-        "--experiment_id", type=int, default=0, help=""
+        "--experiment_id", type=str, default="", help=""
     )
     parser.add_argument(
         "--round_new_clients", type=float, default=0.1, help=""

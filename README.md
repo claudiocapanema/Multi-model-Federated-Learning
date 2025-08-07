@@ -4,12 +4,12 @@ This project extends [PFLlib (Personalized Federated Learning Algorithm Library)
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPL_v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html) [![arXiv](https://img.shields.io/badge/arXiv-2312.04992-b31b1b.svg)](https://arxiv.org/abs/2312.04992)
 
-## FL exampple
+## FL examppe
 
 To execute a single model training use the following example:
 ```bash
 
-python main.py --total_clients=20 --number_of_rounds=100 --strategy="MultiFedAvg+MFP" --dataset="CIFAR10"  --model="CNN_3" --fraction_fit=0.3 --alpha=0.1 --experiment_id=2
+python main.py --total_clients=20 --number_of_rounds=100 --strategy="MultiFedAvg+MFP" --dataset="CIFAR10"  --model="CNN_3" --fraction_fit=0.3 --alpha=0.1 --experiment_id="2"
 
 ```
 
@@ -18,7 +18,15 @@ python main.py --total_clients=20 --number_of_rounds=100 --strategy="MultiFedAvg
 You can execute a simulation with only one command line. The command below executes an experiment with three models.
 ```bash
 
-python main.py --total_clients=30 --number_of_rounds=100 --strategy="MultiFedAvg" --dataset="WISDM-W" --dataset="ImageNet10"  --dataset="Gowalla" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.3 --alpha=0.1 --alpha=0.1 --alpha=1.0 --experiment_id=2
+python main.py --total_clients=30 --number_of_rounds=100 --strategy="MultiFedAvg" --dataset="WISDM-W" --dataset="ImageNet10"  --dataset="Gowalla" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.3 --alpha=0.1 --alpha=0.1 --alpha=1.0 --experiment_id="2"
+
+```
+
+## MEFL label shift example
+
+```bash
+
+python main.py --total_clients=20 --number_of_rounds=10 --strategy="MultiFedAvg" --dataset="WISDM-W" --dataset="ImageNet10"  --dataset="Gowalla" --model="gru" --model="CNN" --fraction_fit=0.3 --alpha=0.1 --alpha=0.1 --experiment_id="label_shift#1"
 
 ```
 
