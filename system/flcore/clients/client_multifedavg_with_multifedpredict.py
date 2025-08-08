@@ -47,7 +47,11 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
         """Train the model with data of this client."""
         try:
             self.lt[me] = t
-            return super().fit(me, t, global_model)
+            parameters, size, metrics = super().fit(me, t, global_model)
+            p_ME, fc_ME, il_ME = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id,
+                                                            self.n_classes, self.concept_drift_window)
+            metrics["non_iid"] = {"fc": fc_ME[me], "il": il_ME[me]}
+            return parameters, size, metrics
         except Exception as e:
             print("fit error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
@@ -79,3 +83,40 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
         except Exception as e:
             print("evaluate error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+            
+    def _get_datasets_metrics(self, trainloader, ME, client_id, n_classes, concept_drift_window=None):
+
+        try:
+            p_ME = []
+            fc_ME = []
+            il_ME = []
+            for me in range(ME):
+                labels_me = []
+                n_classes_me = n_classes[me]
+                p_me = {i: 0 for i in range(n_classes_me)}
+                with (torch.no_grad()):
+                    for batch in trainloader[me]:
+                        labels = batch["label"]
+                        labels = labels.to("cuda:0")
+
+                        if concept_drift_window is not None:
+                            labels = (labels + concept_drift_window[me])
+                            labels = labels % n_classes[me]
+                        labels = labels.detach().cpu().numpy()
+                        labels_me += labels.tolist()
+                    unique, count = np.unique(labels_me, return_counts=True)
+                    data_unique_count_dict = dict(zip(np.array(unique).tolist(), np.array(count).tolist()))
+                    for label in data_unique_count_dict:
+                        p_me[label] = data_unique_count_dict[label]
+                    p_me = np.array(list(p_me.values()))
+                    fc_me = len(np.argwhere(p_me > 0)) / n_classes_me
+                    il_me = len(np.argwhere(p_me < np.sum(p_me) / n_classes_me)) / n_classes_me
+                    p_me = p_me / np.sum(p_me)
+                    p_ME.append(p_me)
+                    fc_ME.append(fc_me)
+                    il_ME.append(il_me)
+                    print(f"p_me {p_me} fc_me {fc_me} il_me {il_me} model {me} client {client_id}")
+            return p_ME, fc_ME, il_ME
+        except Exception as e:
+           print("_get_datasets_metrics error")
+           print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))

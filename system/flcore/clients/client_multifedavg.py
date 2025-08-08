@@ -26,17 +26,16 @@ from .utils.models_utils import load_model, get_weights, load_data, set_weights,
 def label_shift_config(ME, n_rounds, alphas, experiment_id, seed=0):
     try:
         np.random.seed(seed)
-        if experiment_id > 0:
-            type_ = "no_drift"
+        if len(experiment_id) > 0:
             if experiment_id == "label_shift#1":
-                ME_concept_drift_rounds = [[int(n_rounds * 0.4), int(n_rounds * 0.8)], [int(n_rounds * 0.4), int(n_rounds * 0.8)]]
-                new_alphas = [[10.0, 0.1], [0.1, 10.0]]
+                ME_concept_drift_rounds = [[int(n_rounds * 0.3), int(n_rounds * 0.6)], [int(n_rounds * 0.3), int(n_rounds * 0.6)]]
+                new_alphas = [[10.0, 0.1], [10.0, 0.1]]
                 type_ = "label_shift"
-
-                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me]} for me in range(ME)}
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
             elif experiment_id == "label_shift#2":
-                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.6)], [int(n_rounds * 0.3), int(n_rounds * 0.7)]]
-                new_alphas = [[10.0, 0.1], [0.1, 10.0]]
+                ME_concept_drift_rounds = [[int(n_rounds * 0.3), int(n_rounds * 0.6)], [int(n_rounds * 0.3), int(n_rounds * 0.6)]]
+                new_alphas = [[0.1, 10.0],[0.1, 10.0]]
                 type_ = "label_shift"
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "type": type_} for me in range(ME)}
@@ -224,6 +223,7 @@ class MultiFedAvgClient:
             self.experiment_id = self.args.experiment_id
             self.data_shift_config = get_data_shift_config(self.ME, self.number_of_rounds, self.alpha, self.experiment_id)
             self.concept_drift_window = [0] * self.ME
+            self.data_shift_train_data = False
 
             self.concept_drift_config = {}
             print(f"concept drift config {self.concept_drift_config} concept drift id {self.experiment_id}")
