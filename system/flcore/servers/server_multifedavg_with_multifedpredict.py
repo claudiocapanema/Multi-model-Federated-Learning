@@ -30,11 +30,18 @@ from flwr.common import (
     parameters_to_ndarrays,
 )
 
+def get_weights(net):
+    try:
+        return [val.cpu().numpy() for _, val in net.state_dict().items()]
+    except Exception as e:
+        print("get_weights error")
+        print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
 
 class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
     def __init__(self, args, times):
         super().__init__(args, times)
-        self.compression = "fedkd"
+        self.compression = ""
         self.similarity_list_per_layer = {me: {} for me in range(self.ME)}
         self.initial_similarity = 0
         self.current_similarity = 0
@@ -43,6 +50,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
         self.similarity_between_layers_per_round_and_client = {me: {} for me in range(self.ME)}
         self.mean_similarity_per_round = {me: {} for me in range(self.ME)}
         self.df = [0] * self.ME
+        self.prediction_layer = {me: {"non_iid": 0, "parameters": []} for me in range(self.ME)}
+        self.homogeneity_degree = {me: 0 for me in range(self.ME)}
 
     def set_clients(self):
 
@@ -74,10 +83,28 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
                     self.model_shape_mefl[me] = [i.shape for i in parameters_aggregated_mefl[me]]
 
             clients_parameters_mefl = {me: [] for me in range(self.ME)}
+            fc_list = {me: [] for me in range(self.ME)}
+            il_list = {me: [] for me in range(self.ME)}
             for i in range(len(results)):
                 parameter, num_examples, result = results[i]
                 me = result["me"]
+                fc = result["non_iid"]["fc"]
+                il = result["non_iid"]["il"]
+                fc_list[me].append(fc)
+                il_list[me].append(il)
                 clients_parameters_mefl[me].append(results[i][0])
+
+            for me in range(self.ME):
+                self.homogeneity_degree[me] = (np.mean(fc_list[me]) + (1 - np.mean(il_list[me]))) / 2
+                if self.homogeneity_degree[me] > self.prediction_layer[me]["non_iid"]:
+                # if server_round <= 59:
+                    print(f"Rodada {server_round} substituiu. Novo {self.homogeneity_degree[me]} antigo {self.prediction_layer[me]['non_iid']} diferença: {self.homogeneity_degree[me] - self.prediction_layer[me]["non_iid"]}")
+                    self.prediction_layer[me]["non_iid"] = self.homogeneity_degree[me]
+                    self.prediction_layer[me]["parameters"] = parameters_aggregated_mefl[me][-2:]
+
+                parameters_aggregated_mefl[me][-2:] = self.prediction_layer[me]["parameters"]
+
+
 
             flag = False
             if server_round == 1:
