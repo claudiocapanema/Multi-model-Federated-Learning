@@ -29,7 +29,7 @@ from flcore.clients.utils.models_utils import get_weights
 # Define metric aggregation function
 def weighted_average(metrics):
     try:
-        # Multiply accuracy of each client by number of examples used
+        # Multiply accuracy of each client by number of Papers examples used
         accuracies = [num_examples * m["Accuracy"] for num_examples, m in metrics]
         balanced_accuracies = [num_examples * m["Balanced accuracy"] for num_examples, m in metrics]
         loss = [num_examples * m["Loss"] for num_examples, m in metrics]
@@ -45,7 +45,7 @@ def weighted_average(metrics):
 
 def weighted_average_fit(metrics):
     try:
-        # Multiply accuracy of each client by number of examples used
+        # Multiply accuracy of each client by number of Papers examples used
         # print(f"metricas recebidas: {metrics}")
         accuracies = [num_examples * m["train_accuracy"] for num_examples, m in metrics]
         balanced_accuracies = [num_examples * m["train_balanced_accuracy"] for num_examples, m in metrics]

@@ -20,6 +20,8 @@ import copy
 import time
 import numpy as np
 from flcore.clients.client_multifedavg_with_multifedpredict import ClientMultiFedAvgWithMultiFedPredict
+from flcore.clients.client_multifedavg_with_fedpredict import ClientMultiFedAvgWithFedPredict
+from flcore.clients.client_multifedavg_with_fedpredict_dynamic import ClientMultiFedAvgWithFedPredictDynamic
 from flcore.servers.server_multifedavg import MultiFedAvg
 import sys
 from fedpredict import fedpredict_server, fedpredict_layerwise_similarity
@@ -59,8 +61,9 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
     def set_clients(self):
 
         try:
+            client_class = ClientMultiFedAvgWithMultiFedPredict
             for i in range(self.total_clients):
-                client = ClientMultiFedAvgWithMultiFedPredict(self.args,
+                client = client_class(self.args,
                                 id=i,
                                    model=copy.deepcopy(self.global_model))
                 self.clients.append(client)

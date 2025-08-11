@@ -4,7 +4,7 @@ This project extends [PFLlib (Personalized Federated Learning Algorithm Library)
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPL_v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html) [![arXiv](https://img.shields.io/badge/arXiv-2312.04992-b31b1b.svg)](https://arxiv.org/abs/2312.04992)
 
-## FL examppe
+## FL example
 
 To execute a single model training use the following example:
 ```bash
@@ -27,6 +27,14 @@ python main.py --total_clients=30 --number_of_rounds=100 --strategy="MultiFedAvg
 ```bash
 
 python main.py --total_clients=20 --number_of_rounds=10 --strategy="MultiFedAvg" --dataset="WISDM-W" --dataset="ImageNet10"  --dataset="Gowalla" --model="gru" --model="CNN" --fraction_fit=0.3 --alpha=0.1 --alpha=0.1 --experiment_id="label_shift#1"
+
+```
+
+## MEFL concept_drift example
+
+```bash
+
+python main.py --total_clients=20 --number_of_rounds=10 --strategy="MultiFedAvg" --dataset="WISDM-W" --dataset="ImageNet10"  --dataset="Gowalla" --model="gru" --model="CNN" --fraction_fit=0.3 --alpha=0.1 --alpha=0.1 --experiment_id="concept_drift#1"
 
 ```
 

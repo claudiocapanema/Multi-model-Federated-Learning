@@ -118,10 +118,10 @@ class MultiFedYogiWithFedPredict(Server):
 
     def aggregate(self, results: List[Tuple[NDArrays, float]], m: int) -> NDArrays:
         """Compute weighted average."""
-        # Calculate the total number of examples used during training
+        # Calculate the total number of Papers examples used during training
         num_examples_total = sum([num_examples for _, num_examples, cid in results])
 
-        # Create a list of weights, each multiplied by the related number of examples
+        # Create a list of weights, each multiplied by the related number of Papers examples
         weighted_weights = [
             [layer.detach().cpu().numpy() * num_examples for layer in weights.parameters()] for weights, num_examples, cid
             in results

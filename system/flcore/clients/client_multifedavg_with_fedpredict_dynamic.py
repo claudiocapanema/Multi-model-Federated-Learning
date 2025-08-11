@@ -23,7 +23,7 @@ import time
 from sklearn.preprocessing import label_binarize
 from sklearn import metrics
 import sys
-from flcore.clients.client_multifedavg import MultiFedAvgClient
+from flcore.clients.client_multifedavg_with_multifedpredict import ClientMultiFedAvgWithMultiFedPredict
 from fedpredict import fedpredict_client_torch
 from .utils.models_utils import load_model, get_weights, load_data, set_weights, test_fedpredict, train
 from numpy.linalg import norm
@@ -43,31 +43,12 @@ def cosine_similarity(p_1, p_2):
         print("cosine_similairty error")
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
+class ClientMultiFedAvgWithFedPredictDynamic(ClientMultiFedAvgWithMultiFedPredict):
     def __init__(self, args, id, model):
         try:
             super().__init__(args, id,  model)
-            self.global_model = copy.deepcopy(self.model)
-            print("quntidade de modelos: ", len(model), type(model))
-            self.model_shape_mefl = []
-            for me in range(self.ME):
-                self.model_shape_mefl.append([param.shape for name, param in model[me].named_parameters()])
-            self.T = args.number_of_rounds
         except Exception as e:
             print("__init__ error")
-            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
-
-    def fit(self, me, t, global_model):
-        """Train the model with data of this client."""
-        try:
-            self.lt[me] = t
-            p_old = self.p_ME
-            similarity = cosine_similarity(self.p_ME[me], p_old[me])
-            parameters, size, metrics = super().fit(me, t, global_model)
-            metrics["non_iid"] = {"fc": self.fc_ME[me], "il": self.il_ME[me], "similarity": similarity}
-            return parameters, size, metrics
-        except Exception as e:
-            print("fit error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def evaluate(self, me, t, global_model, metrics):
@@ -89,13 +70,6 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             similarity = metrics["similarity"]
             homogeneity_degree = metrics["homogeneity_degree"]
             s = cosine_similarity(self.p_ME[me], p_ME[me])
-            a = 0.97
-            # b = [0.54, 0.56]
-            b = [0.55, 0.55]
-            c = [0.72, 0.65]
-            d = 0.81
-            # if (fc[me] >= 0.97 and il[me] < 0.55 and homogeneity_degree[me] > c[me]) or (
-            #         ps[me] < 0.81 and nt > 0 and t > 10 and homogeneity_degree[me] > c[me]):
             if t <= 10:
                 similarity = 0
             if similarity > 1:
@@ -103,11 +77,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             elif similarity < 0:
                 similarity = 0
             combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
-                                                     t=t, T=self.T, nt=nt, s=float(similarity), fc={'global': fc, 'reference': a},
-                                                     il={'global': il, 'reference': b[me]},
-                                                     dh={'global': homogeneity_degree, 'reference': c[me]},
-                                                     ps={'global': homogeneity_degree, 'reference': d},
-            device=self.device, global_model_original_shape=self.model_shape_mefl[me])
+                                                     t=t, T=self.T, nt=nt, s=float(similarity), device=self.device, global_model_original_shape=self.model_shape_mefl[me])
             loss, metrics = test_fedpredict(combined_model, self.valloader[me], self.device, self.client_id, t,
                                             self.args.dataset[me], self.n_classes[me], s, p_ME[me],
                                             self.concept_drift_window[me])
