@@ -52,6 +52,9 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
         self.df = [0] * self.ME
         self.prediction_layer = {me: {"non_iid": 0, "parameters": []} for me in range(self.ME)}
         self.homogeneity_degree = {me: 0 for me in range(self.ME)}
+        self.fc = {me: 0 for me in range(self.ME)}
+        self.il = {me: 0 for me in range(self.ME)}
+        self.similarity = {me: 0 for me in range(self.ME)}
 
     def set_clients(self):
 
@@ -85,24 +88,34 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
             clients_parameters_mefl = {me: [] for me in range(self.ME)}
             fc_list = {me: [] for me in range(self.ME)}
             il_list = {me: [] for me in range(self.ME)}
+            similarity_list = {me: [] for me in range(self.ME)}
+            num_samples_list = {me: [] for me in range(self.ME)}
             for i in range(len(results)):
                 parameter, num_examples, result = results[i]
                 me = result["me"]
                 fc = result["non_iid"]["fc"]
                 il = result["non_iid"]["il"]
+                similarity = result["non_iid"]["similarity"]
                 fc_list[me].append(fc)
                 il_list[me].append(il)
+                similarity_list[me].append(similarity)
+                num_samples_list[me].append(num_examples)
                 clients_parameters_mefl[me].append(results[i][0])
-
+            print("verificar")
+            print(fc_list[0],  num_samples_list[0],  self.fc[0])
             for me in range(self.ME):
-                self.homogeneity_degree[me] = (np.mean(fc_list[me]) + (1 - np.mean(il_list[me]))) / 2
-                if self.homogeneity_degree[me] > self.prediction_layer[me]["non_iid"]:
-                # if server_round <= 59:
+                print(self._weighted_average(fc_list[me], num_samples_list[me]))
+                self.fc[me] = self._weighted_average(fc_list[me], num_samples_list[me])
+                self.il[me] = self._weighted_average(il_list[me], num_samples_list[me])
+                self.similarity[me] = self._weighted_average(il_list[me], num_samples_list[me])
+                self.homogeneity_degree[me] = (self.fc[me] + (1 - self.il[me])) / 2
+                # if self.homogeneity_degree[me] > self.prediction_layer[me]["non_iid"]:
+                if server_round <= 59:
                     print(f"Rodada {server_round} substituiu. Novo {self.homogeneity_degree[me]} antigo {self.prediction_layer[me]['non_iid']} diferença: {self.homogeneity_degree[me] - self.prediction_layer[me]["non_iid"]}")
                     self.prediction_layer[me]["non_iid"] = self.homogeneity_degree[me]
                     self.prediction_layer[me]["parameters"] = parameters_aggregated_mefl[me][-2:]
 
-                parameters_aggregated_mefl[me][-2:] = self.prediction_layer[me]["parameters"]
+                # parameters_aggregated_mefl[me][-2:] = self.prediction_layer[me]["parameters"]
 
 
 
@@ -150,6 +163,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
             print("inicio s")
             for me in range(self.ME):
                 clients_evaluate_list = []
+                metrics = {"fc": self.fc[me], "il": self.il[me], "homogeneity_degree": self.homogeneity_degree[me], "similarity": self.similarity[me]}
                 for i in range(len(self.clients)):
                     client_dict = {}
                     client_dict["client"] = self.clients[i]
@@ -162,7 +176,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
                     global_model_parameters=parameters_aggregated_mefl[me], client_evaluate_list=clients_evaluate_list,
                     t=t, T=self.number_of_rounds, df=self.df[me], compression=self.compression, fl_framework="flwr", k_ratio=0.3)
                 for i in range(len(self.clients)):
-                    evaluate_results.append(self.clients[i].evaluate(me, t, parameters_to_ndarrays(clients_compressed_parameters[i][1].parameters)))
+                    evaluate_results.append(self.clients[i].evaluate(me, t, parameters_to_ndarrays(clients_compressed_parameters[i][1].parameters), metrics))
                     # evaluate_results.append(self.clients[i].evaluate(me, t,
                     #     clients_compressed_parameters[i][1].config["parameters"]))
 
@@ -235,4 +249,15 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
             return file_path, header, data
         except Exception as e:
             print("get_results error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+    def _weighted_average(self, values, weights):
+
+        try:
+            values = np.array([i * j for i, j in zip(values, weights)])
+            values = np.sum(values) / np.sum(weights)
+            return float(values)
+
+        except Exception as e:
+            print("_weighted_average error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))

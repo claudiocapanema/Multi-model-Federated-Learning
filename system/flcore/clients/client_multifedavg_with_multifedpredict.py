@@ -26,8 +26,22 @@ import sys
 from flcore.clients.client_multifedavg import MultiFedAvgClient
 from fedpredict import fedpredict_client_torch
 from .utils.models_utils import load_model, get_weights, load_data, set_weights, test, train
+from numpy.linalg import norm
 import pickle
 
+def cosine_similarity(p_1, p_2):
+
+    # compute cosine similarity
+    try:
+        p_1_size = np.array(p_1).shape
+        p_2_size = np.array(p_2).shape
+        if p_1_size != p_2_size:
+            raise Exception(f"Input sizes have different shapes: {p_1_size} and {p_2_size}. Please check your input data.")
+
+        return np.dot(p_1, p_2) / (norm(p_1) * norm(p_2))
+    except Exception as e:
+        print("cosine_similairty error")
+        print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
     def __init__(self, args, id, model):
@@ -47,16 +61,16 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
         """Train the model with data of this client."""
         try:
             self.lt[me] = t
+            p_old = self.p_ME
+            similarity = cosine_similarity(self.p_ME[me], p_old[me])
             parameters, size, metrics = super().fit(me, t, global_model)
-            p_ME, fc_ME, il_ME = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id,
-                                                            self.n_classes, self.concept_drift_window)
-            metrics["non_iid"] = {"fc": fc_ME[me], "il": il_ME[me]}
+            metrics["non_iid"] = {"fc": self.fc_ME[me], "il": self.il_ME[me], "similarity": similarity}
             return parameters, size, metrics
         except Exception as e:
             print("fit error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def evaluate(self, me, t, global_model):
+    def evaluate(self, me, t, global_model, metrics):
         """Evaluate the model on the data this client has."""
         try:
             g = torch.Generator()
@@ -69,9 +83,31 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             # if nt > 0:
             #     set_weights(self.global_model[me], global_model)
             # global_model = pickle.loads(global_model)
-            self.update_local_test_data(t, me)
+            p_ME, fc_ME, il_ME = self.update_local_test_data(t, me)
+            fc = metrics["fc"]
+            il = metrics["il"]
+            similarity = metrics["similarity"]
+            homogeneity_degree = metrics["homogeneity_degree"]
+            s = cosine_similarity(self.p_ME[me], p_ME[me])
+            a = 0.97
+            # b = [0.54, 0.56]
+            b = [0.55, 0.55]
+            c = [0.72, 0.65]
+            d = 0.81
+            # if (fc[me] >= 0.97 and il[me] < 0.55 and homogeneity_degree[me] > c[me]) or (
+            #         ps[me] < 0.81 and nt > 0 and t > 10 and homogeneity_degree[me] > c[me]):
+            if t <= 10:
+                similarity = 0
+            if similarity > 1:
+                similarity = 1
+            elif similarity < 0:
+                similarity = 0
             combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
-                                                     t=t, T=self.T, nt=nt, device=self.device, global_model_original_shape=self.model_shape_mefl[me])
+                                                     t=t, T=self.T, nt=nt, s=float(similarity), fc={'global': fc, 'reference': a},
+                                                     il={'global': il, 'reference': b[me]},
+                                                     dh={'global': homogeneity_degree, 'reference': c[me]},
+                                                     ps={'global': homogeneity_degree, 'reference': d},
+            device=self.device, global_model_original_shape=self.model_shape_mefl[me])
             loss, metrics = test(combined_model, self.valloader[me], self.device, self.client_id, t,
                                  self.args.dataset[me], self.n_classes[me], self.concept_drift_window[me])
             metrics["Model size"] = self.models_size[me]
@@ -83,40 +119,3 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
         except Exception as e:
             print("evaluate error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
-            
-    def _get_datasets_metrics(self, trainloader, ME, client_id, n_classes, concept_drift_window=None):
-
-        try:
-            p_ME = []
-            fc_ME = []
-            il_ME = []
-            for me in range(ME):
-                labels_me = []
-                n_classes_me = n_classes[me]
-                p_me = {i: 0 for i in range(n_classes_me)}
-                with (torch.no_grad()):
-                    for batch in trainloader[me]:
-                        labels = batch["label"]
-                        labels = labels.to("cuda:0")
-
-                        if concept_drift_window is not None:
-                            labels = (labels + concept_drift_window[me])
-                            labels = labels % n_classes[me]
-                        labels = labels.detach().cpu().numpy()
-                        labels_me += labels.tolist()
-                    unique, count = np.unique(labels_me, return_counts=True)
-                    data_unique_count_dict = dict(zip(np.array(unique).tolist(), np.array(count).tolist()))
-                    for label in data_unique_count_dict:
-                        p_me[label] = data_unique_count_dict[label]
-                    p_me = np.array(list(p_me.values()))
-                    fc_me = len(np.argwhere(p_me > 0)) / n_classes_me
-                    il_me = len(np.argwhere(p_me < np.sum(p_me) / n_classes_me)) / n_classes_me
-                    p_me = p_me / np.sum(p_me)
-                    p_ME.append(p_me)
-                    fc_ME.append(fc_me)
-                    il_ME.append(il_me)
-                    print(f"p_me {p_me} fc_me {fc_me} il_me {il_me} model {me} client {client_id}")
-            return p_ME, fc_ME, il_ME
-        except Exception as e:
-           print("_get_datasets_metrics error")
-           print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))

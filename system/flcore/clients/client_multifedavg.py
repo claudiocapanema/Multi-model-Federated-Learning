@@ -249,6 +249,9 @@ class MultiFedAvgClient:
                     classes += labels.numpy().tolist()
                 # print("oi ", classes)
                 # print("classes : ", np.unique(classes, return_counts=True))
+                self.p_ME, self.fc_ME, self.il_ME = self._get_datasets_metrics(self.trainloader, self.ME,
+                                                                               self.client_id,
+                                                                               self.n_classes)
         except Exception as e:
             print("__init__ client error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
@@ -347,9 +350,16 @@ class MultiFedAvgClient:
                         num_partitions=self.args.total_clients + 1,
                         batch_size=self.args.batch_size,
                     )
+                    self.trainloader[me] = self.recent_trainloader[me]
+                    p_ME, fc_ME, il_ME = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id,
+                                                                    self.n_classes, self.concept_drift_window)
+                    self.p_ME, self.fc_ME, self.il_ME = p_ME, fc_ME, il_ME
                 elif t in self.data_shift_config[me]["data_shift_rounds"] and self.data_shift_config[me]["type"] in [
                     "concept_drift"]:
                     self.concept_drift_window[me] += 1
+                    p_ME, fc_ME, il_ME = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id,
+                                                                    self.n_classes, self.concept_drift_window)
+                    self.p_ME, self.fc_ME, self.il_ME = p_ME, fc_ME, il_ME
 
         except Exception as e:
             print(f"update_local_train_data error {self.data_shift_config}")
@@ -372,10 +382,18 @@ class MultiFedAvgClient:
                         num_partitions=self.args.total_clients + 1,
                         batch_size=self.args.batch_size,
                     )
+                    p_ME, fc_ME, il_ME = self.p_ME, self.fc_ME, self.il_ME
                 elif t in self.data_shift_config[me][
                     "data_shift_rounds"] and self.data_shift_config[me]["type"] in ["concept_drift"] and t - self.lt[
                     me] > 0:
                     self.concept_drift_window[me] += 1
+                    p_ME, fc_ME, il_ME = self.p_ME, self.fc_ME, self.il_ME
+                else:
+                    p_ME, fc_ME, il_ME = self.p_ME, self.fc_ME, self.il_ME
+            else:
+                p_ME, fc_ME, il_ME = self.p_ME, self.fc_ME, self.il_ME
+
+            return p_ME, fc_ME, il_ME
 
         except Exception as e:
             print(f"update_local_train_data error {self.data_shift_config}")
@@ -389,6 +407,7 @@ class MultiFedAvgClient:
             else:
                 config = self.data_shift_config[me]
                 alpha = None
+
                 for i, round_ in enumerate(config["data_shift_rounds"]):
                     if server_round >= round_:
                         alpha = config["new_alphas"][i]
@@ -434,6 +453,43 @@ class MultiFedAvgClient:
         except Exception as e:
             print("_get_optimizer error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+    def _get_datasets_metrics(self, trainloader, ME, client_id, n_classes, concept_drift_window=None):
+
+        try:
+            p_ME = []
+            fc_ME = []
+            il_ME = []
+            for me in range(ME):
+                labels_me = []
+                n_classes_me = n_classes[me]
+                p_me = {i: 0 for i in range(n_classes_me)}
+                with (torch.no_grad()):
+                    for batch in trainloader[me]:
+                        labels = batch["label"]
+                        labels = labels.to("cuda:0")
+
+                        if concept_drift_window is not None:
+                            labels = (labels + concept_drift_window[me])
+                            labels = labels % n_classes[me]
+                        labels = labels.detach().cpu().numpy()
+                        labels_me += labels.tolist()
+                    unique, count = np.unique(labels_me, return_counts=True)
+                    data_unique_count_dict = dict(zip(np.array(unique).tolist(), np.array(count).tolist()))
+                    for label in data_unique_count_dict:
+                        p_me[label] = data_unique_count_dict[label]
+                    p_me = np.array(list(p_me.values()))
+                    fc_me = len(np.argwhere(p_me > 0)) / n_classes_me
+                    il_me = len(np.argwhere(p_me < np.sum(p_me) / n_classes_me)) / n_classes_me
+                    p_me = p_me / np.sum(p_me)
+                    p_ME.append(p_me)
+                    fc_ME.append(fc_me)
+                    il_ME.append(il_me)
+                    print(f"p_me {p_me} fc_me {fc_me} il_me {il_me} model {me} client {client_id}")
+            return p_ME, fc_ME, il_ME
+        except Exception as e:
+           print("_get_datasets_metrics error")
+           print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 
 
