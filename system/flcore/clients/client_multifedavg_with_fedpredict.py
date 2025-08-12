@@ -63,7 +63,8 @@ class ClientMultiFedAvgWithFedPredict(ClientMultiFedAvgWithMultiFedPredict):
             nt = t - self.lt[me]
             self.update_local_test_data(t, me)
             combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
-                                                     t=t, T=self.T, nt=nt, device=self.device, global_model_original_shape=self.model_shape_mefl[me])
+                                                     t=t, T=self.T, nt=nt, device=self.device,
+                                                     global_model_original_shape=self.model_shape_mefl[me])
             loss, metrics = test(combined_model, self.valloader[me], self.device, self.client_id, t,
                                  self.args.dataset[me], self.n_classes[me], self.concept_drift_window[me])
             metrics["Model size"] = self.models_size[me]

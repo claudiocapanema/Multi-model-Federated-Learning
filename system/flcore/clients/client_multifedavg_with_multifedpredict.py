@@ -62,8 +62,8 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
         try:
             self.lt[me] = t
             p_old = self.p_ME
-            similarity = cosine_similarity(self.p_ME[me], p_old[me])
             parameters, size, metrics = super().fit(me, t, global_model)
+            similarity = cosine_similarity(self.p_ME[me], p_old[me])
             metrics["non_iid"] = {"fc": self.fc_ME[me], "il": self.il_ME[me], "similarity": similarity}
             return parameters, size, metrics
         except Exception as e:
@@ -96,14 +96,14 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             d = 0.81
             # if (fc[me] >= 0.97 and il[me] < 0.55 and homogeneity_degree[me] > c[me]) or (
             #         ps[me] < 0.81 and nt > 0 and t > 10 and homogeneity_degree[me] > c[me]):
-            if t <= 10:
-                similarity = 0
+            # if t <= 10:
+            #     similarity = 1
             if similarity > 1:
                 similarity = 1
             elif similarity < 0:
                 similarity = 0
             combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
-                                                     t=t, T=self.T, nt=nt, s=float(similarity), fc={'global': fc, 'reference': a},
+                                                     t=t, T=self.T, nt=nt, s=round(float(similarity), 2), fc={'global': fc, 'reference': a},
                                                      il={'global': il, 'reference': b[me]},
                                                      dh={'global': homogeneity_degree, 'reference': c[me]},
                                                      ps={'global': homogeneity_degree, 'reference': d},

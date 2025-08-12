@@ -22,7 +22,7 @@ import numpy as np
 from flcore.clients.client_multifedavg_with_multifedpredict import ClientMultiFedAvgWithMultiFedPredict
 from flcore.clients.client_multifedavg_with_fedpredict import ClientMultiFedAvgWithFedPredict
 from flcore.clients.client_multifedavg_with_fedpredict_dynamic import ClientMultiFedAvgWithFedPredictDynamic
-from flcore.servers.server_multifedavg import MultiFedAvg
+from flcore.servers.server_multifedavg_with_multifedpredict import MultiFedAvgWithMultiFedPredict
 import sys
 from fedpredict import fedpredict_server, fedpredict_layerwise_similarity
 import flwr
@@ -40,7 +40,7 @@ def get_weights(net):
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 
-class MultiFedAvgWithFedPredictDynamic(MultiFedAvg):
+class MultiFedAvgWithFedPredictDynamic(MultiFedAvgWithMultiFedPredict):
     def __init__(self, args, times):
         super().__init__(args, times)
 

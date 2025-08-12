@@ -65,19 +65,10 @@ class ClientMultiFedAvgWithFedPredictDynamic(ClientMultiFedAvgWithMultiFedPredic
             #     set_weights(self.global_model[me], global_model)
             # global_model = pickle.loads(global_model)
             p_ME, fc_ME, il_ME = self.update_local_test_data(t, me)
-            fc = metrics["fc"]
-            il = metrics["il"]
-            similarity = metrics["similarity"]
-            homogeneity_degree = metrics["homogeneity_degree"]
             s = cosine_similarity(self.p_ME[me], p_ME[me])
-            if t <= 10:
-                similarity = 0
-            if similarity > 1:
-                similarity = 1
-            elif similarity < 0:
-                similarity = 0
             combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
-                                                     t=t, T=self.T, nt=nt, s=float(similarity), device=self.device, global_model_original_shape=self.model_shape_mefl[me])
+                                                     t=t, T=self.T, nt=nt, s=round(float(s), 2), device=self.device,
+                                                     global_model_original_shape=self.model_shape_mefl[me])
             loss, metrics = test_fedpredict(combined_model, self.valloader[me], self.device, self.client_id, t,
                                             self.args.dataset[me], self.n_classes[me], s, p_ME[me],
                                             self.concept_drift_window[me])

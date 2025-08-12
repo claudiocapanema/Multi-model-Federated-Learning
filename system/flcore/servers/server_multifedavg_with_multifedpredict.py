@@ -118,7 +118,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
                     self.prediction_layer[me]["non_iid"] = self.homogeneity_degree[me]
                     self.prediction_layer[me]["parameters"] = parameters_aggregated_mefl[me][-2:]
 
-                # parameters_aggregated_mefl[me][-2:] = self.prediction_layer[me]["parameters"]
+                parameters_aggregated_mefl[me][-2:] = self.prediction_layer[me]["parameters"]
 
 
 

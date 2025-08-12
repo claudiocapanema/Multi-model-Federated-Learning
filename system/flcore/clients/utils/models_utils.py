@@ -50,7 +50,7 @@ def fedpredict_client_weight_predictions_torch(output: torch.Tensor, t: int, cur
         _has_torch = True
         if similarity != 1:
             if _has_torch:
-                output = torch.multiply(output, torch.from_numpy(current_proportion * (1 - similarity)))
+                output = torch.multiply(output, torch.from_numpy(current_proportion * (1 - similarity)).to(output.device))
             else:
                 raise ValueError("Framework 'torch' not found")
 
@@ -649,9 +649,10 @@ def test_fedpredict(model, testloader, device, client_id, t, dataset_name, n_cla
                 if concept_drift_window > 0:
                     labels = (labels + concept_drift_window) % n_classes
                 y_true.append(label_binarize(labels.detach().cpu().numpy(), classes=np.arange(n_classes)))
-                outputs = model(x)
-                if s != 1 and s > 10:
-                    output = fedpredict_client_weight_predictions_torch(output=output, t=t,
+                outputs = model(x).to(device)
+                if round(s, 2) != 1:
+                    print(f"similaridade {s}")
+                    outputs = fedpredict_client_weight_predictions_torch(output=outputs, t=t,
                                                                         current_proportion=p,
                                                                         similarity=s)
                 y_prob.append(outputs.detach().cpu().numpy())
