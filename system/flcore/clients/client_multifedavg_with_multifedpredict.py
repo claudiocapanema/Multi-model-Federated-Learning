@@ -64,7 +64,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             p_old = self.p_ME
             parameters, size, metrics = super().fit(me, t, global_model)
             similarity = cosine_similarity(self.p_ME[me], p_old[me])
-            metrics["non_iid"] = {"fc": self.fc_ME[me], "il": self.il_ME[me], "similarity": similarity}
+            metrics["non_iid"] = {"fc": self.fc_ME[me], "il": self.il_ME[me], "similarity": similarity, "ps": 1 - similarity}
             return parameters, size, metrics
         except Exception as e:
             print("fit error")
@@ -88,14 +88,13 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             il = metrics["il"]
             similarity = metrics["similarity"]
             homogeneity_degree = metrics["homogeneity_degree"]
+            ps = metrics["ps"]
             s = cosine_similarity(self.p_ME[me], p_ME[me])
             a = 0.97
             # b = [0.54, 0.56]
             b = [0.55, 0.55]
             c = [0.72, 0.65]
             d = 0.81
-            # if (fc[me] >= 0.97 and il[me] < 0.55 and homogeneity_degree[me] > c[me]) or (
-            #         ps[me] < 0.81 and nt > 0 and t > 10 and homogeneity_degree[me] > c[me]):
             # if t <= 10:
             #     similarity = 1
             if similarity > 1:
@@ -106,8 +105,12 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                                                      t=t, T=self.T, nt=nt, s=round(float(similarity), 2), fc={'global': fc, 'reference': a},
                                                      il={'global': il, 'reference': b[me]},
                                                      dh={'global': homogeneity_degree, 'reference': c[me]},
-                                                     ps={'global': homogeneity_degree, 'reference': d},
+                                                     ps={'global': ps, 'reference': d},
             device=self.device, global_model_original_shape=self.model_shape_mefl[me])
+            if (fc >= 0.97 and il < 0.55 and homogeneity_degree > c[me]) or (
+                    ps < 0.81 and nt > 0 and t > 10 and homogeneity_degree > c[me]):
+                s = 1
+                combined_model = global_model
             loss, metrics = test_fedpredict(combined_model, self.valloader[me], self.device, self.client_id, t,
                                             self.args.dataset[me], self.n_classes[me], s, p_ME[me],
                                             self.concept_drift_window[me])

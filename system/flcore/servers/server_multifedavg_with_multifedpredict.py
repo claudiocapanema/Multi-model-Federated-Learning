@@ -56,6 +56,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
         self.homogeneity_degree = {me: 0 for me in range(self.ME)}
         self.fc = {me: 0 for me in range(self.ME)}
         self.il = {me: 0 for me in range(self.ME)}
+        self.ps =  {me: 0 for me in range(self.ME)}
         self.similarity = {me: 0 for me in range(self.ME)}
 
     def set_clients(self):
@@ -91,6 +92,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
             clients_parameters_mefl = {me: [] for me in range(self.ME)}
             fc_list = {me: [] for me in range(self.ME)}
             il_list = {me: [] for me in range(self.ME)}
+            ps_list = {me: [] for me in range(self.ME)}
             similarity_list = {me: [] for me in range(self.ME)}
             num_samples_list = {me: [] for me in range(self.ME)}
             for i in range(len(results)):
@@ -98,27 +100,29 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
                 me = result["me"]
                 fc = result["non_iid"]["fc"]
                 il = result["non_iid"]["il"]
+                ps = result["non_iid"]["ps"]
                 similarity = result["non_iid"]["similarity"]
                 fc_list[me].append(fc)
                 il_list[me].append(il)
+                ps_list[me].append(ps)
                 similarity_list[me].append(similarity)
                 num_samples_list[me].append(num_examples)
                 clients_parameters_mefl[me].append(results[i][0])
-            print("verificar")
-            print(fc_list[0],  num_samples_list[0],  self.fc[0])
+
             for me in range(self.ME):
-                print(self._weighted_average(fc_list[me], num_samples_list[me]))
                 self.fc[me] = self._weighted_average(fc_list[me], num_samples_list[me])
                 self.il[me] = self._weighted_average(il_list[me], num_samples_list[me])
+                self.ps[me] = self._weighted_average(ps_list[me], num_samples_list[me])
                 self.similarity[me] = self._weighted_average(il_list[me], num_samples_list[me])
                 self.homogeneity_degree[me] = (self.fc[me] + (1 - self.il[me])) / 2
                 # if self.homogeneity_degree[me] > self.prediction_layer[me]["non_iid"]:
-                if server_round <= 59:
-                    print(f"Rodada {server_round} substituiu. Novo {self.homogeneity_degree[me]} antigo {self.prediction_layer[me]['non_iid']} diferença: {self.homogeneity_degree[me] - self.prediction_layer[me]["non_iid"]}")
-                    self.prediction_layer[me]["non_iid"] = self.homogeneity_degree[me]
-                    self.prediction_layer[me]["parameters"] = parameters_aggregated_mefl[me][-2:]
+                print(f"round {server_round} fc {self.fc[me]} il {self.il[me]} similarity {self.similarity[me]} ps {self.ps[me]} homogeneity_degree {self.homogeneity_degree[me]}")
+                # if server_round <= 59:
+                #     print(f"Rodada {server_round} substituiu. Novo {self.homogeneity_degree[me]} antigo {self.prediction_layer[me]['non_iid']} diferença: {self.homogeneity_degree[me] - self.prediction_layer[me]["non_iid"]}")
+                #     self.prediction_layer[me]["non_iid"] = self.homogeneity_degree[me]
+                #     self.prediction_layer[me]["parameters"] = parameters_aggregated_mefl[me][-2:]
 
-                parameters_aggregated_mefl[me][-2:] = self.prediction_layer[me]["parameters"]
+                # parameters_aggregated_mefl[me][-2:] = self.prediction_layer[me]["parameters"]
 
 
 
@@ -166,7 +170,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
             print("inicio s")
             for me in range(self.ME):
                 clients_evaluate_list = []
-                metrics = {"fc": self.fc[me], "il": self.il[me], "homogeneity_degree": self.homogeneity_degree[me], "similarity": self.similarity[me]}
+                metrics = {"fc": self.fc[me], "il": self.il[me], "homogeneity_degree": self.homogeneity_degree[me], "ps": self.ps[me], "similarity": self.similarity[me]}
                 for i in range(len(self.clients)):
                     client_dict = {}
                     client_dict["client"] = self.clients[i]
