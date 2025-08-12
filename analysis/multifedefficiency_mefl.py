@@ -121,13 +121,13 @@ def line(df, base_dir, x, y, hue=None, style=None, ci=None, hue_order=None, y_ma
 
 if __name__ == "__main__":
 
-    # experiment_id = "label_shift#1"
-    experiment_id = "label_shift#2"
+    experiment_id = "label_shift#1"
+    # experiment_id = "label_shift#2"
     total_clients = 20
     # alphas = [10.0, 10.0]
     # alphas = [1.0, 0.1, 0.1]
-    alphas = [10.0]
-    # alphas = [0.1]
+    # alphas = [10.0]
+    alphas = [0.1]
     # alphas = [1.0, 1.0]
     # alphas = [0.1, 0.1, 0.1]
     # alphas = [10.0, 0.1]

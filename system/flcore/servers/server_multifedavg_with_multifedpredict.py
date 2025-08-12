@@ -43,6 +43,9 @@ def get_weights(net):
 class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
     def __init__(self, args, times):
         super().__init__(args, times)
+        self.test_metrics_names = ["Accuracy", "Balanced accuracy", "Loss", "Round (t)", "Fraction fit",
+                                   "# training clients", "training clients and models", "Model size", "Alpha", "fc", "il", "dh", "ps"]
+        self.results_test_metrics = {me: {metric: [] for metric in self.test_metrics_names} for me in range(self.ME)}
         self.compression = ""
         self.similarity_list_per_layer = {me: {} for me in range(self.ME)}
         self.initial_similarity = 0
@@ -114,7 +117,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
                 self.il[me] = self._weighted_average(il_list[me], num_samples_list[me])
                 self.ps[me] = self._weighted_average(ps_list[me], num_samples_list[me])
                 self.similarity[me] = self._weighted_average(il_list[me], num_samples_list[me])
-                self.homogeneity_degree[me] = (self.fc[me] + (1 - self.il[me])) / 2
+                self.homogeneity_degree[me] = round((self.fc[me] + (1 - self.il[me])) / 2, 2)
                 # if self.homogeneity_degree[me] > self.prediction_layer[me]["non_iid"]:
                 print(f"round {server_round} fc {self.fc[me]} il {self.il[me]} similarity {self.similarity[me]} ps {self.ps[me]} homogeneity_degree {self.homogeneity_degree[me]}")
                 # if server_round <= 59:
@@ -194,6 +197,22 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
             print("evaluate error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
+    def add_metrics(self, server_round, metrics_aggregated, me):
+        try:
+            metrics_aggregated[me]["Fraction fit"] = self.fraction_fit
+            metrics_aggregated[me]["# training clients"] = self.n_trained_clients
+            metrics_aggregated[me]["training clients and models"] = self.selected_clients_m[me]
+            metrics_aggregated[me]["fc"] = self.fc[me]
+            metrics_aggregated[me]["il"] = self.il[me]
+            metrics_aggregated[me]["dh"] = self.homogeneity_degree[me]
+            metrics_aggregated[me]["ps"] = self.ps[me]
+
+            for metric in metrics_aggregated[me]:
+                self.results_test_metrics[me][metric].append(metrics_aggregated[me][metric])
+        except Exception as e:
+            print("add_metrics error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
     def _get_results(self, train_test, mode, me):
 
         try:
@@ -263,7 +282,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
         try:
             values = np.array([i * j for i, j in zip(values, weights)])
             values = np.sum(values) / np.sum(weights)
-            return float(values)
+            return round(float(values), 2)
 
         except Exception as e:
             print("_weighted_average error")

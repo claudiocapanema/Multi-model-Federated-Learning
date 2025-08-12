@@ -65,7 +65,7 @@ class ClientMultiFedAvgWithFedPredictDynamic(ClientMultiFedAvgWithMultiFedPredic
             #     set_weights(self.global_model[me], global_model)
             # global_model = pickle.loads(global_model)
             p_ME, fc_ME, il_ME = self.update_local_test_data(t, me)
-            s = cosine_similarity(self.p_ME[me], p_ME[me])
+            s = min(cosine_similarity(self.p_ME[me], p_ME[me]), 1)
             combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
                                                      t=t, T=self.T, nt=nt, s=round(float(s), 2), device=self.device,
                                                      global_model_original_shape=self.model_shape_mefl[me])

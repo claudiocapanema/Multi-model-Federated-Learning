@@ -35,6 +35,12 @@ def weighted_average(metrics):
         loss = [num_examples * m["Loss"] for num_examples, m in metrics]
         examples = [num_examples for num_examples, _ in metrics]
 
+        alphas = []
+        for num_examples, m in metrics:
+            alphas.append(m["Alpha"])
+        alpha_same = len(set(alphas)) == 1
+        if not alpha_same:
+            raise ValueError("Clients have different alphas")
         # Aggregate and return custom metric (weighted average)
         return {"Accuracy": sum(accuracies) / sum(examples), "Balanced accuracy": sum(balanced_accuracies) / sum(examples),
                 "Loss": sum(loss) / sum(examples), "Round (t)": metrics[0][1]["Round (t)"], "Model size": metrics[0][1]["Model size"], "Alpha": metrics[0][1]["Alpha"]}
