@@ -120,12 +120,12 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
                 self.homogeneity_degree[me] = round((self.fc[me] + (1 - self.il[me])) / 2, 2)
                 # if self.homogeneity_degree[me] > self.prediction_layer[me]["non_iid"]:
                 print(f"round {server_round} fc {self.fc[me]} il {self.il[me]} similarity {self.similarity[me]} ps {self.ps[me]} homogeneity_degree {self.homogeneity_degree[me]}")
-                # if server_round <= 59:
-                #     print(f"Rodada {server_round} substituiu. Novo {self.homogeneity_degree[me]} antigo {self.prediction_layer[me]['non_iid']} diferença: {self.homogeneity_degree[me] - self.prediction_layer[me]["non_iid"]}")
-                #     self.prediction_layer[me]["non_iid"] = self.homogeneity_degree[me]
-                #     self.prediction_layer[me]["parameters"] = parameters_aggregated_mefl[me][-2:]
+                if server_round <= 59:
+                    print(f"Rodada {server_round} substituiu. Novo {self.homogeneity_degree[me]} antigo {self.prediction_layer[me]['non_iid']} diferença: {self.homogeneity_degree[me] - self.prediction_layer[me]["non_iid"]}")
+                    self.prediction_layer[me]["non_iid"] = self.homogeneity_degree[me]
+                    self.prediction_layer[me]["parameters"] = parameters_aggregated_mefl[me][-6:]
 
-                # parameters_aggregated_mefl[me][-2:] = self.prediction_layer[me]["parameters"]
+                parameters_aggregated_mefl[me][-6:] = self.prediction_layer[me]["parameters"]
 
 
 

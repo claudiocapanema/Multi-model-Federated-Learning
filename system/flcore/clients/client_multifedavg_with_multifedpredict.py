@@ -53,7 +53,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             for me in range(self.ME):
                 self.model_shape_mefl.append([param.shape for name, param in model[me].named_parameters()])
             self.T = args.number_of_rounds
-            self.reset_round = 0
+            self.reset_round = [0] * self.ME
         except Exception as e:
             print("__init__ error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
@@ -106,14 +106,17 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 similarity = 0
 
             if ps > 0:
-                self.reset_round = t - 1
-            t_hat = t - self.reset_round
+                self.reset_round[me] = t - 1
+                self.lt[me] = 0
+            t_hat = t - self.reset_round[me]
+            nt = t - (self.lt[me] - self.reset_round[me])
             # combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
             #                                          t=t, T=self.T, nt=nt, s=round(float(similarity), 2), fc={'global': fc, 'reference': a},
             #                                          il={'global': il, 'reference': b[me]},
             #                                          dh={'global': homogeneity_degree, 'reference': c[me]},
             #                                          ps={'global': ps, 'reference': d},
             # device=self.device, global_model_original_shape=self.model_shape_mefl[me])
+            print(f"valor t {t_hat} nt {nt}")
             combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
                                                      t=t_hat, T=self.T, nt=nt, s=round(float(similarity), 2),
                                                      device=self.device,
@@ -129,7 +132,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             #                 combined_model = self.global_model[me]
             #                 s = 1
 
-            loss, metrics = test_fedpredict(combined_model, self.valloader[me], self.device, self.client_id, t_hat,
+            loss, metrics = test_fedpredict(combined_model, self.valloader[me], self.device, self.client_id, t,
                                             self.args.dataset[me], self.n_classes[me], s, p_ME[me],
                                             self.concept_drift_window[me])
             metrics["Model size"] = self.models_size[me]
