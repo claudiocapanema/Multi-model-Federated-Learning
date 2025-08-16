@@ -68,6 +68,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             if 1 - similarity < 0:
                 print(f"similaridade is {similarity} rodada {t}")
             metrics["non_iid"] = {"fc": self.fc_ME[me], "il": self.il_ME[me], "similarity": similarity, "ps": 1 - similarity}
+
             return parameters, size, metrics
         except Exception as e:
             print("fit error")
@@ -93,11 +94,11 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             homogeneity_degree = metrics["homogeneity_degree"]
             ps = metrics["ps"]
             s = cosine_similarity(self.p_ME[me], p_ME[me])
-            a = 0.97
+            a = 0.67
             # b = [0.54, 0.56]
-            b = [0.55, 0.55]
-            c = [0.72, 0.65]
-            d = 0.81
+            b = [0.76, 0.76]
+            c = [0.47, 0.47]
+            d = 0.55
             # if t <= 10:
             #     similarity = 1
             if similarity > 1:
@@ -105,27 +106,31 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             elif similarity < 0:
                 similarity = 0
 
+            # novo
             if ps > 0:
                 self.reset_round[me] = t - 1
                 self.lt[me] = 0
             t_hat = t - self.reset_round[me]
             nt = t - (self.lt[me] - self.reset_round[me])
-            # combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
-            #                                          t=t, T=self.T, nt=nt, s=round(float(similarity), 2), fc={'global': fc, 'reference': a},
-            #                                          il={'global': il, 'reference': b[me]},
-            #                                          dh={'global': homogeneity_degree, 'reference': c[me]},
-            #                                          ps={'global': ps, 'reference': d},
-            # device=self.device, global_model_original_shape=self.model_shape_mefl[me])
             print(f"valor t {t_hat} nt {nt}")
+
             combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
-                                                     t=t_hat, T=self.T, nt=nt, s=round(float(similarity), 2),
-                                                     device=self.device,
-                                                     global_model_original_shape=self.model_shape_mefl[me])
-            # if (fc >= 0.97 and il < 0.55 and homogeneity_degree > c[me]) or (
-            #         ps < 0.81 and nt > 0 and t > 10 and homogeneity_degree > c[me]):
-            #     s = 1
-            #     set_weights(self.global_model[me], global_model)
-            #     combined_model = self.global_model[me]
+                                                     t=t_hat, T=self.T, nt=nt, s=round(float(similarity), 2), fc={'global': fc, 'reference': a},
+                                                     il={'global': il, 'reference': b[me]},
+                                                     dh={'global': homogeneity_degree, 'reference': c[me]},
+                                                     ps={'global': ps, 'reference': d},
+            device=self.device, global_model_original_shape=self.model_shape_mefl[me])
+
+            # combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
+            #                                          t=t_hat, T=self.T, nt=nt, s=round(float(similarity), 2),
+            #                                          device=self.device,
+            #                                          global_model_original_shape=self.model_shape_mefl[me])
+            print(f"rodada {t} recebido fc{fc} il{il} homogeneity degree {homogeneity_degree} ps {ps} nt {nt}")
+            if (fc >= a and il < b[me] and homogeneity_degree > c[me]) or (
+                    ps < d and nt > 0 and t > 10 and homogeneity_degree > c[me]):
+                s = 1
+                set_weights(self.global_model[me], global_model)
+                combined_model = self.global_model[me]
             # if t >=30 and t<=60:
             # if t >= 30:
             # set_weights(self.global_model[me], global_model)
