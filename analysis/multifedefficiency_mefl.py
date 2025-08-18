@@ -123,20 +123,24 @@ if __name__ == "__main__":
 
     experiment_id = "label_shift#1"
     # experiment_id = "label_shift#2"
+    # experiment_id = "concept_drift#1"
+    # experiment_id = "concept_drift#2"
     total_clients = 20
     # alphas = [10.0, 10.0]
     # alphas = [1.0, 0.1, 0.1]
-    # alphas = [10.0]
     alphas = [0.1]
+    # alphas = [10.0]
     # alphas = [1.0, 1.0]
     # alphas = [0.1, 0.1, 0.1]
     # alphas = [10.0, 0.1]
     dataset = ["CIFAR10"]
+    #dataset = ["WISDM-W"]
     # dataset = ["WISDM-W", "ImageNet10", "Gowalla"]
     # dataset = ["WISDM-W", "ImageNet10"]
     # dataset = ["EMNIST", "CIFAR10"]
     # models_names = ["cnn_c"]
     # model_name = ["gru", "CNN", "lstm"]
+    #model_name = ["gru"]
     model_name = ["CNN"]
     fraction_fit = 0.3
     number_of_rounds = 100
@@ -183,6 +187,6 @@ if __name__ == "__main__":
     print(df)
 
     line(df, write_path, x="Round (t)", y="Accuracy (%)", hue="Table")
-    line(df, write_path, x="Round (t)", y="Accuracy (%)", hue="Table")
+    # line(df, write_path, x="Round (t)", y="Accuracy (%)", hue="Table")
     # line(df, write_path, x="Round (t)", y="Loss", hue="Strategy", style="Version", hue_order=hue_order, y_max=1)
     # line(df, write_path, x="Round (t)", y="Loss", hue="Strategy", style="Version", hue_order=hue_order, y_max=1)

@@ -25,7 +25,7 @@ from sklearn import metrics
 import sys
 from flcore.clients.client_multifedavg import MultiFedAvgClient
 from fedpredict import fedpredict_client_torch
-from .utils.models_utils import load_model, get_weights, load_data, set_weights, test_fedpredict, train
+from .utils.models_utils import load_model, get_weights, load_data, set_weights, test, test_fedpredict, train
 from numpy.linalg import norm
 import pickle
 
@@ -54,6 +54,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 self.model_shape_mefl.append([param.shape for name, param in model[me].named_parameters()])
             self.T = args.number_of_rounds
             self.reset_round = [0] * self.ME
+            self.ps_reset = 1
         except Exception as e:
             print("__init__ error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
@@ -108,29 +109,32 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
 
             # novo
             if ps > 0:
-                self.reset_round[me] = t - 1
+                self.reset_round[me] = max(int((t - 1)), 1) - 10
                 self.lt[me] = 0
-            t_hat = t - self.reset_round[me]
-            nt = t - (self.lt[me] - self.reset_round[me])
+                self.ps_reset = ps
+            t_hat = max(int((t - self.reset_round[me])), 1)
+            nt = t - (self.lt[me])
             print(f"valor t {t_hat} nt {nt}")
-
+            # if t >= 60:
+            #     if self.lt[me] >= 60:
+            #         t_hat = self.T
             combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
                                                      t=t_hat, T=self.T, nt=nt, s=round(float(similarity), 2), fc={'global': fc, 'reference': a},
                                                      il={'global': il, 'reference': b[me]},
                                                      dh={'global': homogeneity_degree, 'reference': c[me]},
                                                      ps={'global': ps, 'reference': d},
             device=self.device, global_model_original_shape=self.model_shape_mefl[me])
-
-            # combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
-            #                                          t=t_hat, T=self.T, nt=nt, s=round(float(similarity), 2),
-            #                                          device=self.device,
-            #                                          global_model_original_shape=self.model_shape_mefl[me])
-            print(f"rodada {t} recebido fc{fc} il{il} homogeneity degree {homogeneity_degree} ps {ps} nt {nt}")
             if (fc >= a and il < b[me] and homogeneity_degree > c[me]) or (
                     ps < d and nt > 0 and t > 10 and homogeneity_degree > c[me]):
                 s = 1
                 set_weights(self.global_model[me], global_model)
                 combined_model = self.global_model[me]
+
+                # combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
+                #                                          t=t_hat, T=self.T, nt=nt, s=round(float(similarity), 2),
+                #                                          device=self.device,
+                #                                          global_model_original_shape=self.model_shape_mefl[me])
+            print(f"rodada {t} recebido fc{fc} il{il} homogeneity degree {homogeneity_degree} ps {ps} nt {nt}")
             # if t >=30 and t<=60:
             # if t >= 30:
             # set_weights(self.global_model[me], global_model)
@@ -140,6 +144,11 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             loss, metrics = test_fedpredict(combined_model, self.valloader[me], self.device, self.client_id, t,
                                             self.args.dataset[me], self.n_classes[me], s, p_ME[me],
                                             self.concept_drift_window[me])
+            # if t >= 60:
+            #     loss, metrics = test(combined_model, self.valloader[me], self.device, self.client_id, t,
+            #                                     self.args.dataset[me], self.n_classes[me],
+            #                                     self.concept_drift_window[me])
+
             metrics["Model size"] = self.models_size[me]
             metrics["Dataset size"] = len(self.valloader[me].dataset)
             metrics["me"] = me

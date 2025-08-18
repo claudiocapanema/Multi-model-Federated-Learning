@@ -32,6 +32,51 @@ from flwr.common import (
     parameters_to_ndarrays,
 )
 
+from functools import partial, reduce
+from typing import Any, Callable, Union
+
+import numpy as np
+
+from flwr.common import FitRes, NDArray, NDArrays, parameters_to_ndarrays
+from flwr.server.client_proxy import ClientProxy
+
+
+def aggregate(results: list[tuple[NDArrays, int]], homogeneity_degree: float, current_parameters: list[tuple[NDArrays, int]], t: int) -> NDArrays:
+    try:
+        """Compute weighted average."""
+        # Calculate the total number of examples used during training
+        num_examples_total = sum(num_examples for (_, num_examples) in results)
+
+        # Create a list of weights, each multiplied by the related number of examples
+        weighted_weights = [
+            [layer * num_examples for layer in weights] for weights, num_examples in results
+        ]
+        weighted_weights = []
+        for i, r in enumerate(results):
+            weights, num_examples = r
+            client_update = []
+            for j, layer in enumerate(weights):
+                original_layer = current_parameters[j]
+                update = layer - original_layer
+                client_update.append(update * num_examples)
+
+            weighted_weights.append(client_update)
+
+        # Compute average weights of each layer
+        weights_prime: NDArrays = [
+            reduce(np.add, layer_updates) / num_examples_total
+            for layer_updates in zip(*weighted_weights)
+        ]
+        # if t <= 59:
+        #     homogeneity_degree = 1
+        if t in [1, 30, 60]:
+            homogeneity_degree = 1
+        weighted_weights = [np.array(original_layer + homogeneity_degree * layer) for original_layer, layer in zip(current_parameters, weights_prime)]
+        return weighted_weights
+    except Exception as e:
+        print("aggregate error")
+        print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
 def get_weights(net):
     try:
         return [val.cpu().numpy() for _, val in net.state_dict().items()]
@@ -84,10 +129,55 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
     ):
         """Aggregate fit results using weighted average."""
         try:
+            # MultiFedAvg
 
+            self.selected_clients_m = [[] for me in range(self.ME)]
 
+            trained_models = []
 
-            parameters_aggregated_mefl, metrics_aggregated_mefl = super().aggregate_fit(server_round, results, failures)
+            results_mefl = {me: [] for me in range(self.ME)}
+            for i in range(len(results)):
+                parameter, num_examples, result = results[i]
+                me = result["me"]
+                if me not in trained_models:
+                    trained_models.append(me)
+                client_id = result["client_id"]
+                self.selected_clients_m[me].append(client_id)
+                results_mefl[me].append(results[i])
+
+            aggregated_ndarrays_mefl = {me: None for me in range(self.ME)}
+            aggregated_ndarrays_mefl = {me: [] for me in range(self.ME)}
+            weights_results_mefl = {me: [] for me in range(self.ME)}
+            # parameters_aggregated_mefl = {me: [] for me in range(self.ME)}
+
+            for me in trained_models:
+                # Convert results
+                weights_results = [
+                    (parameters, num_examples)
+                    for parameters, num_examples, fit_res in results_mefl[me]
+                ]
+                aggregated_ndarrays_mefl[me] = aggregate(weights_results, self.homogeneity_degree[me], self.parameters_aggregated_mefl[me], server_round)
+                if len(weights_results) > 1:
+                    aggregated_ndarrays_mefl[me] = aggregate(weights_results, self.homogeneity_degree[me], self.parameters_aggregated_mefl[me], server_round)
+                elif len(weights_results) == 1:
+                    aggregated_ndarrays_mefl[me] = results_mefl[me][0][0]
+
+            for me in trained_models:
+                self.parameters_aggregated_mefl[me] = aggregated_ndarrays_mefl[me]
+
+            # Aggregate custom metrics if aggregation fn was provided
+            metrics_aggregated_mefl = {me: [] for me in range(self.ME)}
+            for me in trained_models:
+                if self.fit_metrics_aggregation_fn:
+                    fit_metrics = [(num_examples, metrics) for _, num_examples, metrics in results_mefl[me]]
+                    metrics_aggregated_mefl[me] = self.fit_metrics_aggregation_fn(fit_metrics)
+
+            print("""finalizou aggregated fit""")
+
+            self.parameters_aggregated_mefl = self.parameters_aggregated_mefl
+            self.metrics_aggregated_mefl = metrics_aggregated_mefl
+
+            parameters_aggregated_mefl, metrics_aggregated_mefl = self.parameters_aggregated_mefl, self.metrics_aggregated_mefl
             if server_round == 1:
                 for me in range(self.ME):
                     self.model_shape_mefl[me] = [i.shape for i in parameters_aggregated_mefl[me]]
@@ -120,12 +210,22 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
                 self.homogeneity_degree[me] = round((self.fc[me] + (1 - self.il[me])) / 2, 2)
                 # if self.homogeneity_degree[me] > self.prediction_layer[me]["non_iid"]:
                 print(f"round {server_round} fc {self.fc[me]} il {self.il[me]} similarity {self.similarity[me]} ps {self.ps[me]} homogeneity_degree {self.homogeneity_degree[me]}")
+                n_layers = 2 * 1
+                # n_layers = 2 * 2 # melhor cnn
+                # n_layers = 1 # melhor gru
                 if server_round <= 59:
+                # if server_round <= 29 or server_round >= 60:
                     print(f"Rodada {server_round} substituiu. Novo {self.homogeneity_degree[me]} antigo {self.prediction_layer[me]['non_iid']} diferença: {self.homogeneity_degree[me] - self.prediction_layer[me]["non_iid"]}")
                     self.prediction_layer[me]["non_iid"] = self.homogeneity_degree[me]
-                    self.prediction_layer[me]["parameters"] = parameters_aggregated_mefl[me][-6:]
+                    # label shift
+                    self.prediction_layer[me]["parameters"] = parameters_aggregated_mefl[me][-n_layers:]
+                    # concept drift
+                    # self.prediction_layer[me]["parameters"] = parameters_aggregated_mefl[me][:n_layers]
 
-                parameters_aggregated_mefl[me][-6:] = self.prediction_layer[me]["parameters"]
+                # label shift
+                # parameters_aggregated_mefl[me][-n_layers:] = self.prediction_layer[me]["parameters"]
+                # concept drift
+                # parameters_aggregated_mefl[me][:n_layers] = self.prediction_layer[me]["parameters"]
 
 
 
