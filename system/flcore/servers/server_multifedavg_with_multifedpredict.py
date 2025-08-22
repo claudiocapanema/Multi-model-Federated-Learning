@@ -39,6 +39,8 @@ import numpy as np
 
 from flwr.common import FitRes, NDArray, NDArrays, parameters_to_ndarrays
 from flwr.server.client_proxy import ClientProxy
+import torch
+import random
 
 
 def aggregate(results: list[tuple[NDArrays, int]], homogeneity_degree: float, current_parameters: list[tuple[NDArrays, int]], t: int) -> NDArrays:
@@ -105,6 +107,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
         self.fc = {me: 0 for me in range(self.ME)}
         self.il = {me: 0 for me in range(self.ME)}
         self.ps =  {me: 0 for me in range(self.ME)}
+        self.increased_training_intensity = {me: 0 for me in range(self.ME)}
+        self.max_number_of_rounds_data_drift_adaptation = 5
         self.similarity = {me: 0 for me in range(self.ME)}
 
     def set_clients(self):
@@ -202,7 +206,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
                 num_samples_list[me].append(num_examples)
                 clients_parameters_mefl[me].append(results[i][0])
 
-            for me in range(self.ME):
+            for me in trained_models:
                 self.fc[me] = self._weighted_average(fc_list[me], num_samples_list[me])
                 self.il[me] = self._weighted_average(il_list[me], num_samples_list[me])
                 self.ps[me] = self._weighted_average(ps_list[me], num_samples_list[me])
@@ -264,7 +268,44 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
             print("aggregate_fit error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-
+    # def select_clients(self, t):
+    #
+    #     try:
+    #         g = torch.Generator()
+    #         g.manual_seed(t)
+    #         random.seed(t)
+    #         np.random.seed(t)
+    #         torch.manual_seed(t)
+    #
+    #         data_drift_model = -1
+    #         for me in range(self.ME):
+    #             if self.ps[me] > 0 or self.increased_training_intensity[me] > 0:
+    #                 data_drift_model = me
+    #
+    #
+    #         if data_drift_model > -1:
+    #             self.increased_training_intensity[data_drift_model] += 1
+    #             if self.increased_training_intensity[data_drift_model] == self.max_number_of_rounds_data_drift_adaptation:
+    #                 self.increased_training_intensity[data_drift_model] = 0
+    #             selected_clients = list(np.random.choice(self.clients, self.num_training_clients, replace=False))
+    #             selected_clients = [i.client_id for i in selected_clients]
+    #         else:
+    #             return super().select_clients(t)
+    #
+    #         sc = []
+    #         for me in range(self.ME):
+    #             if me == data_drift_model:
+    #                 sc.append(selected_clients)
+    #             else:
+    #                 sc.append([])
+    #
+    #         self.n_trained_clients = sum([len(i) for i in sc])
+    #
+    #         return sc
+    #
+    #     except Exception as e:
+    #         print("select_clients error")
+    #         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def evaluate(self, t, parameters_aggregated_mefl):
 

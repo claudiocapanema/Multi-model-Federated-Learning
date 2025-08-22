@@ -17,6 +17,7 @@ def read_data(read_solutions, read_dataset_order):
         "FedKD": {"Strategy": "FedKD", "Version": "Original", "Table": "FedKD"},
         "FedKD+FP": {"Strategy": "FedKD", "Version": "FP", "Table": "FedKD+FP"},
         "MultiFedAvg+MFP": {"Strategy": "MultiFedAvg", "Version": "MFP", "Table": "MultiFedAvg+MFP"},
+        "MultiFedAvg+MFP_v2": {"Strategy": "MultiFedAvg", "Version": "MFP_v2", "Table": "MultiFedAvg+MFP_v2"},
         "MultiFedAvg+FPD": {"Strategy": "MultiFedAvg", "Version": "FPD", "Table": "MultiFedAvg+FPD"},
         "MultiFedAvg+FP": {"Strategy": "MultiFedAvg", "Version": "FP", "Table": "MultiFedAvg+FP"},
         "MultiFedAvg": {"Strategy": "MultiFedAvg", "Version": "Original", "Table": "MultiFedAvg"},
@@ -121,34 +122,35 @@ def line(df, base_dir, x, y, hue=None, style=None, ci=None, hue_order=None, y_ma
 
 if __name__ == "__main__":
 
-    experiment_id = "label_shift#1"
+    # experiment_id = "label_shift#1"
     # experiment_id = "label_shift#2"
+    experiment_id = "label_shift#3"
     # experiment_id = "concept_drift#1"
     # experiment_id = "concept_drift#2"
-    total_clients = 20
+    total_clients = 30
     # alphas = [10.0, 10.0]
     # alphas = [1.0, 0.1, 0.1]
-    alphas = [0.1]
+    alphas = [0.1, 0.1]
     # alphas = [10.0]
     # alphas = [1.0, 1.0]
     # alphas = [0.1, 0.1, 0.1]
     # alphas = [10.0, 0.1]
-    dataset = ["CIFAR10"]
-    #dataset = ["WISDM-W"]
+    dataset = ["CIFAR10", "WISDM-W"]
+    # dataset = ["WISDM-W"]
     # dataset = ["WISDM-W", "ImageNet10", "Gowalla"]
     # dataset = ["WISDM-W", "ImageNet10"]
     # dataset = ["EMNIST", "CIFAR10"]
     # models_names = ["cnn_c"]
     # model_name = ["gru", "CNN", "lstm"]
-    #model_name = ["gru"]
-    model_name = ["CNN"]
+    # model_name = ["gru"]
+    model_name = ["CNN", "gru"]
     fraction_fit = 0.3
     number_of_rounds = 100
     local_epochs = 1
     round_new_clients = 0
     train_test = "test"
     # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
-    solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg"]
+    solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg"]
 
     read_solutions = {solution: [] for solution in solutions}
     read_dataset_order = []
@@ -186,6 +188,7 @@ if __name__ == "__main__":
     df = df[['Round (t)', 'Fraction fit', 'Alpha', 'Solution', 'Accuracy (%)', 'Dataset', 'Strategy', 'Version', 'Table']]
     print(df)
 
+    line(df, write_path, x="Round (t)", y="Accuracy (%)", hue="Table")
     line(df, write_path, x="Round (t)", y="Accuracy (%)", hue="Table")
     # line(df, write_path, x="Round (t)", y="Accuracy (%)", hue="Table")
     # line(df, write_path, x="Round (t)", y="Loss", hue="Strategy", style="Version", hue_order=hue_order, y_max=1)

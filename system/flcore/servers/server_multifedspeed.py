@@ -794,12 +794,12 @@ class MultiFedSpeed(Server):
     #
     #
     #     """Compute weighted average."""
-    #     # Calculate the total number of examples used during training
+    #     # Calculate the total number of Papers examples used during training
     #     num_examples_total = sum([num_examples for _, num_examples, cid in results])
     #     num_similarities_total = sum([self.clients_cosine_similarities[m][cid] for _, _, cid in results])
     #     total = num_examples_total + num_similarities_total
     #
-    #     # Create a list of weights, each multiplied by the related number of examples
+    #     # Create a list of weights, each multiplied by the related number of Papers examples
     #     weighted_weights = [
     #         [layer.detach().cpu().numpy() * (self.clients_cosine_similarities[m][cid]) for layer in weights.parameters()] for weights, num_examples, cid in results
     #     ]

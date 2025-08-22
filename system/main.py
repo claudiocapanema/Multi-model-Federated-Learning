@@ -158,6 +158,8 @@ def run(args):
         server = FedFairMMFL
     elif args.strategy == "MultiFedAvg+MFP":
         server = MultiFedAvgWithMultiFedPredict
+    elif args.strategy == "MultiFedAvg+MFP_v2":
+        server = MultiFedAvgWithMultiFedPredict
     elif args.strategy == "MultiFedAvg+FP":
         server = MultiFedAvgWithFedPredict
     elif args.strategy == "MultiFedAvg+FPD":

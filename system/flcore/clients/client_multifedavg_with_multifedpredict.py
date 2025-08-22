@@ -114,7 +114,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 self.ps_reset = ps
             t_hat = max(int((t - self.reset_round[me])), 1)
             nt = t - (self.lt[me])
-            print(f"valor t {t_hat} nt {nt}")
+            print(f"valor t {t_hat} nt {nt} tamanho {len(global_model)}")
             # if t >= 60:
             #     if self.lt[me] >= 60:
             #         t_hat = self.T

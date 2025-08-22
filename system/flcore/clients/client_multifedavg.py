@@ -40,16 +40,16 @@ def label_shift_config(ME, n_rounds, alphas, experiment_id, seed=0):
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "type": type_} for me in range(ME)}
             elif experiment_id == "label_shift#3":
-                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)],
-                                           [int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)]]
-                new_alphas = [[10.0, 1.0, 0.1], [0.1, 1.0, 10.0]]
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.6)],
+                                           [int(n_rounds * 0.4), int(n_rounds * 0.8)]]
+                new_alphas = [[10.0, 0.1], [10.0, 0.1]]
                 type_ = "label_shift"
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "type": type_} for me in range(ME)}
             elif experiment_id == "label_shift#4":
-                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)],
-                                           [int(n_rounds * 0.2), int(n_rounds * 0.5), int(n_rounds * 0.8)]]
-                new_alphas = [[0.1, 1.0, 10.0], [10.0, 1.0, 0.1]]
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.6)],
+                                           [int(n_rounds * 0.4), int(n_rounds * 0.8)]]
+                new_alphas = [[0.1, 10.0], [0.1, 10.0]]
                 type_ = "label_shift"
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "type": type_} for me in range(ME)}
@@ -252,9 +252,9 @@ class MultiFedAvgClient:
                     classes += labels.numpy().tolist()
                 # print("oi ", classes)
                 # print("classes : ", np.unique(classes, return_counts=True))
-                self.p_ME, self.fc_ME, self.il_ME = self._get_datasets_metrics(self.trainloader, self.ME,
-                                                                               self.client_id,
-                                                                               self.n_classes)
+            self.p_ME, self.fc_ME, self.il_ME = self._get_datasets_metrics(self.trainloader, self.ME,
+                                                                           self.client_id,
+                                                                           self.n_classes)
         except Exception as e:
             print("__init__ client error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
@@ -359,7 +359,11 @@ class MultiFedAvgClient:
                     self.p_ME, self.fc_ME, self.il_ME = p_ME, fc_ME, il_ME
                 elif t in self.data_shift_config[me]["data_shift_rounds"] and self.data_shift_config[me]["type"] in [
                     "concept_drift"]:
-                    self.concept_drift_window[me] += 1
+                    if self.concept_drift_window[me] == 0:
+                        self.concept_drift_window[me] = 1
+                    elif self.concept_drift_window[me] == 1:
+                        self.concept_drift_window[me] = 0
+                    # self.concept_drift_window[me] += 1
                     p_ME, fc_ME, il_ME = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id,
                                                                     self.n_classes, self.concept_drift_window)
                     self.p_ME, self.fc_ME, self.il_ME = p_ME, fc_ME, il_ME
@@ -389,7 +393,11 @@ class MultiFedAvgClient:
                 elif t in self.data_shift_config[me][
                     "data_shift_rounds"] and self.data_shift_config[me]["type"] in ["concept_drift"] and t - self.lt[
                     me] > 0:
-                    self.concept_drift_window[me] += 1
+                    if self.concept_drift_window[me] == 0:
+                        self.concept_drift_window[me] = 1
+                    elif self.concept_drift_window[me] == 1:
+                        self.concept_drift_window[me] = 0
+                    # self.concept_drift_window[me] += 1
                     p_ME, fc_ME, il_ME = self.p_ME, self.fc_ME, self.il_ME
                 else:
                     p_ME, fc_ME, il_ME = self.p_ME, self.fc_ME, self.il_ME
