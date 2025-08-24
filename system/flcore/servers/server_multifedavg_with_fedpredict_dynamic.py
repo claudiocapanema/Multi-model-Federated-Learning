@@ -31,6 +31,7 @@ from flwr.common import (
     ndarrays_to_parameters,
     parameters_to_ndarrays,
 )
+from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, weighted_loss_avg
 
 def get_weights(net):
     try:
@@ -250,3 +251,95 @@ class MultiFedAvgWithFedPredictDynamic(MultiFedAvgWithMultiFedPredict):
     #     except Exception as e:
     #         print("_weighted_average error")
     #         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+    def aggregate_fit(
+        self,
+        server_round: int,
+        results,
+        failures,
+    ):
+        """Aggregate fit results using weighted average."""
+        try:
+
+            self.selected_clients_m = [[] for me in range(self.ME)]
+
+            trained_models = []
+
+            results_mefl = {me: [] for me in range(self.ME)}
+            for i in range(len(results)):
+                parameter, num_examples, result = results[i]
+                me = result["me"]
+                if me not in trained_models:
+                    trained_models.append(me)
+                client_id = result["client_id"]
+                self.selected_clients_m[me].append(client_id)
+                results_mefl[me].append(results[i])
+
+
+            aggregated_ndarrays_mefl = {me: None for me in range(self.ME)}
+            aggregated_ndarrays_mefl = {me: [] for me in range(self.ME)}
+            weights_results_mefl = {me: [] for me in range(self.ME)}
+            # parameters_aggregated_mefl = {me: [] for me in range(self.ME)}
+
+            for me in trained_models:
+                # Convert results
+                weights_results = [
+                    (parameters, num_examples)
+                    for parameters, num_examples, fit_res in results_mefl[me]
+                ]
+                aggregated_ndarrays_mefl[me] = aggregate(weights_results)
+                if len(weights_results) > 1:
+                    aggregated_ndarrays_mefl[me] = aggregate(weights_results)
+                elif len(weights_results) == 1:
+                    aggregated_ndarrays_mefl[me] = results_mefl[me][0][0]
+
+            for me in trained_models:
+                self.parameters_aggregated_mefl[me] = aggregated_ndarrays_mefl[me]
+
+            # Aggregate custom metrics if aggregation fn was provided
+            metrics_aggregated_mefl = {me: [] for me in range(self.ME)}
+            for me in trained_models:
+                if self.fit_metrics_aggregation_fn:
+                    fit_metrics = [(num_examples, metrics) for _, num_examples, metrics in results_mefl[me]]
+                    metrics_aggregated_mefl[me] = self.fit_metrics_aggregation_fn(fit_metrics)
+
+            print("""finalizou aggregated fit""")
+
+            self.parameters_aggregated_mefl = self.parameters_aggregated_mefl
+            self.metrics_aggregated_mefl = metrics_aggregated_mefl
+
+            return self.parameters_aggregated_mefl, metrics_aggregated_mefl
+        except Exception as e:
+            print("aggregate_fit error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+    def evaluate(self, t, parameters_aggregated_mefl):
+
+        try:
+            evaluate_results = []
+            print("inicio s")
+            for me in range(self.ME):
+                clients_evaluate_list = []
+                metrics = {"fc": self.fc[me], "il": self.il[me], "homogeneity_degree": self.homogeneity_degree[me], "ps": self.ps[me], "similarity": self.similarity[me],}
+                for i in range(len(self.clients)):
+                    client_dict = {}
+                    client_dict["client"] = self.clients[i]
+                    client_dict["cid"] = self.clients[i].client_id
+                    client_dict["nt"] = t - self.clients[i].lt[me]
+                    client_dict["lt"] = self.clients[i].lt[me]
+                    clients_evaluate_list.append((self.clients[i], EvaluateIns(ndarrays_to_parameters(parameters_aggregated_mefl[me]), client_dict)))
+                print(f"submetidos t: {self.t_hat[me]} T: {self.number_of_rounds} df: {self.df[me]}")
+                clients_compressed_parameters = fedpredict_server(
+                    global_model_parameters=parameters_aggregated_mefl[me], client_evaluate_list=clients_evaluate_list,
+                    t=t, T=self.number_of_rounds, df=self.df[me], compression=self.compression, fl_framework="flwr", k_ratio=0.3)
+                for i in range(len(self.clients)):
+                    evaluate_results.append(self.clients[i].evaluate(me, t, parameters_to_ndarrays(clients_compressed_parameters[i][1].parameters), metrics))
+                    # evaluate_results.append(self.clients[i].evaluate(me, t,
+                    #     clients_compressed_parameters[i][1].config["parameters"]))
+
+            loss_aggregated_mefl, metrics_aggregated_mefl = self.aggregate_evaluate(server_round=t,
+                                                                                    results=evaluate_results,
+                                                                                    failures=[])
+        except Exception as e:
+            print("evaluate error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))

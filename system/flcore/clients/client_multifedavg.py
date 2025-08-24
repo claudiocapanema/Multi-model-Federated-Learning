@@ -89,16 +89,16 @@ def global_concept_drift_config(ME, n_rounds, alphas, experiment_id, seed=0):
         if len(experiment_id) > 0:
             type_ = "no_drift"
             if experiment_id == "concept_drift#1":
-                ME_concept_drift_rounds = [[int(n_rounds * 0.3), int(n_rounds * 0.6)],
-                                           [int(n_rounds * 0.3), int(n_rounds * 0.6)]]
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.6)],
+                                           [int(n_rounds * 0.4), int(n_rounds * 0.8)]]
                 new_alphas = [[0.1, 0.1], [0.1, 0.1]]
                 type_ = "concept_drift"
 
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "type": type_} for me in range(ME)}
             elif experiment_id == "concept_drift#2":
-                ME_concept_drift_rounds = [[int(n_rounds * 0.3), int(n_rounds * 0.6)],
-                                           [int(n_rounds * 0.3), int(n_rounds * 0.6)]]
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.6)],
+                                           [int(n_rounds * 0.4), int(n_rounds * 0.8)]]
                 new_alphas = [[10.0, 10.0], [10.0, 10.0]]
                 type_ = "concept_drift"
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],

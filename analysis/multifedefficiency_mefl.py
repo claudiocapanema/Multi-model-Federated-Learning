@@ -124,8 +124,9 @@ if __name__ == "__main__":
 
     # experiment_id = "label_shift#1"
     # experiment_id = "label_shift#2"
-    experiment_id = "label_shift#3"
-    # experiment_id = "concept_drift#1"
+    # experiment_id = "label_shift#3"
+    # experiment_id = "label_shift#4"
+    experiment_id = "concept_drift#1"
     # experiment_id = "concept_drift#2"
     total_clients = 30
     # alphas = [10.0, 10.0]
