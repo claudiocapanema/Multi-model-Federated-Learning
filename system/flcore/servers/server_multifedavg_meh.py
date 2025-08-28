@@ -54,7 +54,7 @@ NDArray = npt.NDArray[Any]
 NDArrays = List[NDArray]
 
 
-class MultiFedAvgMDH(MultiFedAvg):
+class MultiFedAvgMEH(MultiFedAvg):
     def __init__(self, args, times):
         super().__init__(args, times)
         self.homogeneity_degree = [None] * self.ME
@@ -85,13 +85,13 @@ class MultiFedAvgMDH(MultiFedAvg):
             selected_clients = list(np.random.choice(self.clients, self.num_training_clients, replace=False))
             selected_clients = [i.client_id for i in selected_clients]
 
-            if self.experiment_id == 1:
+            if self.experiment_id == "1":
                 middle = int(self.number_of_rounds * 0.5)
-            elif self.experiment_id == 2:
+            elif self.experiment_id == "2":
                 middle = int(1)
-            elif self.experiment_id == 3:
+            elif self.experiment_id == "3":
                 middle = int(self.number_of_rounds * 0.3)
-            elif self.experiment_id == 4:
+            elif self.experiment_id == "4":
                 middle = int(self.number_of_rounds * 0.7)
             heterogeneous_models = np.argwhere(self.homogeneity_degree <= 0.36).flatten()
             homogeneous_models = np.argwhere(self.homogeneity_degree > 0.36).flatten()

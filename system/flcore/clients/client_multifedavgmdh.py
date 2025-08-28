@@ -45,14 +45,14 @@ class MultiFedAvgMDHClient(MultiFedAvgClient):
             self.NT = [None] * self.ME
             self.previous_alpha = self.alpha
 
-            self.num_examples, self.p_ME, self.fc_ME, self.il_ME = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id,
+            self.num_examples, self.p_ME, self.fc_ME, self.il_ME = self._get_datasets_metrics_meh(self.trainloader, self.ME, self.client_id,
                                                                            self.n_classes)
         except Exception as e:
             logger.error("MultiFedAvgMDHClient __init__ error")
             logger.error("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 
-    def _get_datasets_metrics(self, trainloader, ME, client_id, n_classes, concept_drift_window=None):
+    def _get_datasets_metrics_meh(self, trainloader, ME, client_id, n_classes, concept_drift_window=None):
 
         try:
             p_ME = []

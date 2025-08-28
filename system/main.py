@@ -25,7 +25,7 @@ import warnings
 import numpy as np
 import logging
 from flcore.servers.server_multifedavg import MultiFedAvg
-from flcore.servers.server_multifedavg_mdh import MultiFedAvgMDH
+from flcore.servers.server_multifedavg_meh import MultiFedAvgMEH
 from flcore.servers.server_multifedavgrr import MultiFedAvgRR
 from flcore.servers.server_fedfairmmfl import FedFairMMFL
 from flcore.servers.server_multifedavg_with_multifedpredict import MultiFedAvgWithMultiFedPredict
@@ -151,8 +151,8 @@ def run(args):
     # select algorithm
     if args.strategy == "MultiFedAvg":
         server = MultiFedAvg
-    elif args.strategy == "MultiFedAvg-MDH":
-        server = MultiFedAvgMDH
+    elif args.strategy == "MultiFedAvg-MEH":
+        server = MultiFedAvgMEH
     elif args.strategy == "MultiFedAvgRR":
         server = MultiFedAvgRR
     elif args.strategy == "FedFairMMFL":

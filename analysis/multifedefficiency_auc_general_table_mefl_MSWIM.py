@@ -42,6 +42,7 @@ def read_data(read_solutions, read_dataset_order):
         "MultiFedAvg+FP": {"Strategy": "MultiFedAvg", "Version": "FP", "Table": "MultiFedAvg+FP"},
         "MultiFedAvg": {"Strategy": "MultiFedAvg", "Version": "Original", "Table": "MultiFedAvg"},
         "MultiFedAvgRR": {"Strategy": "MultiFedAvgRR", "Version": "Original", "Table": "MultiFedAvgRR"},
+        "FedFairMMFL": {"Strategy": "FedFairMMFL", "Version": "Original", "Table": "FedFairMMFL"},
         "MultiFedAvg-MEH": {"Strategy": "MultiFedAvg-MEH", "Version": "Original", "Table": "MultiFedAvg-MEH"}
     }
     hue_order = []
@@ -221,7 +222,7 @@ def table(df, write_path, metric, t=None):
 def improvements(df, datasets, metric):
     # , "FedKD+FP": "FedKD"
     # strategies = {"MultiFedAvg-MDH": "MultiFedAvg", "FedFairMMFL": "MultiFedAvg", "MultiFedAvgRR": "MultiFedAvg"}
-    strategies = {"MultiFedAvg+MFP_v2": "MultiFedAvg", "MultiFedAvg+MFP": "MultiFedAvg", "MultiFedAvg+FP": "MultiFedAvg", "MultiFedAvg+FPD": "MultiFedAvg"}
+    strategies = {"MultiFedAvg-MEH": "MultiFedAvg", "MultiFedAvgRR": "MultiFedAvg", "FedFairMMFL": "MultiFedAvg", "MultiFedAvg": "MultiFedAvg"}
     # strategies = {r"MultiFedAvg+FP": "MultiFedAvg"}
     columns = df.columns.tolist()
     improvements_dict = {'Dataset': [], 'Table': [], 'Original strategy': [], 'Alpha': [], metric: []}
@@ -301,7 +302,7 @@ def accuracy_improvement(df, datasets):
     # reference_solutions = {"MultiFedAvg+FP": "MultiFedAvg", "MultiFedAvgGlobalModelEval+FP": "MultiFedAvgGlobalModelEval"}
     # ,
     #                            "FedKD+FP": "FedKD"
-    reference_solutions = {"MultiFedAvg+MFP_v2": "MultiFedAvg", "MultiFedAvg+MFP": "MultiFedAvg", "MultiFedAvg+FP": "MultiFedAvg", "MultiFedAvg+FPD": "MultiFedAvg"}
+    reference_solutions = {"MultiFedAvg-MEH": "MultiFedAvg", "MultiFedAvgRR": "MultiFedAvg", "FedFairMMFL": "MultiFedAvg", "MultiFedAvg": "MultiFedAvg"}
 
     print(df_difference)
     # exit()
@@ -396,7 +397,7 @@ if __name__ == "__main__":
     model_name = ["gru", "CNN", "lstm"]
     # model_name = ["gru"]
     # model_name = ["CNN", "gru"]
-    fraction_fit = 0.3
+    fraction_fit = 0.4
     number_of_rounds = 100
     local_epochs = 1
     round_new_clients = 0
@@ -424,7 +425,9 @@ if __name__ == "__main__":
                 train_test)
             read_dataset_order.append(dt)
 
-            read_solutions[solution].append("""{}{}_{}.csv""".format(read_path, dt, solution.replace("MultiFedAvg-MEH", "HMultiFedAvg")))
+            # read_solutions[solution].append("""{}{}_{}.csv""".format(read_path, dt, solution.replace("MultiFedAvg-MEH", "HMultiFedAvg")))
+            read_solutions[solution].append(
+                """{}{}_{}.csv""".format(read_path, dt, solution))
 
     write_path = """plots/MEFL/experiment_id_{}/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(
         experiment_id,

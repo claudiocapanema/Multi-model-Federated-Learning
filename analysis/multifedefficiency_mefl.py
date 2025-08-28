@@ -125,13 +125,13 @@ if __name__ == "__main__":
     # experiment_id = "label_shift#1"
     # experiment_id = "label_shift#2"
     # experiment_id = "label_shift#3"
-    # experiment_id = "label_shift#4"
-    experiment_id = "concept_drift#1"
+    experiment_id = "label_shift#4"
+    # experiment_id = "concept_drift#1"
     # experiment_id = "concept_drift#2"
     total_clients = 30
-    # alphas = [10.0, 10.0]
+    alphas = [10.0, 10.0]
     # alphas = [1.0, 0.1, 0.1]
-    alphas = [0.1, 0.1]
+    # alphas = [0.1, 0.1]
     # alphas = [10.0]
     # alphas = [1.0, 1.0]
     # alphas = [0.1, 0.1, 0.1]
@@ -151,7 +151,7 @@ if __name__ == "__main__":
     round_new_clients = 0
     train_test = "test"
     # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
-    solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg"]
+    solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP"]
 
     read_solutions = {solution: [] for solution in solutions}
     read_dataset_order = []

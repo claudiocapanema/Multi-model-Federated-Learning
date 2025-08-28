@@ -274,10 +274,10 @@ def get_transform(dataset_name, train_test):
                                       Resize(32),
                                       ToTensor(),
                                       Normalize(mean=[0.485, 0.456, 0.406],
-                                                std=[0.229, 0.224, 0.225]),
-                                      # transforms.Resize((32, 32)),
-                                      # transforms.ToTensor(),
-                                      # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                                                std=[0.229, 0.224, 0.225])
+                                      # Resize((32, 32)),
+                                      # ToTensor(),
+                                      # Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
                                   ]
                               ),
                               "test":
@@ -286,10 +286,10 @@ def get_transform(dataset_name, train_test):
                                           Resize(32),
                                           ToTensor(),
                                           Normalize(mean=[0.485, 0.456, 0.406],
-                                                    std=[0.229, 0.224, 0.225]),
-                                          # transforms.Resize((32, 32)),
-                                          # transforms.ToTensor(),
-                                          # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                                                    std=[0.229, 0.224, 0.225])
+                                          # Resize((32, 32)),
+                                          # ToTensor(),
+                                          # Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
                                       ]
                                   )
                           }

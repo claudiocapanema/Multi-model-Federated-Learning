@@ -43,7 +43,7 @@ import torch
 import random
 
 
-def aggregate(results: list[tuple[NDArrays, int]], homogeneity_degree: float, current_parameters: list[tuple[NDArrays, int]], t: int, ps: float) -> NDArrays:
+def aggregate(results: list[tuple[NDArrays, int]], homogeneity_degree: float, current_parameters: list[tuple[NDArrays, int]], t: int, ps: float, data_shift: bool, me: int) -> NDArrays:
     try:
         """Compute weighted average."""
         # Calculate the total number of examples used during training
@@ -72,9 +72,21 @@ def aggregate(results: list[tuple[NDArrays, int]], homogeneity_degree: float, cu
         # if t <= 59:
         #     homogeneity_degree = 1
         # if t in [1, 20, 40, 60, 80]:
-        if t in [1] or ps > 0:
+        # if t in [1] or data_shift:
+        # if t in [1] or (me == 0 and t in [20, 60]) or (me == 1 and t in [40, 80]):
+        if t in [1]:
             homogeneity_degree = 1
-        weighted_weights = [np.array(original_layer + homogeneity_degree * layer) for original_layer, layer in zip(current_parameters, weights_prime)]
+        new_weights = []
+        i = 0
+        for original_layer, layer in zip(current_parameters, weights_prime):
+            if i < len(current_parameters) - 2:
+                w = np.array(original_layer + layer)
+            else:
+                w = np.array(original_layer + homogeneity_degree * layer)
+            new_weights.append(w)
+            i += 1
+        weighted_weights = new_weights
+        # weighted_weights = [np.array(original_layer + homogeneity_degree * layer) for original_layer, layer in zip(current_parameters, weights_prime)]
         return weighted_weights
     except Exception as e:
         print("aggregate error")
@@ -105,6 +117,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
         self.df = [0] * self.ME
         self.prediction_layer = {me: {"non_iid": 0, "parameters": []} for me in range(self.ME)}
         self.homogeneity_degree = {me: 0 for me in range(self.ME)}
+        self.homogeneity_degree_normalized = {me: 0 for me in range(self.ME)}
+        self.homogeneity_degree_list = {me: [] for me in range(self.ME)}
         self.fc = {me: 0 for me in range(self.ME)}
         self.il = {me: 0 for me in range(self.ME)}
         self.ps =  {me: 0 for me in range(self.ME)}
@@ -113,6 +127,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
         self.similarity = {me: 0 for me in range(self.ME)}
         self.t_hat = [1] * self.ME
         self.reduced_training_intensity_flag = [False] * self.ME
+        self.train_accuracy_list = {me: [] for me in range(self.ME)}
 
     def set_clients(self):
 
@@ -183,33 +198,50 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
                 self.ps[me] = self._weighted_average(ps_list[me], num_samples_list[me])
                 self.similarity[me] = self._weighted_average(il_list[me], num_samples_list[me])
                 self.homogeneity_degree[me] = round((self.fc[me] + (1 - self.il[me])) / 2, 2)
+                self.homogeneity_degree_list[me].append(self.homogeneity_degree[me])
+                if (max(self.homogeneity_degree_list[me]) - min(self.homogeneity_degree_list[me])) > 0:
+                    self.homogeneity_degree_normalized[me] = 0 if self.homogeneity_degree[me] == 0 else (self.homogeneity_degree[me] - min(self.homogeneity_degree_list[me])) / (max(self.homogeneity_degree_list[me]) - min(self.homogeneity_degree_list[me]))
+                else:
+                    self.homogeneity_degree_normalized[me] = 0
                 # if self.homogeneity_degree[me] > self.prediction_layer[me]["non_iid"]:
                 print(f"round {server_round} fc {self.fc[me]} il {self.il[me]} similarity {self.similarity[me]} ps {self.ps[me]} homogeneity_degree {self.homogeneity_degree[me]}")
 
             print(f"modelos treinados rodada {server_round} trained models {trained_models}")
-            for me in trained_models:
-                # Convert results
-                weights_results = [
-                    (parameters, num_examples)
-                    for parameters, num_examples, fit_res in results_mefl[me]
-                ]
-                aggregated_ndarrays_mefl[me] = aggregate(weights_results, self.homogeneity_degree[me], self.parameters_aggregated_mefl[me], server_round, self.ps[me])
-                if len(weights_results) > 1:
-                    aggregated_ndarrays_mefl[me] = aggregate(weights_results, self.homogeneity_degree[me], self.parameters_aggregated_mefl[me], server_round, self.ps[me])
-                elif len(weights_results) == 1:
-                    aggregated_ndarrays_mefl[me] = results_mefl[me][0][0]
-
-            for me in trained_models:
-                self.parameters_aggregated_mefl[me] = aggregated_ndarrays_mefl[me]
-
             # Aggregate custom metrics if aggregation fn was provided
             metrics_aggregated_mefl = {me: [] for me in range(self.ME)}
             for me in trained_models:
                 if self.fit_metrics_aggregation_fn:
                     fit_metrics = [(num_examples, metrics) for _, num_examples, metrics in results_mefl[me]]
                     metrics_aggregated_mefl[me] = self.fit_metrics_aggregation_fn(fit_metrics)
+                    self.train_accuracy_list[me].append(metrics_aggregated_mefl[me]["Accuracy"])
 
             print("""finalizou aggregated fit""")
+            print(self.train_accuracy_list)
+            data_shift = [False] * self.ME
+            # for me in trained_models:
+            #     changes , _ = self.detect_change_ema(self.train_accuracy_list[me])
+            #     if len(changes) > 0:
+            #         print(f"changes {changes}")
+            #         exit()
+            #         if changes[-1] == server_round:
+            #             data_shift[me] = True
+
+            print(f"data_shift {data_shift} rodada {server_round}")
+
+            for me in trained_models:
+                # Convert results
+                weights_results = [
+                    (parameters, num_examples)
+                    for parameters, num_examples, fit_res in results_mefl[me]
+                ]
+                aggregated_ndarrays_mefl[me] = aggregate(weights_results, self.homogeneity_degree_normalized[me], self.parameters_aggregated_mefl[me], server_round, self.ps[me], data_shift[me], me)
+                if len(weights_results) > 1:
+                    aggregated_ndarrays_mefl[me] = aggregate(weights_results, self.homogeneity_degree_normalized[me], self.parameters_aggregated_mefl[me], server_round, self.ps[me], data_shift[me], me)
+                elif len(weights_results) == 1:
+                    aggregated_ndarrays_mefl[me] = results_mefl[me][0][0]
+
+            for me in trained_models:
+                self.parameters_aggregated_mefl[me] = aggregated_ndarrays_mefl[me]
 
             self.parameters_aggregated_mefl = self.parameters_aggregated_mefl
             self.metrics_aggregated_mefl = metrics_aggregated_mefl
@@ -449,8 +481,42 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
         try:
             values = np.array([i * j for i, j in zip(values, weights)])
             values = np.sum(values) / np.sum(weights)
-            return round(float(values), 2)
+            return round(float(values), 3)
 
         except Exception as e:
             print("_weighted_average error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+    def detect_change_ema(self, signal, alpha=0.1, threshold=3.0):
+        try:
+            """
+            Detecta mudanças repentinas usando EMA (Exponential Moving Average).
+    
+            Args:
+                signal (list ou np.array): sequência de valores reais.
+                alpha (float): fator de suavização da EMA (0<alpha<=1).
+                threshold (float): múltiplos do desvio padrão do resíduo para detectar mudança.
+    
+            Returns:
+                indices (list): pontos onde foram detectadas mudanças.
+                ema (np.array): valores da EMA ao longo do tempo.
+            """
+            signal = np.array(signal)
+            ema = np.zeros_like(signal, dtype=float)
+            ema[0] = signal[0]
+
+            # Calcula EMA
+            for t in range(1, len(signal)):
+                ema[t] = alpha * signal[t] + (1 - alpha) * ema[t - 1]
+
+            # Resíduo
+            residuals = signal - ema
+            std = np.std(residuals)
+
+            # Detecta mudanças quando resíduo "explode"
+            change_points = [i for i, r in enumerate(residuals) if abs(r) > threshold * std]
+
+            return change_points, ema
+        except Exception as e:
+            print("detect_change_ema error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))

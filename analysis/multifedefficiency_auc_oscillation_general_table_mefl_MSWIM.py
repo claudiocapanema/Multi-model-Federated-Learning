@@ -22,9 +22,10 @@ def get_std(df):
     for i in range(1,len(accs)):
         diff = accs[i] - accs[i-1]
         if diff < 0:
+            diff = abs(diff)
             negative_oscillations.append(diff)
 
-    return pd.DataFrame({"# negative oscillations": [len(negative_oscillations)] * len(df), "Amplitude": [sum(negative_oscillations)] * len(df)})
+    return pd.DataFrame({"negative oscillations": [len(negative_oscillations)] * len(df), "Amplitude": [sum(negative_oscillations)] * len(df)})
 
 def read_data(read_solutions, read_dataset_order):
     df_concat = None
@@ -42,6 +43,7 @@ def read_data(read_solutions, read_dataset_order):
         "MultiFedAvg+FP": {"Strategy": "MultiFedAvg", "Version": "FP", "Table": "MultiFedAvg+FP"},
         "MultiFedAvg": {"Strategy": "MultiFedAvg", "Version": "Original", "Table": "MultiFedAvg"},
         "MultiFedAvgRR": {"Strategy": "MultiFedAvgRR", "Version": "Original", "Table": "MultiFedAvgRR"},
+        "FedFairMMFL": {"Strategy": "FedFairMMFL", "Version": "Original", "Table": "FedFairMMFL"},
         "MultiFedAvg-MEH": {"Strategy": "MultiFedAvg-MEH", "Version": "Original", "Table": "MultiFedAvg-MEH"}
     }
     hue_order = []
@@ -63,7 +65,7 @@ def read_data(read_solutions, read_dataset_order):
                 df["Alpha"] = np.array([0.1] * len(df))
                 # df["Efficiency"] = np.array(df["# training clients"])
                 std = get_std(df)
-                df["# negative oscillations"] = std["# negative oscillations"].to_numpy()
+                df["negative oscillations"] = std["negative oscillations"].to_numpy()
                 df["Amplitude"] = std["Amplitude"].to_numpy()
 
                 if df_concat is None:
@@ -82,13 +84,15 @@ def read_data(read_solutions, read_dataset_order):
 
 def group_by(df, metric):
 
+    df2 = {"negative oscillations": [df.iloc[0]["negative oscillations"]], "Amplitude": [df.iloc[0]["Amplitude"]]}
     area = trapz(df[metric].to_numpy(), dx=1)
+    df2[metric] = [area]
 
-    return area
+    return pd.DataFrame(df2)
 
 
 
-def table(df, write_path, metric, t=None):
+def table(df, write_path, metrics, t=None):
     datasets = df["Dataset"].unique().tolist()
     alphas = sorted(df["Alpha"].unique().tolist())
     columns = df["Table"].unique().tolist()
@@ -96,13 +100,12 @@ def table(df, write_path, metric, t=None):
 
     print(columns)
 
-    model_report = {i: {} for i in alphas}
+    model_report = {i: {} for i in metrics}
     if t is not None:
         df = df[df['Round (t)'].isin(t)]
 
     df_test = df[
-        ['Round (t)', 'Table', 'Balanced accuracy (%)', 'Accuracy (%)', 'Fraction fit', 'Dataset',
-         'Alpha']]
+        ['Round (t)', 'Table', 'Balanced accuracy (%)', 'Accuracy (%)', 'Fraction fit', 'Dataset', 'Alpha', "negative oscillations", "Amplitude"]]
 
     # df_test = df_test.query("""Round in [10, 100]""")
     print("agrupou table")
@@ -115,32 +118,46 @@ def table(df, write_path, metric, t=None):
     index = [np.array(arr),
              np.array(columns * len(datasets))]
 
+    # index = []
+    # for dt in datasets:
+    #     for column in columns:
+    #         index.append(np.array([dt, column]))
+    #
+    # index = index
+
     models_dict = {}
     ci = 0.95
 
-    # for alpha in model_report:
-    models_datasets_dict = {dt: {} for dt in datasets}
-    for column in columns:
-        for dt in datasets:
+    models_datasets_dict = {dt: {metric: {} for metric in metrics} for dt in datasets}
+    for metric in metrics:
+        for column in columns:
+            for dt in datasets:
             # models_datasets_dict[dt][column] = t_distribution((filter(df_test, dt,
             #                                                           alpha=float(alpha), strategy=column)[
             #     metric]).tolist(), ci)
-            filtered = df_test.query(f"Dataset == '{dt}' and Table == '{column}'")
-            size = filtered.shape[0]
-            re = group_by(filtered, metric=metric)
-            models_datasets_dict[dt][column] = re / size
+                filtered = df_test.query(f"Dataset == '{dt}' and Table == '{column}'")
+                size = filtered.shape[0]
+                if metric == "Accuracy (%)":
+                    re = group_by(filtered, metric=metric)
+                    models_datasets_dict[dt][metric][column] = float(re[metric] / size)
+                else:
+                    models_datasets_dict[dt][metric][column] = int(np.mean(filtered[metric]))
 
-    model_metrics = []
+    print(models_datasets_dict)
+    # exit()
 
-    for dt in datasets:
-        for column in columns:
-            model_metrics.append(str(round(models_datasets_dict[dt][column], 2)))
+    for metric in metrics:
+        model_metrics = []
+        for dt in datasets:
+            for column in columns:
+                model_metrics.append(str(round(models_datasets_dict[dt][metric][column], 2)))
 
-    models_dict[0.1] = model_metrics
+        models_dict[metric] = model_metrics
 
+        # print("coluna ", metric, "\n", models_dict)
+    # exit()
     print(models_dict)
     print(index)
-    # exit()
 
     df_table = pd.DataFrame(models_dict, index=index).round(4)
     print("df table: ", df_table)
@@ -153,6 +170,7 @@ def table(df, write_path, metric, t=None):
     n_solutions = len(pd.Series([i[1] for i in indexes]).unique().tolist())
     max_values = idmax(df_table, n_solutions)
     print("max values", max_values)
+    print(df_accuracy_improvements)
 
     for max_value in max_values:
         row_index = max_value[0]
@@ -166,7 +184,7 @@ def table(df, write_path, metric, t=None):
     print("melhorias")
     print(df_accuracy_improvements)
 
-    indexes = alphas
+    indexes = metrics
     for i in range(df_accuracy_improvements.shape[0]):
         row = df_accuracy_improvements.iloc[i]
         for index in indexes:
@@ -208,20 +226,21 @@ def table(df, write_path, metric, t=None):
 
     Path(write_path).mkdir(parents=True, exist_ok=True)
     if t is not None:
-        filename = """{}latex_round_auc_general_novo_{}_{}.txt""".format(write_path, [min(t), max(t)], metric)
+        filename = """{}latex_round_auc_oscillation_general_novo_{}_{}.txt""".format(write_path, [min(t), max(t)], metric)
     else:
-        filename = """{}latex_auc_general_noovo_{}.txt""".format(write_path, metric)
+        filename = """{}latex_auc_oscillation_general_novo_{}.txt""".format(write_path, metric)
     pd.DataFrame({'latex': [latex]}).to_csv(filename, header=False, index=False)
 
-    improvements(df_table, datasets, metric)
+    print(df_accuracy_improvements)
+
+    # improvements(df_table, datasets, metrics)
 
     #  df.to_latex().replace("\}", "}").replace("\{", "{").replace("\\\nRecall", "\\\n\hline\nRecall").replace("\\\nF-score", "\\\n\hline\nF1-score")
 
 
-def improvements(df, datasets, metric):
+def improvements(df, datasets, metrics):
     # , "FedKD+FP": "FedKD"
-    # strategies = {"MultiFedAvg-MDH": "MultiFedAvg", "FedFairMMFL": "MultiFedAvg", "MultiFedAvgRR": "MultiFedAvg"}
-    strategies = {"MultiFedAvg+MFP_v2": "MultiFedAvg", "MultiFedAvg+MFP": "MultiFedAvg", "MultiFedAvg+FP": "MultiFedAvg", "MultiFedAvg+FPD": "MultiFedAvg"}
+    strategies = {"MultiFedAvg-MEH": "MultiFedAvg", "MultiFedAvgRR": "MultiFedAvg", "FedFairMMFL": "MultiFedAvg", "MultiFedAvg": "MultiFedAvg"}
     # strategies = {r"MultiFedAvg+FP": "MultiFedAvg"}
     columns = df.columns.tolist()
     improvements_dict = {'Dataset': [], 'Table': [], 'Original strategy': [], 'Alpha': [], metric: []}
@@ -301,7 +320,7 @@ def accuracy_improvement(df, datasets):
     # reference_solutions = {"MultiFedAvg+FP": "MultiFedAvg", "MultiFedAvgGlobalModelEval+FP": "MultiFedAvgGlobalModelEval"}
     # ,
     #                            "FedKD+FP": "FedKD"
-    reference_solutions = {"MultiFedAvg+MFP_v2": "MultiFedAvg", "MultiFedAvg+MFP": "MultiFedAvg", "MultiFedAvg+FP": "MultiFedAvg", "MultiFedAvg+FPD": "MultiFedAvg"}
+    reference_solutions = {"MultiFedAvg-MEH": "MultiFedAvg", "MultiFedAvgRR": "MultiFedAvg", "FedFairMMFL": "MultiFedAvg", "MultiFedAvg": "MultiFedAvg"}
 
     print(df_difference)
     # exit()
@@ -328,7 +347,12 @@ def accuracy_improvement(df, datasets):
 def select_mean(index, column_values, columns, n_solutions):
     list_of_means = []
     indexes = []
-    print("ola: ", column_values, "ola0")
+    column = columns[index]
+    select_max = False
+    print(column_values)
+
+    if column in ["Accuracy (%)"]:
+        select_max = True
 
     for i in range(len(column_values)):
         print("valor: ", column_values[i])
@@ -342,8 +366,13 @@ def select_mean(index, column_values, columns, n_solutions):
 
         dataset_values = list_of_means[i: i + n_solutions]
         max_tuple = max(dataset_values, key=lambda e: e[0])
-        column_min_value = max_tuple[1]
-        column_max_value = max_tuple[2]
+        min_tuple = min(dataset_values, key=lambda e: e[0])
+        if select_max:
+            column_min_value = max_tuple[1]
+            column_max_value = max_tuple[2]
+        else:
+            column_min_value = min_tuple[1]
+            column_max_value = min_tuple[2]
         print("maximo: ", column_max_value)
         for j in range(len(list_of_means)):
             value_tuple = list_of_means[j]
@@ -371,38 +400,24 @@ def idmax(df, n_solutions):
 
 
 if __name__ == "__main__":
-    # experiment_id = "label_shift#1"
-    # experiment_id = "label_shift#2"
-    # experiment_id = "label_shift#3"
-    # experiment_id = "label_shift#4"
-    # experiment_id = "concept_drift#1"
-    # experiment_id = "concept_drift#2"
     experiment_id = 2
     total_clients = 30
-    # alphas = [10.0, 10.0]
+    alphas = [0.1, 0.1, 1.0]
+    # alphas = [0.1, 0.1, 0.1]
+    # alphas = [0.1, 1.0, 0.1]
     # alphas = [1.0, 0.1, 0.1]
     # alphas = [0.1, 0.1]
-    # alphas = [10.0]
-    # alphas = [1.0, 1.0]
-    # alphas = [0.1, 0.1, 0.1]
-    alphas = [0.1, 0.1, 1.0]
-    # alphas = [10.0, 0.1]
-    # dataset = ["CIFAR10", "WISDM-W"]
-    # dataset = ["WISDM-W"]
     dataset = ["WISDM-W", "ImageNet10", "Gowalla"]
     # dataset = ["WISDM-W", "ImageNet10"]
     # dataset = ["EMNIST", "CIFAR10"]
     # models_names = ["cnn_c"]
     model_name = ["gru", "CNN", "lstm"]
-    # model_name = ["gru"]
-    # model_name = ["CNN", "gru"]
-    fraction_fit = 0.3
+    # model_name = ["gru", "CNN"]
+    fraction_fit = 0.4
     number_of_rounds = 100
     local_epochs = 1
     round_new_clients = 0
     train_test = "test"
-    # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
-    # solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg"]
     # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
     solutions = ["MultiFedAvg-MEH", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
 
@@ -424,7 +439,7 @@ if __name__ == "__main__":
                 train_test)
             read_dataset_order.append(dt)
 
-            read_solutions[solution].append("""{}{}_{}.csv""".format(read_path, dt, solution.replace("MultiFedAvg-MEH", "HMultiFedAvg")))
+            read_solutions[solution].append("""{}{}_{}.csv""".format(read_path, dt, solution))
 
     write_path = """plots/MEFL/experiment_id_{}/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(
         experiment_id,
@@ -441,10 +456,10 @@ if __name__ == "__main__":
     df, hue_order = read_data(read_solutions, read_dataset_order)
 
     pd.set_option('display.max_rows', None)
-    print(df[["Strategy", "Dataset", "# negative oscillations", "Amplitude"]].drop_duplicates())
-
-    # table(df, write_path, "Balanced accuracy (%)", t=None)
-    table(df, write_path, "Accuracy (%)", t=None)
-    # table(df, write_path, "Accuracy (%)", t=[i for i in range(1, 31)])
-    # table(df, write_path, "Accuracy (%)", t=[i for i in range(1, 51)])
-    # table(df, write_path, "Accuracy (%)", t=[i for i in range(70, 101)])
+    print(df[["Strategy", "Dataset", "negative oscillations", "Amplitude"]].drop_duplicates())
+    metrics = ["negative oscillations", "Amplitude"]
+    # table(df, write_path, metrics, t=None)
+    table(df, write_path, metrics, t=None)
+    # table(df, write_path, metrics, t=[i for i in range(1, 31)])
+    # table(df, write_path, metrics, t=[i for i in range(1, 51)])
+    # table(df, write_path, metrics, t=[i for i in range(70, 101)])
