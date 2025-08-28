@@ -222,7 +222,7 @@ def table(df, write_path, metrics, t=None):
         "&  \\", "& - \\").replace(" - " + r"\textbf", " " + r"\textbf").replace("_{dc}", r"_{\text{dc}}").replace(
         "\multirow[t]{" + n_strategies + "}{*}{EMNIST}", "EMNIST").replace(
         "\multirow[t]{" + n_strategies + "}{*}{CIFAR10}", "CIFAR10").replace(
-        "\multirow[t]{" + n_strategies + "}{*}{GTSRB}", "GTSRB").replace("\cline{1-4}", "\hline").replace("\cline{1-5}", "\hline").replace("\multirow[t]", "\multirow").replace("MultiFedAvg-MDH", "MultiFedAvg-MDH").replace("\cline{1-3}", "\hline")
+        "\multirow[t]{" + n_strategies + "}{*}{GTSRB}", "GTSRB").replace("\cline{1-4}", "\hline").replace("\cline{1-5}", "\hline").replace("\multirow[t]", "\multirow").replace("MultiFedAvg-MDH", "MultiFedAvg-MDH").replace("\cline{1-3}", "\hline").replace("WISDM", "GRU").replace("ImageNet-10", "CNN"). replace("Gowalla", "LSTM").replace(r"\textuparrow0.0\%", "0.0\%")
 
     Path(write_path).mkdir(parents=True, exist_ok=True)
     if t is not None:
@@ -240,7 +240,7 @@ def table(df, write_path, metrics, t=None):
 
 def improvements(df, datasets, metrics):
     # , "FedKD+FP": "FedKD"
-    strategies = {"MultiFedAvg-MEH": "MultiFedAvg", "MultiFedAvgRR": "MultiFedAvg", "FedFairMMFL": "MultiFedAvg", "MultiFedAvg": "MultiFedAvg"}
+    strategies = {"MultiFedAvg-MEH": "MultiFedAvg", "MultiFedAvgRR": "MultiFedAvg", "FedFairMMFL": "MultiFedAvg"}
     # strategies = {r"MultiFedAvg+FP": "MultiFedAvg"}
     columns = df.columns.tolist()
     improvements_dict = {'Dataset': [], 'Table': [], 'Original strategy': [], 'Alpha': [], metric: []}
@@ -320,7 +320,7 @@ def accuracy_improvement(df, datasets):
     # reference_solutions = {"MultiFedAvg+FP": "MultiFedAvg", "MultiFedAvgGlobalModelEval+FP": "MultiFedAvgGlobalModelEval"}
     # ,
     #                            "FedKD+FP": "FedKD"
-    reference_solutions = {"MultiFedAvg-MEH": "MultiFedAvg", "MultiFedAvgRR": "MultiFedAvg", "FedFairMMFL": "MultiFedAvg", "MultiFedAvg": "MultiFedAvg"}
+    reference_solutions = {"MultiFedAvg-MEH": "MultiFedAvg", "MultiFedAvgRR": "MultiFedAvg", "FedFairMMFL": "MultiFedAvg"}
 
     print(df_difference)
     # exit()
@@ -419,7 +419,7 @@ if __name__ == "__main__":
     round_new_clients = 0
     train_test = "test"
     # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
-    solutions = ["MultiFedAvg-MEH", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
+    solutions = ["MultiFedAvg-MEH", "FedFairMMFL", "MultiFedAvgRR", "MultiFedAvg"]
 
     read_solutions = {solution: [] for solution in solutions}
     read_dataset_order = []
