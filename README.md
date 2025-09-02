@@ -1,6 +1,6 @@
 # Multi-model Federated Learning (MEFL)
 
-This project extends [PFLlib (Personalized Federated Learning Algorithm Library)](https://github.com/TsingZ0/PFLlib) to train multiple models simultaneously. For simulations using the Flower framework please consider visiting our second project that simulates MEFL using the Flower framework - [FL-HIAAC_docker](https://github.com/claudiocapanema/FL-HIAAC_docker).
+This project extends [PFLlib (Personalized Federated Learning Algorithm Library)](https://github.com/TsingZ0/PFLlib) to train multiple models simultaneously. For simulations using the Flower framework, please consider visiting our second project that simulates MEFL using the Flower framework - [FL-HIAAC_docker](https://github.com/claudiocapanema/FL-HIAAC_docker).
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPL_v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html) [![arXiv](https://img.shields.io/badge/arXiv-2312.04992-b31b1b.svg)](https://arxiv.org/abs/2312.04992)
 
@@ -54,7 +54,7 @@ If this project has been useful to you, please cite our paper.
 
 [Data Shift Under Delayed Labeling in Multi-Model Federated Learning](https://ieeexplore.ieee.org/document/11096152) (MultiFedPredict)
 
-```python
+```text
 @INPROCEEDINGS{capanema2025@data,
   author={Capanema, Cláudio G. S. and Silva, Fabrício A. and Villas, Leandro A. and Loureiro, Antonio A. F.},
   booktitle={2025 21st International Conference on Distributed Computing in Smart Systems and the Internet of Things (DCOSS-IoT)}, 
