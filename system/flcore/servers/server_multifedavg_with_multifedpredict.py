@@ -122,11 +122,9 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
         self.fc = {me: 0 for me in range(self.ME)}
         self.il = {me: 0 for me in range(self.ME)}
         self.ps =  {me: 0 for me in range(self.ME)}
-        self.increased_training_intensity = {me: 0 for me in range(self.ME)}
         self.max_number_of_rounds_data_drift_adaptation = 5
         self.similarity = {me: 0 for me in range(self.ME)}
         self.t_hat = [1] * self.ME
-        self.reduced_training_intensity_flag = [False] * self.ME
         self.train_accuracy_list = {me: [] for me in range(self.ME)}
 
     def set_clients(self):
@@ -303,64 +301,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
 
         except Exception as e:
             print("aggregate_fit error")
-            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
-
-    def select_clients(self, t):
-
-        try:
-            g = torch.Generator()
-            g.manual_seed(t)
-            random.seed(t)
-            np.random.seed(t)
-            torch.manual_seed(t)
-
-            data_drift_model = -1
-            for me in range(self.ME):
-                if self.ps[me] > 0 or self.increased_training_intensity[me] > 0:
-                    data_drift_model = me
-
-
-            if data_drift_model > -1:
-                self.increased_training_intensity[data_drift_model] += 1
-                if self.increased_training_intensity[data_drift_model] == self.max_number_of_rounds_data_drift_adaptation:
-                    self.increased_training_intensity[data_drift_model] = 0
-                selected_clients = list(np.random.choice(self.clients, self.num_training_clients, replace=False))
-                selected_clients = [i.client_id for i in selected_clients]
-            else:
-                sc = super().select_clients(t)
-
-                for me in range(self.ME):
-                    if len(sc[me]) > 0:
-                        self.t_hat[me] = t
-                        self.reduced_training_intensity_flag[me] = False
-                    elif len(sc[me]) == 0 and not self.reduced_training_intensity_flag[me]:
-                        self.t_hat[me] = t - 1
-                        # self.t_hat[me] = t
-                        self.reduced_training_intensity_flag[me] = True
-
-                return sc
-
-            sc = []
-            for me in range(self.ME):
-                if me == data_drift_model:
-                    sc.append(selected_clients)
-                else:
-                    sc.append([])
-
-            for me in range(self.ME):
-                if len(sc[me]) > 0:
-                    self.t_hat[me] = t
-                    self.reduced_training_intensity_flag[me] = False
-                elif len(sc[me]) == 0 and not self.reduced_training_intensity_flag[me]:
-                    self.t_hat[me] = t - 1
-                    self.reduced_training_intensity_flag[me] = True
-
-            self.n_trained_clients = sum([len(i) for i in sc])
-
-            return sc
-
-        except Exception as e:
-            print("select_clients error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def evaluate(self, t, parameters_aggregated_mefl):
