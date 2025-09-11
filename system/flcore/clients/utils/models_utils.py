@@ -216,7 +216,7 @@ def wikitext_preprocess(dataset):
             y = self.data[idx + self.seq_len]
             return {"text": torch.tensor(x, dtype=torch.long), "label": torch.tensor(y, dtype=torch.long)}
 
-    seq_len = 30
+    seq_len = 1
     batch_size = 256
 
     train_dataset = NextWordDataset(train_tokens, seq_len)
@@ -327,7 +327,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                     dataset={"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "MNIST": "ylecun/mnist",
                          "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
-                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-10-Words-25'}[dataset_name],
+                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-1-Words-3743'}[dataset_name],
                     partitioners={"train": partitioner},
                     seed=42
                 )
@@ -341,7 +341,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                 dataset={"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "MNIST": "ylecun/mnist",
                          "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
-                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-10-Words-25'}[
+                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-1-Words-3743'}[
                     dataset_name],
                 partitioners={"train": partitioner},
                 path=f"datasets/{dataset_name}",

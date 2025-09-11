@@ -98,8 +98,8 @@ class ClientMultiFedAvgWithMultiFedPredictv0(MultiFedAvgClient):
             s = cosine_similarity(self.p_ME[me], p_ME[me])
             a = 0.67
             # b = [0.54, 0.56]
-            b = [0.76, 0.76]
-            c = [0.47, 0.47]
+            b = [0.76, 0.76, 0.76]
+            c = [0.47, 0.47, 0.47]
             d = 0.55
             # if t <= 10:
             #     similarity = 1

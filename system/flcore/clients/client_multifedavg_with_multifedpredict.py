@@ -94,14 +94,12 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             il = metrics["il"]
             similarity = metrics["similarity"]
             homogeneity_degree = metrics["homogeneity_degree"]
-            freeze = metrics["freeze"]
-            freeze_round = metrics["freeze_round"]
             ps = metrics["ps"]
             s = cosine_similarity(self.p_ME[me], p_ME[me])
             a = 0.67
             # b = [0.54, 0.56]
-            b = [0.76, 0.76]
-            c = [0.47, 0.47]
+            b = [0.76, 0.76, 0.76]
+            c = [0.47, 0.47, 0.47]
             d = 0.55
             # if t <= 10:
             #     similarity = 1
@@ -110,62 +108,26 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             elif similarity < 0:
                 similarity = 0
 
-            # novo
-            # if ps > 0:
-            #     self.reset_round[me] = max(int((t - 1)), 1) - 10
-            #     self.lt[me] = 0
-            #     self.ps_reset = ps
-            # t_hat = max(int((t - self.reset_round[me])), 1)
-            # nt = t - (self.lt[me])
-
-            t_hat = t
-            if freeze:
-                t_hat = freeze_round
-            nt = t_hat - self.lt[me]
-            print(f"valor t {t_hat} nt {nt} tamanho {len(global_model)}")
-            # if t >= 60:
-            #     if self.lt[me] >= 60:
-            #         t_hat = self.T
-            # combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
-            #                                          t=t_hat, T=self.T, nt=nt, s=round(float(similarity), 2),
-            # device=self.device, global_model_original_shape=self.model_shape_mefl[me])
+            print(f"valor t {t} nt {nt} tamanho {len(global_model)}")
             combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
-                                                     t=t_hat, T=self.T, nt=nt, s=round(float(similarity), 2),
+                                                     t=t, T=self.T, nt=nt, s=round(float(similarity), 2),
                                                      fc={'global': fc, 'reference': a},
                                                      il={'global': il, 'reference': b[me]},
                                                      dh={'global': homogeneity_degree, 'reference': c[me]},
                                                      ps={'global': ps, 'reference': d},
                                                      device=self.device,
                                                      global_model_original_shape=self.model_shape_mefl[me])
-            if freeze:
-                print(f"cong rodada {t}")
-                combined_model = self.combined_model[me]
-            else:
-                self.combined_model[me] = combined_model
             if (fc >= a and il < b[me] and homogeneity_degree > c[me]) or (
                     ps < d and nt > 0 and t > 10 and homogeneity_degree > c[me]):
                 s = 1
                 set_weights(self.global_model[me], global_model)
                 combined_model = self.global_model[me]
 
-                # combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
-                #                                          t=t_hat, T=self.T, nt=nt, s=round(float(similarity), 2),
-                #                                          device=self.device,
-                #                                          global_model_original_shape=self.model_shape_mefl[me])
             print(f"rodada {t} recebido fc{fc} il{il} homogeneity degree {homogeneity_degree} ps {ps} nt {nt}")
-            # if t >=30 and t<=60:
-            # if t >= 30:
-            # set_weights(self.global_model[me], global_model)
-            #                 combined_model = self.global_model[me]
-            #                 s = 1
 
             loss, metrics = test_fedpredict(combined_model, self.valloader[me], self.device, self.client_id, t,
                                             self.args.dataset[me], self.n_classes[me], s, p_ME[me],
                                             self.concept_drift_window[me])
-            # if t >= 60:
-            # loss, metrics = test(combined_model, self.valloader[me], self.device, self.client_id, t,
-            #                                 self.args.dataset[me], self.n_classes[me],
-            #                                 self.concept_drift_window[me])
 
             metrics["Model size"] = self.models_size[me]
             metrics["Dataset size"] = len(self.valloader[me].dataset)

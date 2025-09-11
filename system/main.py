@@ -52,7 +52,7 @@ emb_dim=32
 def load_model(model_name, dataset, strategy, device):
     try:
         num_classes = {'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'Tiny-ImageNet': 200,
-         'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30}[dataset]
+         'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 3743}[dataset]
         out_channel = 32
         if model_name == 'CNN':
             if dataset in ['MNIST']:
@@ -121,7 +121,7 @@ def load_model(model_name, dataset, strategy, device):
             if dataset in ["Gowalla"]:
                 return LSTM(6, device=device, num_layers=1, hidden_size=1, sequence_length=4, num_classes=num_classes)
             elif dataset in ["wikitext"]:
-                return LSTMNextWord(vocab_size=num_classes, embed_dim=3, hidden_dim=6)
+                return LSTMNextWord(vocab_size=num_classes, embed_dim=10, hidden_dim=10)
 
         raise ValueError("""Model not found for model {} and dataset {}""".format(model_name, dataset))
 
@@ -157,14 +157,23 @@ def run(args):
         server = MultiFedAvgRR
     elif args.strategy == "FedFairMMFL":
         server = FedFairMMFL
+    elif args.strategy == "MultiFedAvg+FP":
+        version = None
+        server = MultiFedAvgWithFedPredict
+    elif args.strategy == "MultiFedAvg+FPD":
+        version = None
+        server = MultiFedAvgWithFedPredictDynamic
     elif args.strategy == "MultiFedAvg+MFP":
         server = MultiFedAvgWithMultiFedPredictv0
     elif args.strategy == "MultiFedAvg+MFP_v2":
+        version = "full"
         server = MultiFedAvgWithMultiFedPredict
-    elif args.strategy == "MultiFedAvg+FP":
-        server = MultiFedAvgWithFedPredict
-    elif args.strategy == "MultiFedAvg+FPD":
-        server = MultiFedAvgWithFedPredictDynamic
+    elif args.strategy == "MultiFedAvg+MFP_v2_dh":
+        version = "dh"
+        server = MultiFedAvgWithMultiFedPredict
+    elif args.strategy == "MultiFedAvg+MFP_v2_iti":
+        version = "iti"
+        server = MultiFedAvgWithMultiFedPredict
 
     # elif args.strategy == "MultiFedEfficiency":
     #     server = MultiFedEfficiency
@@ -181,7 +190,10 @@ def run(args):
         print(args.strategy)
         raise NotImplementedError
 
-    server = server(args, models)
+    if args.strategy not in ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+FP", "MultiFedAvg+FPD"]:
+        server = server(args, models)
+    else:
+        server = server(args, models, version)
     server.train()
 
     time_list.append(time.time()-start)

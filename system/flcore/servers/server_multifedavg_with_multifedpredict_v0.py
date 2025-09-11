@@ -73,7 +73,7 @@ def aggregate(results: list[tuple[NDArrays, int]], homogeneity_degree: float, cu
         #     homogeneity_degree = 1
         if t in [1, 20, 40, 60, 80]:
             homogeneity_degree = 1
-        weighted_weights = [np.array(original_layer + homogeneity_degree * layer) for original_layer, layer in zip(current_parameters, weights_prime)]
+        weighted_weights = [np.array(original_layer + layer) for original_layer, layer in zip(current_parameters, weights_prime)]
         return weighted_weights
     except Exception as e:
         print("aggregate error")

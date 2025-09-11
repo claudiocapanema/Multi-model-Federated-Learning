@@ -38,6 +38,8 @@ def read_data(read_solutions, read_dataset_order):
         "FedKD+FP": {"Strategy": "FedKD", "Version": "FP", "Table": "FedKD+FP"},
         "MultiFedAvg+MFP": {"Strategy": "MultiFedAvg", "Version": "MFP", "Table": "MultiFedAvg+MFP"},
         "MultiFedAvg+MFP_v2": {"Strategy": "MultiFedAvg", "Version": "MFP_v2", "Table": "MultiFedAvg+MFP_v2"},
+        "MultiFedAvg+MFP_v2_dh": {"Strategy": "MultiFedAvg", "Version": "MFP_v2_dh", "Table": "MultiFedAvg+MFP_v2_dh"},
+        "MultiFedAvg+MFP_v2_iti": {"Strategy": "MultiFedAvg", "Version": "MFP_v2_iti", "Table": "MultiFedAvg+MFP_v2_iti"},
         "MultiFedAvg+FPD": {"Strategy": "MultiFedAvg", "Version": "FPD", "Table": "MultiFedAvg+FPD"},
         "MultiFedAvg+FP": {"Strategy": "MultiFedAvg", "Version": "FP", "Table": "MultiFedAvg+FP"},
         "MultiFedAvg": {"Strategy": "MultiFedAvg", "Version": "Original", "Table": "MultiFedAvg"},
@@ -221,7 +223,7 @@ def table(df, write_path, metric, t=None):
 def improvements(df, datasets, metric):
     # , "FedKD+FP": "FedKD"
     # strategies = {"MultiFedAvg-MDH": "MultiFedAvg", "FedFairMMFL": "MultiFedAvg", "MultiFedAvgRR": "MultiFedAvg"}
-    strategies = {"MultiFedAvg+MFP_v2": "MultiFedAvg", "MultiFedAvg+MFP": "MultiFedAvg", "MultiFedAvg+FP": "MultiFedAvg", "MultiFedAvg+FPD": "MultiFedAvg"}
+    strategies = {"MultiFedAvg+MFP_v2": "MultiFedAvg", "MultiFedAvg+MFP_v2_dh": "MultiFedAvg", "MultiFedAvg+MFP_v2_iti": "MultiFedAvg", "MultiFedAvg+MFP": "MultiFedAvg", "MultiFedAvg+FP": "MultiFedAvg", "MultiFedAvg+FPD": "MultiFedAvg"}
     # strategies = {r"MultiFedAvg+FP": "MultiFedAvg"}
     columns = df.columns.tolist()
     improvements_dict = {'Dataset': [], 'Table': [], 'Original strategy': [], 'Alpha': [], metric: []}
@@ -301,7 +303,7 @@ def accuracy_improvement(df, datasets):
     # reference_solutions = {"MultiFedAvg+FP": "MultiFedAvg", "MultiFedAvgGlobalModelEval+FP": "MultiFedAvgGlobalModelEval"}
     # ,
     #                            "FedKD+FP": "FedKD"
-    reference_solutions = {"MultiFedAvg+MFP_v2": "MultiFedAvg", "MultiFedAvg+MFP": "MultiFedAvg", "MultiFedAvg+FP": "MultiFedAvg", "MultiFedAvg+FPD": "MultiFedAvg"}
+    reference_solutions = {"MultiFedAvg+MFP_v2": "MultiFedAvg", "MultiFedAvg+MFP_v2_dh": "MultiFedAvg", "MultiFedAvg+MFP_v2_iti": "MultiFedAvg", "MultiFedAvg+MFP": "MultiFedAvg", "MultiFedAvg+FP": "MultiFedAvg", "MultiFedAvg+FPD": "MultiFedAvg"}
 
     print(df_difference)
     # exit()
@@ -375,36 +377,35 @@ if __name__ == "__main__":
     # experiment_id = "label_shift#2"
     # experiment_id = "label_shift#3"
     # experiment_id = "label_shift#4"
-    # experiment_id = "concept_drift#1"
+    experiment_id = "concept_drift#1"
     # experiment_id = "concept_drift#2"
-    experiment_id = 2
-    total_clients = 30
+    total_clients = 40
     # alphas = [10.0, 10.0]
+    alphas = [0.1, 0.1, 0.1]
+    # alphas = [10.0, 10.0, 10.0]
     # alphas = [1.0, 0.1, 0.1]
     # alphas = [0.1, 0.1]
     # alphas = [10.0]
     # alphas = [1.0, 1.0]
-    # alphas = [0.1, 0.1, 0.1]
-    alphas = [0.1, 0.1, 1.0]
+
     # alphas = [10.0, 0.1]
     # dataset = ["CIFAR10", "WISDM-W"]
     # dataset = ["WISDM-W"]
-    dataset = ["WISDM-W", "ImageNet10", "Gowalla"]
+    # dataset = ["ImageNet10", "WISDM-W", "Gowalla"]
+    dataset = ["ImageNet10", "WISDM-W", "wikitext"]
     # dataset = ["WISDM-W", "ImageNet10"]
     # dataset = ["EMNIST", "CIFAR10"]
     # models_names = ["cnn_c"]
-    model_name = ["gru", "CNN", "lstm"]
-    # model_name = ["gru"]
-    # model_name = ["CNN", "gru"]
+    model_name = ["CNN", "gru", "lstm"]
     fraction_fit = 0.3
     number_of_rounds = 100
     local_epochs = 1
     round_new_clients = 0
     train_test = "test"
     # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
-    # solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg"]
+    solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg"]
     # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
-    solutions = ["MultiFedAvg-MEH", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
+    # solutions = ["MultiFedAvg-MEH", "MultiFedAvg", "MultiFedAvgRR", "FedFairMMFL"]
 
     read_solutions = {solution: [] for solution in solutions}
     read_dataset_order = []

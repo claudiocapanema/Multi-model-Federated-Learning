@@ -22,7 +22,7 @@ import numpy as np
 from flcore.clients.client_multifedavg_with_multifedpredict import ClientMultiFedAvgWithMultiFedPredict
 from flcore.clients.client_multifedavg_with_fedpredict import ClientMultiFedAvgWithFedPredict
 from flcore.clients.client_multifedavg_with_fedpredict_dynamic import ClientMultiFedAvgWithFedPredictDynamic
-from flcore.servers.server_multifedavg import MultiFedAvg
+from flcore.servers.server_multifedavg_with_multifedpredict_v0 import MultiFedAvgWithMultiFedPredictv0
 import sys
 from fedpredict import fedpredict_server, fedpredict_layerwise_similarity
 import flwr
@@ -42,56 +42,6 @@ from flwr.server.client_proxy import ClientProxy
 import torch
 import random
 
-
-def aggregate(results: list[tuple[NDArrays, int]], homogeneity_degree: float, current_parameters: list[tuple[NDArrays, int]], t: int, ps: float, data_shift: bool, me: int) -> NDArrays:
-    try:
-        """Compute weighted average."""
-        # Calculate the total number of examples used during training
-        num_examples_total = sum(num_examples for (_, num_examples) in results)
-
-        # Create a list of weights, each multiplied by the related number of examples
-        weighted_weights = [
-            [layer * num_examples for layer in weights] for weights, num_examples in results
-        ]
-        weighted_weights = []
-        for i, r in enumerate(results):
-            weights, num_examples = r
-            client_update = []
-            for j, layer in enumerate(weights):
-                original_layer = current_parameters[j]
-                update = layer - original_layer
-                client_update.append(update * num_examples)
-
-            weighted_weights.append(client_update)
-
-        # Compute average weights of each layer
-        weights_prime: NDArrays = [
-            reduce(np.add, layer_updates) / num_examples_total
-            for layer_updates in zip(*weighted_weights)
-        ]
-        # if t <= 59:
-        #     homogeneity_degree = 1
-        # if t in [1, 20, 40, 60, 80]:
-        # if t in [1] or data_shift:
-        # if t in [1] or (me == 0 and t in [20, 60]) or (me == 1 and t in [40, 80]):
-        if t in [1]:
-            homogeneity_degree = 1
-        new_weights = []
-        i = 0
-        for original_layer, layer in zip(current_parameters, weights_prime):
-            if i < len(current_parameters) - 2:
-                w = np.array(original_layer + layer)
-            else:
-                w = np.array(original_layer + homogeneity_degree * layer)
-            new_weights.append(w)
-            i += 1
-        weighted_weights = new_weights
-        # weighted_weights = [np.array(original_layer + homogeneity_degree * layer) for original_layer, layer in zip(current_parameters, weights_prime)]
-        return weighted_weights
-    except Exception as e:
-        print("aggregate error")
-        print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
-
 def get_weights(net):
     try:
         return [val.cpu().numpy() for _, val in net.state_dict().items()]
@@ -100,32 +50,18 @@ def get_weights(net):
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 
-class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
-    def __init__(self, args, times):
+class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
+    def __init__(self, args, times, version):
         super().__init__(args, times)
-        self.test_metrics_names = ["Accuracy", "Balanced accuracy", "Loss", "Round (t)", "Fraction fit",
-                                   "# training clients", "training clients and models", "Model size", "Alpha", "fc", "il", "dh", "ps"]
-        self.results_test_metrics = {me: {metric: [] for metric in self.test_metrics_names} for me in range(self.ME)}
-        self.compression = ""
-        self.similarity_list_per_layer = {me: {} for me in range(self.ME)}
-        self.initial_similarity = 0
-        self.current_similarity = 0
-        self.model_shape_mefl = [None] * self.ME
-        self.similarity_between_layers_per_round = {me: {} for me in range(self.ME)}
-        self.similarity_between_layers_per_round_and_client = {me: {} for me in range(self.ME)}
-        self.mean_similarity_per_round = {me: {} for me in range(self.ME)}
-        self.df = [0] * self.ME
-        self.prediction_layer = {me: {"non_iid": 0, "parameters": []} for me in range(self.ME)}
-        self.homogeneity_degree = {me: 0 for me in range(self.ME)}
-        self.homogeneity_degree_normalized = {me: 0 for me in range(self.ME)}
-        self.homogeneity_degree_list = {me: [] for me in range(self.ME)}
-        self.fc = {me: 0 for me in range(self.ME)}
-        self.il = {me: 0 for me in range(self.ME)}
-        self.ps =  {me: 0 for me in range(self.ME)}
-        self.max_number_of_rounds_data_drift_adaptation = 5
-        self.similarity = {me: 0 for me in range(self.ME)}
         self.t_hat = [1] * self.ME
+        self.reduced_training_intensity_flag = [False] * self.ME
         self.train_accuracy_list = {me: [] for me in range(self.ME)}
+        self.max_number_of_rounds_data_drift_adaptation = 3
+        self.increased_training_intensity = [0] * self.ME
+        self.reduced_training_intensity_flag = [False] * self.ME
+        self.version = version
+        # self.clients_ids = [i.client_id for i in self.clients]
+        # self.clients_ids_uniform_selection = dict(copy.deepcopy(self.clients_ids))
 
     def set_clients(self):
 
@@ -136,6 +72,9 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
                                 id=i,
                                    model=copy.deepcopy(self.global_model))
                 self.clients.append(client)
+
+            self.clients_ids = [i.client_id for i in self.clients]
+            self.clients_ids_uniform_selection = [i for i in copy.deepcopy(self.clients_ids)]
 
         except Exception as e:
             print("set_clients error")
@@ -170,6 +109,39 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
             weights_results_mefl = {me: [] for me in range(self.ME)}
             # parameters_aggregated_mefl = {me: [] for me in range(self.ME)}
 
+            print(f"modelos treinados rodada {server_round} trained models {trained_models}")
+            for me in trained_models:
+                # Convert results
+                weights_results = [
+                    (parameters, num_examples)
+                    for parameters, num_examples, fit_res in results_mefl[me]
+                ]
+                aggregated_ndarrays_mefl[me] = self.aggregate(weights_results, self.homogeneity_degree[me], self.parameters_aggregated_mefl[me], server_round)
+                if len(weights_results) > 1:
+                    aggregated_ndarrays_mefl[me] = self.aggregate(weights_results, self.homogeneity_degree[me], self.parameters_aggregated_mefl[me], server_round)
+                elif len(weights_results) == 1:
+                    aggregated_ndarrays_mefl[me] = results_mefl[me][0][0]
+
+            for me in trained_models:
+                self.parameters_aggregated_mefl[me] = aggregated_ndarrays_mefl[me]
+
+            # Aggregate custom metrics if aggregation fn was provided
+            metrics_aggregated_mefl = {me: [] for me in range(self.ME)}
+            for me in trained_models:
+                if self.fit_metrics_aggregation_fn:
+                    fit_metrics = [(num_examples, metrics) for _, num_examples, metrics in results_mefl[me]]
+                    metrics_aggregated_mefl[me] = self.fit_metrics_aggregation_fn(fit_metrics)
+
+            print("""finalizou aggregated fit""")
+
+            self.parameters_aggregated_mefl = self.parameters_aggregated_mefl
+            self.metrics_aggregated_mefl = metrics_aggregated_mefl
+
+            parameters_aggregated_mefl, metrics_aggregated_mefl = self.parameters_aggregated_mefl, self.metrics_aggregated_mefl
+            if server_round == 1:
+                for me in range(self.ME):
+                    self.model_shape_mefl[me] = [i.shape for i in parameters_aggregated_mefl[me]]
+
             clients_parameters_mefl = {me: [] for me in range(self.ME)}
             fc_list = {me: [] for me in range(self.ME)}
             il_list = {me: [] for me in range(self.ME)}
@@ -196,59 +168,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
                 self.ps[me] = self._weighted_average(ps_list[me], num_samples_list[me])
                 self.similarity[me] = self._weighted_average(il_list[me], num_samples_list[me])
                 self.homogeneity_degree[me] = round((self.fc[me] + (1 - self.il[me])) / 2, 2)
-                self.homogeneity_degree_list[me].append(self.homogeneity_degree[me])
-                if (max(self.homogeneity_degree_list[me]) - min(self.homogeneity_degree_list[me])) > 0:
-                    self.homogeneity_degree_normalized[me] = 0 if self.homogeneity_degree[me] == 0 else (self.homogeneity_degree[me] - min(self.homogeneity_degree_list[me])) / (max(self.homogeneity_degree_list[me]) - min(self.homogeneity_degree_list[me]))
-                else:
-                    self.homogeneity_degree_normalized[me] = 0
                 # if self.homogeneity_degree[me] > self.prediction_layer[me]["non_iid"]:
                 print(f"round {server_round} fc {self.fc[me]} il {self.il[me]} similarity {self.similarity[me]} ps {self.ps[me]} homogeneity_degree {self.homogeneity_degree[me]}")
-
-            print(f"modelos treinados rodada {server_round} trained models {trained_models}")
-            # Aggregate custom metrics if aggregation fn was provided
-            metrics_aggregated_mefl = {me: [] for me in range(self.ME)}
-            for me in trained_models:
-                if self.fit_metrics_aggregation_fn:
-                    fit_metrics = [(num_examples, metrics) for _, num_examples, metrics in results_mefl[me]]
-                    metrics_aggregated_mefl[me] = self.fit_metrics_aggregation_fn(fit_metrics)
-                    self.train_accuracy_list[me].append(metrics_aggregated_mefl[me]["Accuracy"])
-
-            print("""finalizou aggregated fit""")
-            print(self.train_accuracy_list)
-            data_shift = [False] * self.ME
-            # for me in trained_models:
-            #     changes , _ = self.detect_change_ema(self.train_accuracy_list[me])
-            #     if len(changes) > 0:
-            #         print(f"changes {changes}")
-            #         exit()
-            #         if changes[-1] == server_round:
-            #             data_shift[me] = True
-
-            print(f"data_shift {data_shift} rodada {server_round}")
-
-            for me in trained_models:
-                # Convert results
-                weights_results = [
-                    (parameters, num_examples)
-                    for parameters, num_examples, fit_res in results_mefl[me]
-                ]
-                aggregated_ndarrays_mefl[me] = aggregate(weights_results, self.homogeneity_degree_normalized[me], self.parameters_aggregated_mefl[me], server_round, self.ps[me], data_shift[me], me)
-                if len(weights_results) > 1:
-                    aggregated_ndarrays_mefl[me] = aggregate(weights_results, self.homogeneity_degree_normalized[me], self.parameters_aggregated_mefl[me], server_round, self.ps[me], data_shift[me], me)
-                elif len(weights_results) == 1:
-                    aggregated_ndarrays_mefl[me] = results_mefl[me][0][0]
-
-            for me in trained_models:
-                self.parameters_aggregated_mefl[me] = aggregated_ndarrays_mefl[me]
-
-            self.parameters_aggregated_mefl = self.parameters_aggregated_mefl
-            self.metrics_aggregated_mefl = metrics_aggregated_mefl
-
-            parameters_aggregated_mefl, metrics_aggregated_mefl = self.parameters_aggregated_mefl, self.metrics_aggregated_mefl
-            if server_round == 1:
-                for me in range(self.ME):
-                    self.model_shape_mefl[me] = [i.shape for i in parameters_aggregated_mefl[me]]
-
                 # n_layers = 2 * 1
                 # # n_layers = 2 * 2 # melhor cnn
                 # # n_layers = 1 # melhor gru
@@ -303,7 +224,114 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
             print("aggregate_fit error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def evaluate(self, t, parameters_aggregated_mefl):
+    def aggregate(self, results: list[tuple[NDArrays, int]], homogeneity_degree: float,
+                  current_parameters: list[tuple[NDArrays, int]], t: int) -> NDArrays:
+        try:
+            """Compute weighted average."""
+            # Calculate the total number of examples used during training
+            num_examples_total = sum(num_examples for (_, num_examples) in results)
+
+            # Create a list of weights, each multiplied by the related number of examples
+            weighted_weights = [
+                [layer * num_examples for layer in weights] for weights, num_examples in results
+            ]
+            weighted_weights = []
+            for i, r in enumerate(results):
+                weights, num_examples = r
+                client_update = []
+                for j, layer in enumerate(weights):
+                    original_layer = current_parameters[j]
+                    update = layer - original_layer
+                    client_update.append(update * num_examples)
+
+                weighted_weights.append(client_update)
+
+            # Compute average weights of each layer
+            weights_prime: NDArrays = [
+                reduce(np.add, layer_updates) / num_examples_total
+                for layer_updates in zip(*weighted_weights)
+            ]
+            # if t <= 59:
+            #     homogeneity_degree = 1
+            if t in [1, 20, 40, 60, 80]:
+                homogeneity_degree = 1
+
+            if self.version in ["iti"]:
+                homogeneity_degree = 1
+            weighted_weights = [np.array(original_layer + homogeneity_degree * layer) for original_layer, layer in
+                                zip(current_parameters, weights_prime)]
+            return weighted_weights
+        except Exception as e:
+            print("aggregate error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+    def select_clients(self, t):
+
+        try:
+            g = torch.Generator()
+            g.manual_seed(t)
+            random.seed(t)
+            np.random.seed(t)
+            torch.manual_seed(t)
+
+            if self.version in ["dh"]:
+                return super().select_clients(t)
+
+            data_drift_model = -1
+            for me in range(self.ME):
+                if self.ps[me] > 0 or self.increased_training_intensity[me] > 0:
+                    data_drift_model = me
+
+
+            if data_drift_model > -1:
+                self.increased_training_intensity[data_drift_model] += 1
+
+                # selected_clients = list(np.random.choice(self.clients, self.num_training_clients, replace=False))
+                # selected_clients = [i.client_id for i in selected_clients]
+                to_remove = [i for i in sorted(random.sample(list(self.clients_ids_uniform_selection), self.num_training_clients))]
+                self.clients_ids_uniform_selection = [x for x in self.clients_ids_uniform_selection if x not in to_remove]
+                selected_clients = list(to_remove)
+                if self.increased_training_intensity[data_drift_model] == self.max_number_of_rounds_data_drift_adaptation:
+                    self.increased_training_intensity[data_drift_model] = 0
+                    self.clients_ids_uniform_selection = [i for i in copy.deepcopy(self.clients_ids)]
+            else:
+                sc = super().select_clients(t)
+
+                for me in range(self.ME):
+                    if len(sc[me]) > 0:
+                        self.t_hat[me] = t
+                        self.reduced_training_intensity_flag[me] = False
+                    elif len(sc[me]) == 0 and not self.reduced_training_intensity_flag[me]:
+                        self.t_hat[me] = t - 1
+                        # self.t_hat[me] = t
+                        self.reduced_training_intensity_flag[me] = True
+
+                return sc
+
+            sc = []
+            for me in range(self.ME):
+                if me == data_drift_model:
+                    sc.append(selected_clients)
+                else:
+                    sc.append([])
+
+            for me in range(self.ME):
+                if len(sc[me]) > 0:
+                    self.t_hat[me] = t
+                    self.reduced_training_intensity_flag[me] = False
+                elif len(sc[me]) == 0 and not self.reduced_training_intensity_flag[me]:
+                    self.t_hat[me] = t - 1
+                    self.reduced_training_intensity_flag[me] = True
+
+            self.n_trained_clients = sum([len(i) for i in sc])
+
+            return sc
+
+        except Exception as e:
+            print("select_clients error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+    def evaluate(self, t, parameters_aggregated_mefl): # v0
 
         try:
             evaluate_results = []
@@ -335,6 +363,37 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvg):
         except Exception as e:
             print("evaluate error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+    # def evaluate(self, t, parameters_aggregated_mefl):
+    #
+    #     try:
+    #         evaluate_results = []
+    #         print("inicio s")
+    #         for me in range(self.ME):
+    #             clients_evaluate_list = []
+    #             metrics = {"fc": self.fc[me], "il": self.il[me], "homogeneity_degree": self.homogeneity_degree[me], "ps": self.ps[me], "similarity": self.similarity[me]}
+    #             for i in range(len(self.clients)):
+    #                 client_dict = {}
+    #                 client_dict["client"] = self.clients[i]
+    #                 client_dict["cid"] = self.clients[i].client_id
+    #                 client_dict["nt"] = t - self.clients[i].lt[me]
+    #                 client_dict["lt"] = self.clients[i].lt[me]
+    #                 clients_evaluate_list.append((self.clients[i], EvaluateIns(ndarrays_to_parameters(parameters_aggregated_mefl[me]), client_dict)))
+    #             print(f"submetidos t: {self.t_hat[me]} T: {self.number_of_rounds} df: {self.df[me]}")
+    #             clients_compressed_parameters = fedpredict_server(
+    #                 global_model_parameters=parameters_aggregated_mefl[me], client_evaluate_list=clients_evaluate_list,
+    #                 t=t, T=self.number_of_rounds, df=self.df[me], compression=self.compression, fl_framework="flwr", k_ratio=0.3)
+    #             for i in range(len(self.clients)):
+    #                 evaluate_results.append(self.clients[i].evaluate(me, t, parameters_to_ndarrays(clients_compressed_parameters[i][1].parameters), metrics))
+    #                 # evaluate_results.append(self.clients[i].evaluate(me, t,
+    #                 #     clients_compressed_parameters[i][1].config["parameters"]))
+    #
+    #         loss_aggregated_mefl, metrics_aggregated_mefl = self.aggregate_evaluate(server_round=t,
+    #                                                                                 results=evaluate_results,
+    #                                                                                 failures=[])
+    #     except Exception as e:
+    #         print("evaluate error")
+    #         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def add_metrics(self, server_round, metrics_aggregated, me):
         try:

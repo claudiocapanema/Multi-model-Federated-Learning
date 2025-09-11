@@ -42,8 +42,8 @@ def get_weights(net):
 
 
 class MultiFedAvgWithFedPredictDynamic(MultiFedAvgWithMultiFedPredict):
-    def __init__(self, args, times):
-        super().__init__(args, times)
+    def __init__(self, args, times, version):
+        super().__init__(args, times, version)
 
     def set_clients(self):
 
