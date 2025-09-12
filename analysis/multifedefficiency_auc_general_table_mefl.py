@@ -377,12 +377,14 @@ if __name__ == "__main__":
     # experiment_id = "label_shift#2"
     # experiment_id = "label_shift#3"
     # experiment_id = "label_shift#4"
-    experiment_id = "concept_drift#1"
+    # experiment_id = "concept_drift#1"
     # experiment_id = "concept_drift#2"
+    # experiment_id = "concept_drift#1_recurrent"
+    experiment_id = "concept_drift#2_recurrent"
     total_clients = 40
     # alphas = [10.0, 10.0]
-    alphas = [0.1, 0.1, 0.1]
-    # alphas = [10.0, 10.0, 10.0]
+    # alphas = [0.1, 0.1, 0.1]
+    alphas = [10.0, 10.0, 10.0]
     # alphas = [1.0, 0.1, 0.1]
     # alphas = [0.1, 0.1]
     # alphas = [10.0]
