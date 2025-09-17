@@ -54,7 +54,7 @@ NDArray = npt.NDArray[Any]
 NDArrays = List[NDArray]
 
 
-class MultiFedAvgMEH(MultiFedAvg):
+class MultiFedAvgMDH(MultiFedAvg):
     def __init__(self, args, times):
         super().__init__(args, times)
         self.homogeneity_degree = [None] * self.ME
