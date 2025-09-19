@@ -41,12 +41,29 @@ from flwr.common import FitRes, NDArray, NDArrays, parameters_to_ndarrays
 from flwr.server.client_proxy import ClientProxy
 import torch
 import random
+from scipy.stats import ks_2samp
 
 def get_weights(net):
     try:
         return [val.cpu().numpy() for _, val in net.state_dict().items()]
     except Exception as e:
         print("get_weights error")
+        print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+def weighted_average_fit(metrics):
+    try:
+        # Multiply accuracy of each client by number of Papers examples used
+        # print(f"metricas recebidas: {metrics}")
+        accuracies = [num_examples * m["train_accuracy"] for num_examples, m in metrics]
+        balanced_accuracies = [num_examples * m["train_balanced_accuracy"] for num_examples, m in metrics]
+        loss = [num_examples * m["train_loss"] for num_examples, m in metrics]
+        examples = [num_examples for num_examples, _ in metrics]
+
+        # Aggregate and return custom metric (weighted average)
+        return {"Accuracy": sum(accuracies) / sum(examples), "Balanced accuracy": sum(balanced_accuracies) / sum(examples),
+                "Loss": sum(loss) / sum(examples), "Round (t)": metrics[0][1]["Round (t)"], "Model size": metrics[0][1]["Model size"]}
+    except Exception as e:
+        print("weighted_average_fit error")
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 
@@ -56,12 +73,14 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
         self.t_hat = [1] * self.ME
         self.reduced_training_intensity_flag = [False] * self.ME
         self.train_accuracy_list = {me: [] for me in range(self.ME)}
-        self.max_number_of_rounds_data_drift_adaptation = 3
+        self.max_number_of_rounds_data_drift_adaptation = len(self.clients) //  self.num_training_clients
         self.increased_training_intensity = [0] * self.ME
         self.reduced_training_intensity_flag = [False] * self.ME
         self.version = version
         # self.clients_ids = [i.client_id for i in self.clients]
         # self.clients_ids_uniform_selection = dict(copy.deepcopy(self.clients_ids))
+        self.train_losses = {me: [] for me in range(self.ME)}
+        self.fit_metrics_aggregation_fn = weighted_average_fit
 
     def set_clients(self):
 
@@ -78,6 +97,37 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
         except Exception as e:
             print("set_clients error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+    def detect_drift_ks(self, losses, window=5, alpha=0.05):
+
+        try:
+            """
+            Detecta drift usando teste de Kolmogorov-Smirnov.
+            Apenas aumentos são considerados drift.
+
+            Args:
+                losses (list[float]): histórico de valores de loss.
+                window (int): tamanho da janela de comparação.
+                alpha (float): nível de significância.
+
+            Returns:
+                bool: True se houve drift, False caso contrário.
+            """
+            if len(losses) < window + 1:
+                return False  # histórico insuficiente
+
+            history = np.array(losses[-(window + 1):-1])
+            last = np.array([losses[-1]] * len(history))  # simula distribuição do último valor
+
+            stat, p_value = ks_2samp(history, last)
+
+            # KS detecta diferença significativa (p < alpha)
+            # mas só consideramos se for aumento
+            return (p_value < alpha) and (losses[-1] > history.mean())
+
+        except Exception as e:
+            print("detect_drift_ks error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def aggregate_fit(
@@ -131,6 +181,10 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 if self.fit_metrics_aggregation_fn:
                     fit_metrics = [(num_examples, metrics) for _, num_examples, metrics in results_mefl[me]]
                     metrics_aggregated_mefl[me] = self.fit_metrics_aggregation_fn(fit_metrics)
+                    self.train_losses[me].append(metrics_aggregated_mefl[me]["Loss"])
+                    print(f"Teste data shift modelo {me} rodada {server_round} teste {self.detect_drift_ks(self.train_losses[me], window=5, alpha=0.05)} testada: {self.train_losses[me]}")
+                else:
+                    print("nao tem")
 
             print("""finalizou aggregated fit""")
 

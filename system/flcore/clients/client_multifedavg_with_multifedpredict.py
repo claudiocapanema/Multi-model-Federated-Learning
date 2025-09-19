@@ -28,6 +28,7 @@ from fedpredict import fedpredict_client_torch
 from .utils.models_utils import load_model, get_weights, load_data, set_weights, test, test_fedpredict, train
 from numpy.linalg import norm
 import pickle
+from scipy.stats import ks_2samp
 
 def cosine_similarity(p_1, p_2):
 
@@ -56,8 +57,40 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             self.reset_round = [0] * self.ME
             self.ps_reset = 1
             self.combined_model = [None] * self.ME
+            self.train_losses = {me: [] for me in range(self.ME)}
         except Exception as e:
             print("__init__ error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+    def detect_drift_ks(self, losses, window=5, alpha=0.05):
+
+        try:
+            """
+            Detecta drift usando teste de Kolmogorov-Smirnov.
+            Apenas aumentos são considerados drift.
+        
+            Args:
+                losses (list[float]): histórico de valores de loss.
+                window (int): tamanho da janela de comparação.
+                alpha (float): nível de significância.
+        
+            Returns:
+                bool: True se houve drift, False caso contrário.
+            """
+            if len(losses) < window + 1:
+                return False  # histórico insuficiente
+
+            history = np.array(losses[-(window + 1):-1])
+            last = np.array([losses[-1]] * len(history))  # simula distribuição do último valor
+
+            stat, p_value = ks_2samp(history, last)
+
+            # KS detecta diferença significativa (p < alpha)
+            # mas só consideramos se for aumento
+            return (p_value < alpha) and (losses[-1] > history.mean())
+
+        except Exception as e:
+            print("detect_drift_ks client error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def fit(self, me, t, global_model):
@@ -66,9 +99,12 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             self.lt[me] = t
             p_old = self.p_ME
             parameters, size, metrics = super().fit(me, t, global_model)
+            self.train_losses[me].append(metrics['train_loss'])
+
             similarity = min(cosine_similarity(self.p_ME[me], p_old[me]), 1)
             if 1 - similarity < 0:
                 print(f"similaridade is {similarity} rodada {t}")
+
             metrics["non_iid"] = {"fc": self.fc_ME[me], "il": self.il_ME[me], "similarity": similarity, "ps": 1 - similarity}
 
             return parameters, size, metrics
