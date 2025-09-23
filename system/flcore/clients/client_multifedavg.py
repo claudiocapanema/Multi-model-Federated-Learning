@@ -498,7 +498,7 @@ class MultiFedAvgClient:
                     p_ME.append(p_me)
                     fc_ME.append(fc_me)
                     il_ME.append(il_me)
-                    print(f"p_me {p_me} fc_me {fc_me} il_me {il_me} model {me} client {client_id}")
+                    # print(f"p_me {p_me} fc_me {fc_me} il_me {il_me} model {me} client {client_id}")
             return p_ME, fc_ME, il_ME
         except Exception as e:
            print("_get_datasets_metrics error")

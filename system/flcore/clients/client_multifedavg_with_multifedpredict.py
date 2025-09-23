@@ -29,6 +29,12 @@ from .utils.models_utils import load_model, get_weights, load_data, set_weights,
 from numpy.linalg import norm
 import pickle
 from scipy.stats import ks_2samp
+from scipy.stats import chi2_contingency
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score
+from scipy.stats import binomtest
+import copy
 
 def cosine_similarity(p_1, p_2):
 
@@ -44,6 +50,25 @@ def cosine_similarity(p_1, p_2):
         print("cosine_similairty error")
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
+
+def extract_labels(loader, label_key="label"):
+    labels = []
+    for batch in loader:
+        if isinstance(batch, dict):
+            if label_key not in batch:
+                raise KeyError(f"Chave '{label_key}' não encontrada no batch. "
+                               f"Chaves disponíveis: {list(batch.keys())}")
+            y = batch[label_key]
+        else:
+            raise ValueError(f"Formato inesperado do batch: {type(batch)}")
+
+        if not isinstance(y, torch.Tensor):
+            raise TypeError(f"Esperado Tensor como rótulo, mas veio {type(y)}")
+
+        labels.append(y)
+    return torch.cat(labels).cpu().numpy()
+
+
 class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
     def __init__(self, args, id, model):
         try:
@@ -58,6 +83,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             self.ps_reset = 1
             self.combined_model = [None] * self.ME
             self.train_losses = {me: [] for me in range(self.ME)}
+            self.train_accuracies = {me: [] for me in range(self.ME)}
         except Exception as e:
             print("__init__ error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
@@ -93,19 +119,90 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             print("detect_drift_ks client error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
+    def ks_drift_test(self, me, trainloader_A, acc_B):
+
+        try:
+            # --------------------------
+            # 3. Avaliar em A (esperado) e em B (novo)
+            # --------------------------
+            acc_A = train(
+                self.model[me],
+                trainloader_A,
+                self.valloader[me],
+                self.optimizer[me],
+                self.local_epochs,
+                self.lr,
+                self.device,
+                self.client_id,
+                1,
+                self.args.dataset[me],
+                self.n_classes[me],
+                self.concept_drift_window[me]
+            )["train_accuracy"]
+
+            # print(f"Acurácia em A (esperada): {acc_A:.3f}")
+            # print(f"Acurácia em B (nova):     {acc_B:.3f}")
+
+            # --------------------------
+            # 4. Teste estatístico para confirmar drift
+            # --------------------------
+            # Hipótese nula: desempenho em B não é pior que em A
+            drift = (acc_A - acc_B) > 0.25
+
+            return drift
+
+
+        except Exception as e:
+            print("ks_drift_test client error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+    def chi2_label_shift(self, loader_A, loader_B, alpha=0.05):
+
+        try:
+            """
+            Detecta label shift entre duas bases usando Qui-quadrado.
+            loader_A: DataLoader PyTorch (base antiga)
+            loader_B: DataLoader PyTorch (base nova)
+            """
+            # Extrair labels dos loaders
+            y_A = extract_labels(loader_A)
+            y_B = extract_labels(loader_B)
+
+            # Contagem de classes
+            freq_A = pd.Series(y_A).value_counts()
+            freq_B = pd.Series(y_B).value_counts()
+
+            contingency = pd.concat([freq_A, freq_B], axis=1).fillna(0)
+            chi2, p, _, _ = chi2_contingency(contingency.T)
+
+            # Retornar resultado
+            return (p < alpha)
+        except Exception as e:
+            print("chi2_label_shift client error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
     def fit(self, me, t, global_model):
         """Train the model with data of this client."""
         try:
             self.lt[me] = t
             p_old = self.p_ME
+            trainloader_A = copy.deepcopy(self.trainloader[me])
             parameters, size, metrics = super().fit(me, t, global_model)
+            trainloader_B = self.trainloader[me]
             self.train_losses[me].append(metrics['train_loss'])
+            self.train_accuracies[me].append(metrics['train_accuracy'])
+            label_shift = self.chi2_label_shift(trainloader_A, trainloader_B)
+            concept_drift = self.ks_drift_test(me, trainloader_A, metrics['train_accuracy'])
+            drift_flag = label_shift or concept_drift
 
             similarity = min(cosine_similarity(self.p_ME[me], p_old[me]), 1)
             if 1 - similarity < 0:
                 print(f"similaridade is {similarity} rodada {t}")
 
-            metrics["non_iid"] = {"fc": self.fc_ME[me], "il": self.il_ME[me], "similarity": similarity, "ps": 1 - similarity}
+            if t in [20, 30, 40, 50, 60, 70, 80, 90]:
+                print(f"cliente #id {self.client_id} rodada {t} modelo {me} accuracies {self.train_accuracies[me]} drift label shift {label_shift} concept drift {concept_drift}")
+
+            metrics["non_iid"] = {"fc": self.fc_ME[me], "il": self.il_ME[me], "similarity": similarity, "ps": 1 - similarity, "drift": drift_flag}
 
             return parameters, size, metrics
         except Exception as e:
