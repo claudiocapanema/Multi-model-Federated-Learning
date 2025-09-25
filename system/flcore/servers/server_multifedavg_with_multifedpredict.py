@@ -81,6 +81,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
         # self.clients_ids_uniform_selection = dict(copy.deepcopy(self.clients_ids))
         self.train_losses = {me: [] for me in range(self.ME)}
         self.fit_metrics_aggregation_fn = weighted_average_fit
+        self.drift_flag = {me: [] for me in range(self.ME)}
+        self.reduced = {me: [] for me in range(self.ME)}
 
     def set_clients(self):
 
@@ -143,6 +145,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             self.selected_clients_m = [[] for me in range(self.ME)]
 
             trained_models = []
+            self.drift_flag = {me: [] for me in range(self.ME)}
+            self.reduced = {me: [] for me in range(self.ME)}
 
             results_mefl = {me: [] for me in range(self.ME)}
             for i in range(len(results)):
@@ -153,6 +157,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 client_id = result["client_id"]
                 self.selected_clients_m[me].append(client_id)
                 results_mefl[me].append(results[i])
+                drift_flag[me].append(result["non_iid"]["drift"])
+                reduced[me].append(result["non_iid"]["reduced"])
 
             aggregated_ndarrays_mefl = {me: None for me in range(self.ME)}
             aggregated_ndarrays_mefl = {me: [] for me in range(self.ME)}
@@ -182,7 +188,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     fit_metrics = [(num_examples, metrics) for _, num_examples, metrics in results_mefl[me]]
                     metrics_aggregated_mefl[me] = self.fit_metrics_aggregation_fn(fit_metrics)
                     self.train_losses[me].append(metrics_aggregated_mefl[me]["Loss"])
-                    print(f"Teste data shift modelo {me} rodada {server_round} teste {self.detect_drift_ks(self.train_losses[me], window=5, alpha=0.05)} testada: {self.train_losses[me]}")
+                    print(f"Teste data shift modelo {me} rodada {server_round} teste {drift_flag[me]} reduced {reduced[me]}")
                 else:
                     print("nao tem")
 
@@ -332,6 +338,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 return super().select_clients(t)
 
             data_drift_model = -1
+            #  or self.drift_flag or self.reduced[me].count(True) > self.reduced[me].count(False)
             for me in range(self.ME):
                 if self.ps[me] > 0 or self.increased_training_intensity[me] > 0:
                     data_drift_model = me

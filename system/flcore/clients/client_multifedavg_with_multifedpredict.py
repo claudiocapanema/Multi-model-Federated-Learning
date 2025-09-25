@@ -119,37 +119,20 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             print("detect_drift_ks client error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def ks_drift_test(self, me, trainloader_A, acc_B):
+    def ks_drift_test(self, me):
 
         try:
             # --------------------------
             # 3. Avaliar em A (esperado) e em B (novo)
             # --------------------------
-            acc_A = train(
-                self.model[me],
-                trainloader_A,
-                self.valloader[me],
-                self.optimizer[me],
-                self.local_epochs,
-                self.lr,
-                self.device,
-                self.client_id,
-                1,
-                self.args.dataset[me],
-                self.n_classes[me],
-                self.concept_drift_window[me]
-            )["train_accuracy"]
+            if len(self.train_accuracies[me]) < 2:
+                return False, False
+            acc_A = self.train_accuracies[me][-2]
+            acc_B = self.train_accuracies[me][-1]
+            drift = (acc_A - acc_B) > 0.1
+            reduced = (acc_A - acc_B) > 0
 
-            # print(f"Acurácia em A (esperada): {acc_A:.3f}")
-            # print(f"Acurácia em B (nova):     {acc_B:.3f}")
-
-            # --------------------------
-            # 4. Teste estatístico para confirmar drift
-            # --------------------------
-            # Hipótese nula: desempenho em B não é pior que em A
-            drift = (acc_A - acc_B) > 0.25
-
-            return drift
+            return drift, reduced
 
 
         except Exception as e:
@@ -192,7 +175,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             self.train_losses[me].append(metrics['train_loss'])
             self.train_accuracies[me].append(metrics['train_accuracy'])
             label_shift = self.chi2_label_shift(trainloader_A, trainloader_B)
-            concept_drift = self.ks_drift_test(me, trainloader_A, metrics['train_accuracy'])
+            concept_drift, reduced = self.ks_drift_test(me)
             drift_flag = label_shift or concept_drift
 
             similarity = min(cosine_similarity(self.p_ME[me], p_old[me]), 1)
@@ -200,9 +183,9 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 print(f"similaridade is {similarity} rodada {t}")
 
             if t in [20, 30, 40, 50, 60, 70, 80, 90]:
-                print(f"cliente #id {self.client_id} rodada {t} modelo {me} accuracies {self.train_accuracies[me]} drift label shift {label_shift} concept drift {concept_drift}")
+                print(f"cliente #id {self.client_id} rodada {t} modelo {me} accuracies {self.train_accuracies[me]} drift label shift {label_shift} concept drift {concept_drift} reduced {reduced}")
 
-            metrics["non_iid"] = {"fc": self.fc_ME[me], "il": self.il_ME[me], "similarity": similarity, "ps": 1 - similarity, "drift": drift_flag}
+            metrics["non_iid"] = {"fc": self.fc_ME[me], "il": self.il_ME[me], "similarity": similarity, "ps": 1 - similarity, "drift": drift_flag, "reduced": reduced}
 
             return parameters, size, metrics
         except Exception as e:
