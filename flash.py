@@ -326,7 +326,7 @@ def run_simulation(scenario='A1'):
             global_state[k] = global_state[k] / len(local_states)
         model.load_state_dict(global_state)
 
-        # avaliação global (usando todo o testset - representa "dados de teste de todos os clientes")
+        # avaliação global 
         g_loss, g_acc = evaluate_global(model, testloader, nn.CrossEntropyLoss())
         print(f"-- Após rodada {rnd}: Global Loss={g_loss:.4f}, Global Acurácia={g_acc:.2f}%")
 
