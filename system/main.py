@@ -30,6 +30,7 @@ from flcore.servers.server_multifedavgrr import MultiFedAvgRR
 from flcore.servers.server_fedfairmmfl import FedFairMMFL
 from flcore.servers.server_multifedavg_with_multifedpredict import MultiFedAvgWithMultiFedPredict
 from flcore.servers.server_dma_fl_synchronous import DMAFLSynchronous
+from flcore.servers.server_adaptive_fedavg import AdaptiveFedAvg
 from flcore.servers.server_multifedavg_with_fedpredict_dynamic import MultiFedAvgWithFedPredictDynamic
 from flcore.servers.server_multifedavg_with_fedpredict import MultiFedAvgWithFedPredict
 from flcore.servers.server_multifedavg_with_multifedpredict_v0 import MultiFedAvgWithMultiFedPredictv0
@@ -156,6 +157,8 @@ def run(args):
         server = MultiFedAvgMDH
     elif args.strategy == "DMA-FL":
         server = DMAFLSynchronous
+    elif args.strategy == "AdaptiveFedAvg":
+        server = AdaptiveFedAvg
     elif args.strategy == "MultiFedAvgRR":
         server = MultiFedAvgRR
     elif args.strategy == "FedFairMMFL":

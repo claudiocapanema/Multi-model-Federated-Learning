@@ -51,7 +51,7 @@ SIGMA_MAX = 5.0             # gaussian blur max sigma
 SEED = 42
 
 
-class AdaptiveFedAvgClient(MultiFedAvg):
+class AdaptiveFedAvg(MultiFedAvg):
     def __init__(self, args, times):
         super().__init__(args, times)
 
@@ -68,10 +68,10 @@ class AdaptiveFedAvgClient(MultiFedAvg):
             print("set_clients error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def select_clients(self, t, me):
+    def update_learning_rate(self, t, me):
 
         try:
-            eta0 = LR_SERVER_INIT
+            eta0 = self.lr_dict[self.args.dataset[me]]
             eta_r = eta0 * (LR_DECAY ** (t - 1))
             if eta_r > eta0:  # just in case
                 eta_r = eta0
@@ -80,73 +80,79 @@ class AdaptiveFedAvgClient(MultiFedAvg):
                 label_map = None
                 blur_sigma = 0.0
 
-                if DRIFT_TYPE == "sudden" and t >= DRIFT_ROUND:
-                    # apply class-swap mapping to ALL client data permanently (as in paper)
-                    # build mapping dict once: swap pairs
-                    label_map = {}
-                    for a, b in CLASS_SWAP_PAIRS:
-                        label_map[a] = b
-                        label_map[b] = a
-                elif DRIFT_TYPE == "incremental" and t >= DRIFT_ROUND:
-                    # compute sigma increasing linearly from 0 to SIGMA_MAX over TD rounds
-                    t_since = t - DRIFT_ROUND
-                    if t_since >= TD:
-                        blur_sigma = SIGMA_MAX
-                    else:
-                        blur_sigma = (t_since / TD) * SIGMA_MAX
+                # if DRIFT_TYPE == "sudden" and t >= DRIFT_ROUND:
+                #     # apply class-swap mapping to ALL client data permanently (as in paper)
+                #     # build mapping dict once: swap pairs
+                #     label_map = {}
+                #     for a, b in CLASS_SWAP_PAIRS:
+                #         label_map[a] = b
+                #         label_map[b] = a
+                # elif DRIFT_TYPE == "incremental" and t >= DRIFT_ROUND:
+                #     # compute sigma increasing linearly from 0 to SIGMA_MAX over TD rounds
+                #     t_since = t - DRIFT_ROUND
+                #     if t_since >= TD:
+                #         blur_sigma = SIGMA_MAX
+                #     else:
+                #         blur_sigma = (t_since / TD) * SIGMA_MAX
 
-                client_dataset = self.clients[me].trainloader.dataset
-                # sample L_EST random samples (or all if fewer)
-                n_samples = min(L_EST, len(client_dataset))
-                if n_samples == 0:
-                    l_k = 0.0
-                else:
-                    # forward-pass loss estimate using global model (no grad)
-                    self.global_model[me].eval()
-                    l_sum = 0.0
-                    with torch.no_grad():
-                        for x_s, y_s in self.clients[cid].trainloader[me]:
-                            x_s, y_s = x_s.to(DEVICE), y_s.to(DEVICE)
-                            out = self.global_mode[me](x_s)
-                            l_sum += float(nn.CrossEntropyLoss(reduction='sum')(out, y_s))
-                    l_k = l_sum / n_samples
+                l_k = self.metrics_aggregated_mefl[me]["Loss"]
 
                 # Update EMAs for client cid following equations in paper
-                self.clients[cid].rounds_seen += 1
+                self.clients[cid].rounds_seen[me] += 1
                 # Mr = lr * (1 - beta1) + Mr-1 * beta1
-                self.clients[cid].M = l_k * (1.0 - BETA1) + self.clients[cid].M * BETA1
+                self.clients[cid].M[me] = l_k * (1.0 - BETA1) + self.clients[cid].M[me] * BETA1
                 # bias-corrected M_hat = M / (1 - beta1^r)
-                denom1 = (1 - (BETA1 ** self.clients[cid].rounds_seen)) if self.clients[cid].rounds_seen > 0 else 1.0
-                M_hat = self.clients[cid].M / (denom1 + 1e-12)
+                denom1 = (1 - (BETA1 ** self.clients[cid].rounds_seen[me])) if self.clients[cid].rounds_seen[me] > 0 else 1.0
+                M_hat = self.clients[cid].M[me] / (denom1 + 1e-12)
 
                 # Vr = (lr - M_{r-1})^2 * (1 - beta2) + Vr-1 * beta2
                 # note: paper uses Mr-1 inside; using M_hat_prev to follow bias-corrected prev
-                prev_M = self.clients[cid].M_hat_prev if self.clients[cid].rounds_seen > 1 else 0.0
-                self.clients[cid].V = ((l_k - prev_M) ** 2) * (1.0 - BETA2) + self.clients[cid].V * BETA2
-                denom2 = (1 - (BETA2 ** self.clients[cid].rounds_seen)) if self.clients[cid].rounds_seen > 0 else 1.0
-                V_hat = self.clients[cid].V / (denom2 + 1e-12)
+                prev_M = self.clients[cid].M_hat_prev[me] if self.clients[cid].rounds_seen[me] > 1 else 0.0
+                self.clients[cid].V[me] = ((l_k - prev_M) ** 2) * (1.0 - BETA2) + self.clients[cid].V[me] * BETA2
+                denom2 = (1 - (BETA2 ** self.clients[cid].rounds_seen[me])) if self.clients[cid].rounds_seen[me] > 0 else 1.0
+                V_hat = self.clients[cid].V[me] / (denom2 + 1e-12)
 
                 # Rr = (V_hat / V_hat_prev) * (1 - beta3) + R_{r-1} * beta3  (if V_hat_prev == 0 use 1*(1-beta3)+R_prev*beta3)
-                if self.clients[cid].V_hat_prev == 0.0:
+                if self.clients[cid].V_hat_prev[me] == 0.0:
                     ratio = 1.0
                 else:
-                    ratio = (V_hat / (self.clients[cid].V_hat_prev + 1e-12))
-                self.clients[cid].R = ratio * (1.0 - BETA3) + self.clients[cid].R * BETA3
-                denom3 = (1 - (BETA3 ** self.clients[cid].rounds_seen)) if self.clients[cid].rounds_seen > 0 else 1.0
-                R_hat = self.clients[cid].R / (denom3 + 1e-12)
+                    ratio = (V_hat / (self.clients[cid].V_hat_prev[me] + 1e-12))
+                self.clients[cid].R[me] = ratio * (1.0 - BETA3) + self.clients[cid].R[me] * BETA3
+                denom3 = (1 - (BETA3 ** self.clients[cid].rounds_seen[me])) if self.clients[cid].rounds_seen[me] > 0 else 1.0
+                R_hat = self.clients[cid].R[me] / (denom3 + 1e-12)
 
                 # compute local lr: eta_lr = min(eta0, eta_r * R_hat)
                 eta_lr = min(eta0, eta_r * (R_hat if R_hat > 0 else 1.0))
 
                 # store bias-corrected prev values for next round
-                self.clients[cid].M_hat_prev = M_hat
-                self.clients[cid].V_hat_prev = V_hat
+                self.clients[cid].M_hat_prev[me] = M_hat
+                self.clients[cid].V_hat_prev[me] = V_hat
 
                 # store computed local lr in client state for use when selected to train
-                self.clients[cid].local_lr = float(eta_lr)
+                self.clients[cid].local_lr[me] = float(eta_lr)
+                self.clients[cid].optimizer[me] = self.clients[cid].get_optimizer(dataset_name=self.args.dataset[me], me=me)
+                print(f'rodada {t} learning rate: {eta_lr} cliente {cid}')
 
         except Exception as e:
-            print("select_clients error")
+            print("update_learning_rate error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+    def aggregate_fit(
+            self,
+            server_round: int,
+            results,
+            failures,
+    ):
+        """Aggregate fit results using weighted average."""
+        try:
+
+            result = super().aggregate_fit(server_round, results, failures)
+            for me in range(self.ME):
+                self.update_learning_rate(server_round, me)
+            return result
+
+        except Exception as e:
+            print("aggregate_fit error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 

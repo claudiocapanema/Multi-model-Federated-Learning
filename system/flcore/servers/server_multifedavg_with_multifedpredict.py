@@ -83,6 +83,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
         self.fit_metrics_aggregation_fn = weighted_average_fit
         self.drift_flag = {me: [] for me in range(self.ME)}
         self.reduced = {me: [] for me in range(self.ME)}
+        self.reduction_fraction_list = {me: [] for me in range(self.ME)}
+        self.ps_list = {me: [] for me in range(self.ME)}
 
     def set_clients(self):
 
@@ -99,37 +101,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
         except Exception as e:
             print("set_clients error")
-            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
-
-    def detect_drift_ks(self, losses, window=5, alpha=0.05):
-
-        try:
-            """
-            Detecta drift usando teste de Kolmogorov-Smirnov.
-            Apenas aumentos são considerados drift.
-
-            Args:
-                losses (list[float]): histórico de valores de loss.
-                window (int): tamanho da janela de comparação.
-                alpha (float): nível de significância.
-
-            Returns:
-                bool: True se houve drift, False caso contrário.
-            """
-            if len(losses) < window + 1:
-                return False  # histórico insuficiente
-
-            history = np.array(losses[-(window + 1):-1])
-            last = np.array([losses[-1]] * len(history))  # simula distribuição do último valor
-
-            stat, p_value = ks_2samp(history, last)
-
-            # KS detecta diferença significativa (p < alpha)
-            # mas só consideramos se for aumento
-            return (p_value < alpha) and (losses[-1] > history.mean())
-
-        except Exception as e:
-            print("detect_drift_ks error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def aggregate_fit(
@@ -157,8 +128,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 client_id = result["client_id"]
                 self.selected_clients_m[me].append(client_id)
                 results_mefl[me].append(results[i])
-                drift_flag[me].append(result["non_iid"]["drift"])
-                reduced[me].append(result["non_iid"]["reduced"])
+                self.drift_flag[me].append(result["non_iid"]["drift"])
+                self.reduced[me].append(result["non_iid"]["reduced"])
 
             aggregated_ndarrays_mefl = {me: None for me in range(self.ME)}
             aggregated_ndarrays_mefl = {me: [] for me in range(self.ME)}
@@ -188,7 +159,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     fit_metrics = [(num_examples, metrics) for _, num_examples, metrics in results_mefl[me]]
                     metrics_aggregated_mefl[me] = self.fit_metrics_aggregation_fn(fit_metrics)
                     self.train_losses[me].append(metrics_aggregated_mefl[me]["Loss"])
-                    print(f"Teste data shift modelo {me} rodada {server_round} teste {drift_flag[me]} reduced {reduced[me]}")
+                    print(f"Teste data shift modelo {me} rodada {server_round} teste {self.drift_flag[me]} reduced {self.reduced[me]}")
                 else:
                     print("nao tem")
 
@@ -325,6 +296,37 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             print("aggregate error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
+    def detect_drift_ks(self, losses, window=5, alpha=0.05):
+
+        try:
+            """
+            Detecta drift usando teste de Kolmogorov-Smirnov.
+            Apenas aumentos são considerados drift.
+
+            Args:
+                losses (list[float]): histórico de valores de loss.
+                window (int): tamanho da janela de comparação.
+                alpha (float): nível de significância.
+
+            Returns:
+                bool: True se houve drift, False caso contrário.
+            """
+            if len(losses) < window + 1:
+                return False  # histórico insuficiente
+
+            history = np.array(losses[-(window + 1):-1])
+            last = np.array([losses[-1]] * len(history))  # simula distribuição do último valor
+
+            stat, p_value = ks_2samp(history, last)
+
+            # KS detecta diferença significativa (p < alpha)
+            # mas só consideramos se for aumento
+            return (p_value < alpha) and (losses[-1] > history.mean())
+
+        except Exception as e:
+            print("detect_drift_ks client error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
     def select_clients(self, t):
 
         try:
@@ -339,11 +341,33 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
             data_drift_model = -1
             #  or self.drift_flag or self.reduced[me].count(True) > self.reduced[me].count(False)
+            drift_degree = [0] * self.ME
+            drift_ps = [0] * self.ME
             for me in range(self.ME):
-                if self.ps[me] > 0 or self.increased_training_intensity[me] > 0:
-                    data_drift_model = me
+                if len(self.reduced[me]) > 0:
+                    reduction_fraction = self.reduced[me].count(True) / len(self.reduced[me])
+                    reduction_fraction_list = copy.deepcopy(self.reduction_fraction_list[me])
+                    reduction_fraction_list.append(reduction_fraction)
+                    if self.detect_drift_ks(reduction_fraction_list, window=5, alpha=0.05):
+                        drift_degree[me] = reduction_fraction
+                    else:
+                        drift_degree[me] = 0
+                        self.reduction_fraction_list[me].append(reduction_fraction)
+                    self.reduction_fraction_list[me].append(reduction_fraction)
+                if len(self.ps_list[me]) == 0:
+                    self.ps_list[me].append(self.ps[me])
+                else:
+                    ps_list = copy.deepcopy(self.ps_list[me])
+                    ps_list.append(self.ps[me])
+                    if self.detect_drift_ks(ps_list, window=5, alpha=0.05):
+                        drift_ps[me] = self.ps[me]
+                    else:
+                        self.ps_list[me].append(self.ps[me])
+                        drift_ps[me] = 0
+                if (drift_degree > 0.5) or self.increased_training_intensity[me] > 0:
+                        data_drift_model = me
 
-
+            print(f"##rodada {t} data_drift_model = {data_drift_model} drift_ps {drift_ps} drift degree = {drift_degree}")
             if data_drift_model > -1:
                 self.increased_training_intensity[data_drift_model] += 1
 
