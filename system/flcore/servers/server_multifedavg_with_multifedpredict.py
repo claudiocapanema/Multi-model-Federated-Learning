@@ -393,8 +393,13 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     else:
                         self.ps_list[me].append(self.ps[me])
                         drift_ps[me] = 0
-                if (drift_degree[me] > 0.5) or self.increased_training_intensity[me] > 0:
+                if (drift_degree[me] > 0.5 and drift_ps[me] > 0) or self.increased_training_intensity[me] > 0:
                         data_drift_model = me
+                        if drift_degree[me] > 0.5 and drift_ps[me] > 0:
+                            data_shift_untrained_clients = (self.total_clients - len(self.reduced[me])) * drift_degree[me]
+                            rounds_needed = data_shift_untrained_clients // self.num_training_clients
+                            self.max_number_of_rounds_data_drift_adaptation = rounds_needed
+
 
             print(f"##rodada {t} data_drift_model = {data_drift_model} drift_ps {drift_ps} drift degree = {drift_degree}")
             if data_drift_model > -1:
