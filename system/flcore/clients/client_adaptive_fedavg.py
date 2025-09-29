@@ -47,95 +47,33 @@ class AdaptiveFedAvgClient(MultiFedAvgClient):
     def __init__(self, args, id, model):
         try:
             super().__init__(args, id,  model)
-            self.M = 0.0
-            self.V = 0.0
-            self.R = 0.0
-            self.rounds_seen = 0  # used for bias correction power
+            self.M = [0] * self.ME
+            self.V = [0] * self.ME
+            self.R = [0] * self.ME
+            self.rounds_seen = [0] * self.ME  # used for bias correction power
             # store last bias-corrected values for denominator (for ratio)
-            self.M_hat_prev = 0.0
-            self.V_hat_prev = 0.0
+            self.M_hat_prev = [0] * self.ME
+            self.V_hat_prev = [0] * self.ME
+            self.local_lr = [self.lr_dict[name] for name in self.args.dataset]
         except Exception as e:
             print("__init__ error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def aggregate_fit(
-        self,
-        server_round: int,
-        results,
-        failures,
-    ):
-        """Aggregate fit results using weighted average."""
+    def get_optimizer(self, dataset_name, me):
         try:
-
-            self.selected_clients_m = [[] for me in range(self.ME)]
-
-            trained_models = []
-
-            results_mefl = {me: [] for me in range(self.ME)}
-            for i in range(len(results)):
-                parameter, num_examples, result = results[i]
-                me = result["me"]
-                if me not in trained_models:
-                    trained_models.append(me)
-                client_id = result["client_id"]
-                self.selected_clients_m[me].append(client_id)
-                results_mefl[me].append(results[i])
-
-
-            aggregated_ndarrays_mefl = {me: None for me in range(self.ME)}
-            aggregated_ndarrays_mefl = {me: [] for me in range(self.ME)}
-            weights_results_mefl = {me: [] for me in range(self.ME)}
-            # parameters_aggregated_mefl = {me: [] for me in range(self.ME)}
-
-            for me in trained_models:
-                # Convert results
-                weights_results = [
-                    (parameters, num_examples)
-                    for parameters, num_examples, fit_res in results_mefl[me]
-                ]
-                aggregated_ndarrays_mefl[me] = aggregate(weights_results)
-                if len(weights_results) > 1:
-                    aggregated_ndarrays_mefl[me] = aggregate(weights_results)
-                elif len(weights_results) == 1:
-                    aggregated_ndarrays_mefl[me] = results_mefl[me][0][0]
-
-            for me in trained_models:
-                self.parameters_aggregated_mefl[me] = aggregated_ndarrays_mefl[me]
-
-            # Aggregate custom metrics if aggregation fn was provided
-            metrics_aggregated_mefl = {me: [] for me in range(self.ME)}
-            for me in trained_models:
-                if self.fit_metrics_aggregation_fn:
-                    fit_metrics = [(num_examples, metrics) for _, num_examples, metrics in results_mefl[me]]
-                    metrics_aggregated_mefl[me] = self.fit_metrics_aggregation_fn(fit_metrics)
-
-            print("""finalizou aggregated fit""")
-
-            self.parameters_aggregated_mefl = self.parameters_aggregated_mefl
-            self.metrics_aggregated_mefl = metrics_aggregated_mefl
-
-            return self.parameters_aggregated_mefl, metrics_aggregated_mefl
+            return {
+                    'EMNIST': torch.optim.SGD(self.model[me].parameters(), lr=self.local_lr[me], momentum=0.9),
+                    'MNIST': torch.optim.SGD(self.model[me].parameters(), lr=self.local_lr[me], momentum=0.9),
+                    'CIFAR10': torch.optim.SGD(self.model[me].parameters(), lr=self.local_lr[me], momentum=0.9),
+                    'GTSRB': torch.optim.SGD(self.model[me].parameters(), lr=self.local_lr[me], momentum=0.9),
+                    'WISDM-W': torch.optim.RMSprop(self.model[me].parameters(), lr=self.local_lr[me], momentum=0.9),
+                    'WISDM-P': torch.optim.RMSprop(self.model[me].parameters(), lr=self.local_lr[me], momentum=0.9),
+                    'ImageNet100': torch.optim.SGD(self.model[me].parameters(), lr=self.local_lr[me], momentum=0.9),
+                    'ImageNet': torch.optim.SGD(self.model[me].parameters(), lr=self.local_lr[me]),
+                    'ImageNet10': torch.optim.SGD(self.model[me].parameters(), lr=self.local_lr[me]),
+                    "ImageNet_v2": torch.optim.Adam(self.model[me].parameters(), lr=self.local_lr[me]),
+                    "Gowalla": torch.optim.RMSprop(self.model[me].parameters(), lr=self.local_lr[me]),
+                    "wikitext": torch.optim.RMSprop(self.model[me].parameters(), lr=self.local_lr[me])}[dataset_name]
         except Exception as e:
-            print("aggregate_fit error")
-            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
-
-    def evaluate(self, me, t, global_model, metrics):
-        """Evaluate the model on the data this client has."""
-        try:
-            g = torch.Generator()
-            g.manual_seed(t)
-            random.seed(t)
-            np.random.seed(t)
-            torch.manual_seed(t)
-
-            loss, metrics = test(self.model, self.valloader[me], self.device, self.client_id, t,
-                                 self.args.dataset[me], self.n_classes[me], self.concept_drift_window[me])
-            metrics["Model size"] = self.models_size[me]
-            metrics["Dataset size"] = len(self.valloader[me].dataset)
-            metrics["me"] = me
-            metrics["Alpha"] = self.alpha[me]
-            tuple_me = (loss, len(self.valloader[me].dataset), metrics)
-            return loss, len(self.valloader[me].dataset), tuple_me
-        except Exception as e:
-            print("evaluate error")
+            print("_get_optimizer error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))

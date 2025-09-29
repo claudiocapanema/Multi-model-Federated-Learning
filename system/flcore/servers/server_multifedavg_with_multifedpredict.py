@@ -26,6 +26,7 @@ from flcore.servers.server_multifedavg_with_multifedpredict_v0 import MultiFedAv
 import sys
 from fedpredict import fedpredict_server, fedpredict_layerwise_similarity
 import flwr
+import math
 from flwr.common import (
     EvaluateIns,
     ndarrays_to_parameters,
@@ -327,6 +328,31 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             print("detect_drift_ks client error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
+    def binomial(self, sucessos, n_treinados):
+
+        try:
+            # Dados observados
+            frac_treinados = sucessos / n_treinados
+
+            # Prior uniforme Beta(1,1)
+            alpha_prior, beta_prior = 2, 2
+
+            # Posterior Beta(alpha+sucessos, beta+(n-sucessos))
+            alpha_post = alpha_prior + sucessos
+            beta_post = beta_prior + (n_treinados - sucessos)
+
+            print(f"Posterior: Beta({alpha_post}, {beta_post})")
+
+            # Probabilidade esperada (valor médio de p)
+            p_media = alpha_post / (alpha_post + beta_post)
+            print(f"Probabilidade esperada de um cliente não-treinado ter acurácia menor: {p_media:.4f}")
+
+            return p_media
+
+        except Exception as e:
+            print("binomial error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
     def select_clients(self, t):
 
         try:
@@ -345,15 +371,18 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             drift_ps = [0] * self.ME
             for me in range(self.ME):
                 if len(self.reduced[me]) > 0:
-                    reduction_fraction = self.reduced[me].count(True) / len(self.reduced[me])
+                    # reduction_fraction = self.reduced[me].count(True) / len(self.reduced[me])
+                    n_clients_reduced = self.reduced[me].count(True)
+                    n_clients = len(self.reduced[me])
+                    reduction_probability = self.binomial(n_clients_reduced, n_clients)
                     reduction_fraction_list = copy.deepcopy(self.reduction_fraction_list[me])
-                    reduction_fraction_list.append(reduction_fraction)
+                    reduction_fraction_list.append(reduction_probability)
                     if self.detect_drift_ks(reduction_fraction_list, window=5, alpha=0.05):
-                        drift_degree[me] = reduction_fraction
+                        drift_degree[me] = reduction_probability
                     else:
                         drift_degree[me] = 0
-                        self.reduction_fraction_list[me].append(reduction_fraction)
-                    self.reduction_fraction_list[me].append(reduction_fraction)
+                        self.reduction_fraction_list[me].append(reduction_probability)
+                    self.reduction_fraction_list[me].append(reduction_probability)
                 if len(self.ps_list[me]) == 0:
                     self.ps_list[me].append(self.ps[me])
                 else:
@@ -364,7 +393,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     else:
                         self.ps_list[me].append(self.ps[me])
                         drift_ps[me] = 0
-                if (drift_degree > 0.5) or self.increased_training_intensity[me] > 0:
+                if (drift_degree[me] > 0.5) or self.increased_training_intensity[me] > 0:
                         data_drift_model = me
 
             print(f"##rodada {t} data_drift_model = {data_drift_model} drift_ps {drift_ps} drift degree = {drift_degree}")

@@ -194,6 +194,18 @@ class MultiFedAvgClient:
             self.batch_size = []
             for dataset in args.dataset:
                 self.batch_size.append({"CIFAR10": 32, "WISDM-W": 16, "ImageNet10": 10, "Gowalla": 64, "wikitext": 256}[dataset])
+            self.lr_dict = {'EMNIST':0.01,
+                            'MNIST': 0.01,
+                            'CIFAR10': 0.01,
+                            'GTSRB': 0.01,
+                            'WISDM-W': 0.001,
+                            'WISDM-P': 0.001,
+                            'ImageNet100': 0.01,
+                            'ImageNet': 0.1,
+                            'ImageNet10': 0.01,
+                            "ImageNet_v2": 0.01,
+                            "Gowalla": 0.001,
+                            "wikitext": 0.001}
             self.model = model
             self.alpha = [float(i) for i in args.alpha]
             self.initial_alpha = self.alpha
@@ -451,18 +463,18 @@ class MultiFedAvgClient:
     def _get_optimizer(self, dataset_name, me):
         try:
             return {
-                    'EMNIST': torch.optim.SGD(self.model[me].parameters(), lr=0.01, momentum=0.9),
-                    'MNIST': torch.optim.SGD(self.model[me].parameters(), lr=0.01, momentum=0.9),
-                    'CIFAR10': torch.optim.SGD(self.model[me].parameters(), lr=0.01, momentum=0.9),
-                    'GTSRB': torch.optim.SGD(self.model[me].parameters(), lr=0.01, momentum=0.9),
-                    'WISDM-W': torch.optim.RMSprop(self.model[me].parameters(), lr=0.001, momentum=0.9),
-                    'WISDM-P': torch.optim.RMSprop(self.model[me].parameters(), lr=0.001, momentum=0.9),
-                    'ImageNet100': torch.optim.SGD(self.model[me].parameters(), lr=0.01, momentum=0.9),
-                    'ImageNet': torch.optim.SGD(self.model[me].parameters(), lr=0.1),
-                    'ImageNet10': torch.optim.SGD(self.model[me].parameters(), lr=0.01),
-                    "ImageNet_v2": torch.optim.Adam(self.model[me].parameters(), lr=0.01),
-                    "Gowalla": torch.optim.RMSprop(self.model[me].parameters(), lr=0.001),
-                    "wikitext": torch.optim.RMSprop(self.model[me].parameters(), lr=0.001)}[dataset_name]
+                    'EMNIST': torch.optim.SGD(self.model[me].parameters(), self.lr_dict[dataset_name], momentum=0.9),
+                    'MNIST': torch.optim.SGD(self.model[me].parameters(), self.lr_dict[dataset_name], momentum=0.9),
+                    'CIFAR10': torch.optim.SGD(self.model[me].parameters(), self.lr_dict[dataset_name], momentum=0.9),
+                    'GTSRB': torch.optim.SGD(self.model[me].parameters(), self.lr_dict[dataset_name], momentum=0.9),
+                    'WISDM-W': torch.optim.RMSprop(self.model[me].parameters(), self.lr_dict[dataset_name], momentum=0.9),
+                    'WISDM-P': torch.optim.RMSprop(self.model[me].parameters(), self.lr_dict[dataset_name], momentum=0.9),
+                    'ImageNet100': torch.optim.SGD(self.model[me].parameters(), self.lr_dict[dataset_name], momentum=0.9),
+                    'ImageNet': torch.optim.SGD(self.model[me].parameters(), self.lr_dict[dataset_name]),
+                    'ImageNet10': torch.optim.SGD(self.model[me].parameters(), self.lr_dict[dataset_name]),
+                    "ImageNet_v2": torch.optim.Adam(self.model[me].parameters(), self.lr_dict[dataset_name]),
+                    "Gowalla": torch.optim.RMSprop(self.model[me].parameters(), self.lr_dict[dataset_name]),
+                    "wikitext": torch.optim.RMSprop(self.model[me].parameters(), self.lr_dict[dataset_name])}[dataset_name]
         except Exception as e:
             print("_get_optimizer error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
