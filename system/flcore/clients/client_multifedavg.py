@@ -23,7 +23,7 @@ import torch
 import numpy as np
 from .utils.models_utils import load_model, get_weights, load_data, set_weights, test, train
 
-def label_shift_config(ME, n_rounds, alphas, experiment_id, seed=0):
+def label_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds, seed=0):
     try:
         np.random.seed(seed)
         if len(experiment_id) > 0:
@@ -47,10 +47,32 @@ def label_shift_config(ME, n_rounds, alphas, experiment_id, seed=0):
                 type_ = "label_shift"
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "type": type_} for me in range(ME)}
+            elif experiment_id == "label_shift#3_gradual":
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2) + client_id // gradual_rounds,
+                                            int(n_rounds * 0.5) + client_id // gradual_rounds],
+                                           [int(n_rounds * 0.3) + client_id // gradual_rounds,
+                                            int(n_rounds * 0.6) + client_id // gradual_rounds],
+                                           [int(n_rounds * 0.4) + client_id // gradual_rounds,
+                                            int(n_rounds * 0.7) + client_id // gradual_rounds]]
+                new_alphas = [[10.0, 0.1], [10.0, 0.1], [10.0, 0.1]]
+                type_ = "label_shift"
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
             elif experiment_id == "label_shift#4":
                 ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5)],
                                            [int(n_rounds * 0.3), int(n_rounds * 0.6)],
                                            [int(n_rounds * 0.4), int(n_rounds * 0.7)]]
+                new_alphas = [[0.1, 10.0], [0.1, 10.0], [0.1, 10.0]]
+                type_ = "label_shift"
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
+            elif experiment_id == "label_shift#4_gradual":
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2) + client_id // gradual_rounds,
+                                            int(n_rounds * 0.5) + client_id // gradual_rounds],
+                                           [int(n_rounds * 0.3) + client_id // gradual_rounds,
+                                            int(n_rounds * 0.6) + client_id // gradual_rounds],
+                                           [int(n_rounds * 0.4) + client_id // gradual_rounds,
+                                            int(n_rounds * 0.7) + client_id // gradual_rounds]]
                 new_alphas = [[0.1, 10.0], [0.1, 10.0], [0.1, 10.0]]
                 type_ = "label_shift"
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
@@ -77,12 +99,12 @@ def label_shift_config(ME, n_rounds, alphas, experiment_id, seed=0):
         print("label_shift_config error")
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-def global_concept_drift_config(ME, n_rounds, alphas, experiment_id, seed=0):
+def global_concept_drift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds, seed=0):
     try:
         np.random.seed(seed)
         if len(experiment_id) > 0:
             type_ = "no_drift"
-            if experiment_id == "concept_drift#1" in experiment_id:
+            if experiment_id in ["concept_drift#1", "concept_drift#1_recurrent"]:
                 ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5)],
                                            [int(n_rounds * 0.3), int(n_rounds * 0.6)],
                                            [int(n_rounds * 0.4), int(n_rounds * 0.7)]]
@@ -91,12 +113,36 @@ def global_concept_drift_config(ME, n_rounds, alphas, experiment_id, seed=0):
 
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "type": type_} for me in range(ME)}
-            elif "concept_drift#2" in experiment_id:
+            elif experiment_id == "concept_drift#1_gradual":
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2) + client_id // gradual_rounds,
+                                            int(n_rounds * 0.5) + client_id // gradual_rounds],
+                                           [int(n_rounds * 0.3) + client_id // gradual_rounds,
+                                            int(n_rounds * 0.6) + client_id // gradual_rounds],
+                                           [int(n_rounds * 0.4) + client_id // gradual_rounds,
+                                            int(n_rounds * 0.7) + client_id // gradual_rounds]]
+                new_alphas = [[0.1, 0.1], [0.1, 0.1], [0.1, 0.1]]
+                type_ = "concept_drift"
+
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
+            elif experiment_id in ["concept_drift#2", "concept_drift#2_recurrent"]:
                 ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5)],
                                            [int(n_rounds * 0.3), int(n_rounds * 0.6)],
                                            [int(n_rounds * 0.4), int(n_rounds * 0.7)]]
                 new_alphas = [[10.0, 10.0], [10.0, 10.0], [10.0, 10.0]]
                 type_ = "concept_drift"
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
+            elif experiment_id == "concept_drift#2_gradual":
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2) + client_id // gradual_rounds,
+                                            int(n_rounds * 0.5) + client_id // gradual_rounds],
+                                           [int(n_rounds * 0.3) + client_id // gradual_rounds,
+                                            int(n_rounds * 0.6) + client_id // gradual_rounds],
+                                           [int(n_rounds * 0.4) + client_id // gradual_rounds,
+                                            int(n_rounds * 0.7) + client_id // gradual_rounds]]
+                new_alphas = [[10.0, 10.0], [10.0, 10.0], [10.0, 10.0]]
+                type_ = "concept_drift"
+
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "type": type_} for me in range(ME)}
             elif "concept_drift#3" in experiment_id:
@@ -167,14 +213,14 @@ def global_concept_drift_config(ME, n_rounds, alphas, experiment_id, seed=0):
         print("global_concept_drift_config error")
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-def get_data_shift_config(ME, n_rounds, alphas, experiment_id):
+def get_data_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds):
 
     try:
 
         if "label_shift" in experiment_id:
-            return label_shift_config(ME, n_rounds, alphas, experiment_id)
+            return label_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds)
         elif "concept_drift" in experiment_id:
-            return global_concept_drift_config(ME, n_rounds, alphas, experiment_id)
+            return global_concept_drift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds)
         else:
             return {}
 
@@ -209,6 +255,7 @@ class MultiFedAvgClient:
             self.model = model
             self.alpha = [float(i) for i in args.alpha]
             self.initial_alpha = self.alpha
+            self.total_clients  = args.total_clients
             self.ME = len(self.model)
             self.number_of_rounds = args.number_of_rounds
             print("Preparing data...")
@@ -232,7 +279,8 @@ class MultiFedAvgClient:
             self.loss_ME = [10] * self.ME
             # Concept drift parameters
             self.experiment_id = self.args.experiment_id
-            self.data_shift_config = get_data_shift_config(self.ME, self.number_of_rounds, self.alpha, self.experiment_id)
+            self.gradual_rounds = 5
+            self.data_shift_config = get_data_shift_config(self.ME, self.number_of_rounds, self.alpha, self.experiment_id, self.client_id, gradual_rounds=self.total_clients // self.gradual_rounds)
             self.concept_drift_window = [0] * self.ME
             self.data_shift_train_data = False
 
