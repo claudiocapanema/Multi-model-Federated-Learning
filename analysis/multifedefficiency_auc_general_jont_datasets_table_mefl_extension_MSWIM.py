@@ -20,9 +20,9 @@ def read_data(read_solutions, read_dataset_order):
         "FedKD": {"Strategy": "FedKD", "Version": "Original", "Table": "FedKD"},
         "FedKD+FP": {"Strategy": "FedKD", "Version": "FP", "Table": "FedKD+FP"},
         "MultiFedAvg+MFP": {"Strategy": "MultiFedAvg", "Version": "MFP", "Table": "MultiFedAvg+MFP"},
-        "MultiFedAvg+MFP_v2": {"Strategy": "MultiFedAvg", "Version": "MFP_v2", "Table": "MultiFedAvg+MFP_v2"},
-        "MultiFedAvg+MFP_v2_dh": {"Strategy": "MultiFedAvg", "Version": "MFP_v2_dh", "Table": "MultiFedAvg+MFP_v2_dh"},
-        "MultiFedAvg+MFP_v2_iti": {"Strategy": "MultiFedAvg", "Version": "MFP_v2_iti", "Table": "MultiFedAvg+MFP_v2_iti"},
+        "MultiFedAvg+MFP_v2": {"Strategy": "MultiFedAvg", "Version": "MFP_v2", "Table": "MultiFedAvg+MFP_{v2}"},
+        "MultiFedAvg+MFP_v2_dh": {"Strategy": "MultiFedAvg", "Version": "MFP_v2_dh", "Table": "MultiFedAvg+MFP_{v2}_{dh}"},
+        "MultiFedAvg+MFP_v2_iti": {"Strategy": "MultiFedAvg", "Version": "MFP_v2_iti", "Table": "MultiFedAvg+MFP_{v2}_{iti}"},
         "MultiFedAvg+FPD": {"Strategy": "MultiFedAvg", "Version": "FPD", "Table": "MultiFedAvg+FPD"},
         "MultiFedAvg+FP": {"Strategy": "MultiFedAvg", "Version": "FP", "Table": "MultiFedAvg+FP"},
         "MultiFedAvg": {"Strategy": "MultiFedAvg", "Version": "Original", "Table": "MultiFedAvg"},
@@ -202,7 +202,7 @@ def table(df, write_path, metric, t=None):
 
 def improvements(df, datasets, metric):
     # , "FedKD+FP": "FedKD"
-    strategies = {"MultiFedAvg+MFP_v2": "MultiFedAvg", "MultiFedAvg+MFP_v2_dh": "MultiFedAvg", "MultiFedAvg+MFP_v2_iti": "MultiFedAvg", "MultiFedAvg+MFP": "MultiFedAvg", "MultiFedAvg+FP": "MultiFedAvg"}
+    strategies = {"MultiFedAvg+MFP_{v2}": "MultiFedAvg", "MultiFedAvg+MFP_{v2}_{dh}": "MultiFedAvg", "MultiFedAvg+MFP_{v2}_{iti}": "MultiFedAvg", "MultiFedAvg+MFP": "MultiFedAvg", "MultiFedAvg+FP": "MultiFedAvg"}
     # strategies = {r"MultiFedAvg+FP": "MultiFedAvg"}
     columns = df.columns.tolist()
     improvements_dict = {'Dataset': [], 'Table': [], 'Original strategy': [], 'Alpha': [], metric: []}
@@ -282,7 +282,7 @@ def accuracy_improvement(df, datasets):
     # reference_solutions = {"MultiFedAvg+FP": "MultiFedAvg", "MultiFedAvgGlobalModelEval+FP": "MultiFedAvgGlobalModelEval"}
     # ,
     #                            "FedKD+FP": "FedKD"
-    reference_solutions = {"MultiFedAvg+MFP_v2": "MultiFedAvg", "MultiFedAvg+MFP_v2_dh": "MultiFedAvg", "MultiFedAvg+MFP_v2_iti": "MultiFedAvg", "MultiFedAvg+MFP": "MultiFedAvg", "MultiFedAvg+FP": "MultiFedAvg"}
+    reference_solutions = {"MultiFedAvg+MFP_{v2}": "MultiFedAvg", "MultiFedAvg+MFP_{v2}_{dh}": "MultiFedAvg", "MultiFedAvg+MFP_{v2}_{iti}": "MultiFedAvg", "MultiFedAvg+MFP": "MultiFedAvg", "MultiFedAvg+FP": "MultiFedAvg"}
 
     print(df_difference)
     # exit()
@@ -358,16 +358,18 @@ if __name__ == "__main__":
     # experiment_id = "label_shift#3_gradual"
     # experiment_id = "label_shift#4"
     # experiment_id = "label_shift#4_gradual"
+    # experiment_id = "label_shift#5"
+    experiment_id = "label_shift#6"
     # experiment_id = "concept_drift#1"
     # experiment_id = "concept_drift#2"
-    experiment_id = "concept_drift#1_gradual"
+    # experiment_id = "concept_drift#1_gradual"
     # experiment_id = "concept_drift#2_gradual"
     # experiment_id = "concept_drift#1_recurrent"
     # experiment_id = "concept_drift#2_recurrent"
     total_clients = 40
     # alphas = [10.0, 10.0]
-    alphas = [0.1, 0.1, 0.1]
-    # alphas = [10.0, 10.0, 10.0]
+    # alphas = [0.1, 0.1, 0.1]
+    alphas = [10.0, 10.0, 10.0]
     # alphas = [1.0, 0.1, 0.1]
     # alphas = [0.1, 0.1]
     # alphas = [10.0]
