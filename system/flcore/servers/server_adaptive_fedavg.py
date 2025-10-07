@@ -54,6 +54,18 @@ SEED = 42
 class AdaptiveFedAvg(MultiFedAvg):
     def __init__(self, args, times):
         super().__init__(args, times)
+        self.lr_dict = {'EMNIST': 0.01,
+                        'MNIST': 0.01,
+                        'CIFAR10': 0.01,
+                        'GTSRB': 0.01,
+                        'WISDM-W': 0.001,
+                        'WISDM-P': 0.001,
+                        'ImageNet100': 0.01,
+                        'ImageNet': 0.1,
+                        'ImageNet10': 0.01,
+                        "ImageNet_v2": 0.01,
+                        "Gowalla": 0.001,
+                        "wikitext": 0.001}
 
     def set_clients(self):
 
