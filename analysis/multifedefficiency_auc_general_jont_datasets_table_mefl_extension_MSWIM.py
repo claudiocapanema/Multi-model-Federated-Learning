@@ -204,7 +204,9 @@ def table(df, write_path, metric, t=None):
 
 def improvements(df, datasets, metric):
     # , "FedKD+FP": "FedKD"
-    strategies = {"$MultiFedAvg+MFP_{v2}$": "MultiFedAvg", "$MultiFedAvg+MFP_{v2dh}$": "MultiFedAvg", "$MultiFedAvg+MFP_{v2iti}$": "MultiFedAvg", "MultiFedAvg+MFP": "MultiFedAvg", "MultiFedAvg+FP": "MultiFedAvg", "DMA-FL": "MultiFedAvg", "AdaptiveFedAvg": "MultiFedAvg"}
+    indexes = df.index.tolist()
+    solutions = pd.Series([i[1] for i in indexes]).unique().tolist()
+    strategies = {solution: "MultiFedAvg" for solution in solutions}
     # strategies = {r"MultiFedAvg+FP": "MultiFedAvg"}
     columns = df.columns.tolist()
     improvements_dict = {'Dataset': [], 'Table': [], 'Original strategy': [], 'Alpha': [], metric: []}
@@ -284,7 +286,7 @@ def accuracy_improvement(df, datasets):
     # reference_solutions = {"MultiFedAvg+FP": "MultiFedAvg", "MultiFedAvgGlobalModelEval+FP": "MultiFedAvgGlobalModelEval"}
     # ,
     #                            "FedKD+FP": "FedKD"
-    reference_solutions = {"$MultiFedAvg+MFP_{v2}$": "MultiFedAvg", "$MultiFedAvg+MFP_{v2dh}$": "MultiFedAvg", "$MultiFedAvg+MFP_{v2iti}$": "MultiFedAvg", "MultiFedAvg+MFP": "MultiFedAvg", "MultiFedAvg+FP": "MultiFedAvg", "DMA-FL": "MultiFedAvg", "AdaptiveFedAvg": "MultiFedAvg"}
+    reference_solutions = {solution: "MultiFedAvg" for solution in solutions}
 
     print(df_difference)
     # exit()
@@ -356,13 +358,13 @@ def idmax(df, n_solutions):
 if __name__ == "__main__":
     # experiment_id = "label_shift#1"
     # experiment_id = "label_shift#2"
-    experiment_id = "label_shift#3"
+    # experiment_id = "label_shift#3"
     # experiment_id = "label_shift#3_gradual"
     # experiment_id = "label_shift#4"
     # experiment_id = "label_shift#4_gradual"
     # experiment_id = "label_shift#5"
     # experiment_id = "label_shift#6"
-    # experiment_id = "concept_drift#1"
+    experiment_id = "concept_drift#1"
     # experiment_id = "concept_drift#2"
     # experiment_id = "concept_drift#1_gradual"
     # experiment_id = "concept_drift#2_gradual"
