@@ -383,13 +383,13 @@ if __name__ == "__main__":
     # experiment_id = "label_shift#3_gradual"
     # experiment_id = "label_shift#4"
     # experiment_id = "label_shift#4_gradual"
-    # experiment_id = "label_shift#5"
+    experiment_id = "label_shift#5"
     # experiment_id = "label_shift#6"
     # experiment_id = "concept_drift#1"
     # experiment_id = "concept_drift#2"
     # experiment_id = "concept_drift#1_gradual"
     # experiment_id = "concept_drift#2_gradual"
-    experiment_id = "concept_drift#1_recurrent"
+    # experiment_id = "concept_drift#1_recurrent"
     # experiment_id = "concept_drift#2_recurrent"
     total_clients = 40
     # alphas = [10.0, 10.0]
