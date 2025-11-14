@@ -67,7 +67,7 @@ def label_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_r
                 ME_concept_drift_rounds = [[int(n_rounds * 0.3)],
                                            [int(n_rounds * 0.5)],
                                            [int(n_rounds * 0.7)]]
-                new_alphas = [[10.0], [10.0], [10.0]]
+                new_alphas = [[0.1], [0.1], [0.1]]
                 type_ = "label_shift"
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "type": type_} for me in range(ME)}
@@ -75,7 +75,7 @@ def label_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_r
                 ME_concept_drift_rounds = [[int(n_rounds * 0.3) + client_id // gradual_rounds],
                                            [int(n_rounds * 0.5) + client_id // gradual_rounds],
                                            [int(n_rounds * 0.7) + client_id // gradual_rounds]]
-                new_alphas = [[10.0], [10.0], [10.0]]
+                new_alphas = [[0.1], [0.1], [0.1]]
                 type_ = "label_shift"
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "type": type_} for me in range(ME)}
@@ -83,7 +83,7 @@ def label_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_r
                 ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5)],
                                            [int(n_rounds * 0.3), int(n_rounds * 0.6)],
                                            [int(n_rounds * 0.4), int(n_rounds * 0.7)]]
-                new_alphas = [[10.0, 0.1], [10.0, 0.1], [10.0, 0.1]]
+                new_alphas = [[0.1, 10.0], [0.1, 10.0], [0.1, 10.0]]
                 type_ = "label_shift"
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "type": type_} for me in range(ME)}
@@ -404,6 +404,7 @@ class MultiFedAvgClient:
             results["me"] = me
             results["client_id"] = self.client_id
             results["Model size"] = self.models_size[me]
+            results["alpha"] = self.alpha[me]
             self.loss_ME[me] = results["train_loss"]
             return get_weights(self.model[me]), len(self.trainloader[me].dataset), results
         except Exception as e:

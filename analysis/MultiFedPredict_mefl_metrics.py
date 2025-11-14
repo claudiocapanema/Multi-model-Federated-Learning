@@ -18,10 +18,17 @@ def read_data(read_solutions, read_dataset_order):
         "FedKD": {"Strategy": "FedKD", "Version": "Original", "Table": "FedKD"},
         "FedKD+FP": {"Strategy": "FedKD", "Version": "FP", "Table": "FedKD+FP"},
         "MultiFedAvg+MFP": {"Strategy": "MultiFedAvg", "Version": "MFP", "Table": "MultiFedAvg+MFP"},
+        "MultiFedAvg+MFP_v2": {"Strategy": "MultiFedAvg", "Version": "MFP_v2", "Table": "$MultiFedAvg+MFP_{v2}$"},
+        "MultiFedAvg+MFP_v2_dh": {"Strategy": "MultiFedAvg", "Version": "MFP_v2_dh", "Table": "$MultiFedAvg+MFP_{v2dh}$"},
+        "MultiFedAvg+MFP_v2_iti": {"Strategy": "MultiFedAvg", "Version": "MFP_v2_iti", "Table": "$MultiFedAvg+MFP_{v2iti}$"},
         "MultiFedAvg+FPD": {"Strategy": "MultiFedAvg", "Version": "FPD", "Table": "MultiFedAvg+FPD"},
         "MultiFedAvg+FP": {"Strategy": "MultiFedAvg", "Version": "FP", "Table": "MultiFedAvg+FP"},
         "MultiFedAvg": {"Strategy": "MultiFedAvg", "Version": "Original", "Table": "MultiFedAvg"},
-        "MultiFedAvgRR": {"Strategy": "MultiFedAvgRR", "Version": "Original", "Table": "MultiFedAvgRR"}
+        "MultiFedAvgRR": {"Strategy": "MultiFedAvgRR", "Version": "Original", "Table": "MultiFedAvgRR"},
+        "FedFairMMFL": {"Strategy": "FedFairMMFL", "Version": "Original", "Table": "FedFairMMFL"},
+        "MultiFedAvg-MDH": {"Strategy": "MultiFedAvg-MDH", "Version": "Original", "Table": "MultiFedAvg-MDH"},
+        "DMA-FL": {"Strategy": "DMA-FL", "Version": "Original", "Table": "DMA-FL"},
+        "AdaptiveFedAvg": {"Strategy": "AdaptiveFedAvg", "Version": "Original", "Table": "AdaptiveFedAvg"}
     }
     hue_order = []
     for solution in read_solutions:
@@ -33,7 +40,7 @@ def read_data(read_solutions, read_dataset_order):
                 path = paths[i]
                 df = pd.read_csv(path)
                 df["Solution"] = np.array([solution] * len(df))
-                df["Dataset"] = np.array([dataset.replace("WISDM-W", "WISDM").replace("ImageNet", "ImageNet-15")] * len(df))
+                df["Dataset"] = np.array([dataset.replace("WISDM-W", "WISDM")] * len(df))
                 df["Strategy"] = np.array([solution_strategy_version[solution]["Strategy"]] * len(df))
                 df["Version"] = np.array([solution_strategy_version[solution]["Version"]] * len(df))
                 try:
@@ -68,9 +75,9 @@ def read_data(read_solutions, read_dataset_order):
     return df_concat, hue_order
 
 
-def bar(df_metrics, df, base_dir, x, y_list, hue=None, style=None, ci=None, hue_order=None):
+def bar(df, base_dir, x, y_list, hue=None, style=None, ci=None, hue_order=None):
 
-    datasets = df_metrics["Dataset"].unique().tolist()
+    datasets = df["Dataset"].unique().tolist()
 
     fig, axs = plt.subplots(2, 2, sharex='all', figsize=(7, 7))
     hue_order = ["MultiFedAvg", "MultiFedAvgRR"]
@@ -78,7 +85,7 @@ def bar(df_metrics, df, base_dir, x, y_list, hue=None, style=None, ci=None, hue_
     for k in range(len(y_list)):
 
         if k <= 2:
-         df_plot = df_metrics
+         df_plot = df
         else:
             df_plot = df
         y = y_list[k]
@@ -102,7 +109,7 @@ def bar(df_metrics, df, base_dir, x, y_list, hue=None, style=None, ci=None, hue_
         if not (i == 0 and j == 1):
             axs[i, j].get_legend().remove()
 
-    n_solutions = len(df_metrics["Version"].unique())
+    n_solutions = len(df["Version"].unique())
     print(n_solutions)
 
     # axs[1].legend(handles, labels, fontsize=9)
@@ -127,7 +134,7 @@ def files(cd, total_clients, fraction_fit, number_of_rounds, local_epochs, train
         for dt in dataset:
             algo = dt + "_" + solution
 
-            read_path = """../results/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/{}/""".format(
+            read_path = """../results/label_shift#{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/{}/""".format(
                 cd,
                 0.1,
                 0.1,
@@ -146,7 +153,7 @@ def files(cd, total_clients, fraction_fit, number_of_rounds, local_epochs, train
             else:
                 read_solutions[solution].append("""{}{}_{}_metrics.csv""".format(read_path, dt, solution))
 
-    write_path = """plots/MEFL/concept_drift_{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/concept_drift_experiment_id_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(
+    write_path = """plots/MEFL/label_shift#{}/new_clients_fraction_{}_round_{}/clients_{}/alpha_{}/label_shift#experiment_id_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(
         cd,
         fraction_new_clients,
         round_new_clients,
@@ -165,46 +172,98 @@ def files(cd, total_clients, fraction_fit, number_of_rounds, local_epochs, train
 
 
 if __name__ == "__main__":
-    concept_drift_experiment_id = 6
-    cd = "false" if concept_drift_experiment_id == 0 else f"true_experiment_id_{concept_drift_experiment_id}"
-    total_clients = 20
-    # alphas = [0.1, 10.0]
-    alphas = {6: [10.0, 10.0], 7: [0.1, 0.1], 8: [10.0, 10.0], 9: [0.1, 0.1], 10: [1.0, 1.0]}[concept_drift_experiment_id]
-    # dataset = ["WISDM-W", "CIFAR10"]
-    dataset = ["WISDM-W", "ImageNet"]
+    # experiment_id = "label_shift#1"
+    # experiment_id = "label_shift#2"
+    experiment_id = "label_shift#3_sudden"
+    # experiment_id = "label_shift#3_gradual"
+    # experiment_id = "label_shift#3_recurrent"
+    # experiment_id = "label_shift#4_sudden"
+    # experiment_id = "label_shift#4_gradual"
+    # experiment_id = "label_shift#4_recurrent"
+    # experiment_id = "label_shift#5"
+    # experiment_id = "label_shift#6"
+    # experiment_id = "concept_drift#1_sudden"
+    # experiment_id = "concept_drift#1_recurrent"
+    # experiment_id = "concept_drift#1_gradual"
+    # experiment_id = "concept_drift#2_sudden"
+    # experiment_id = "concept_drift#2_gradual"
+    # experiment_id = "concept_drift#2_recurrent"
+    total_clients = 40
+    # alphas = [10.0, 10.0]
+    alphas = [0.1, 0.1, 0.1]
+    # alphas = [10.0, 10.0, 10.0]
+    # alphas = [1.0, 0.1, 0.1]
+    # alphas = [0.1, 0.1]
+    # alphas = [10.0]
+    # alphas = [1.0, 1.0]
+
+    # alphas = [10.0, 0.1]
+    # dataset = ["CIFAR10", "WISDM-W"]
+    # dataset = ["WISDM-W"]
+    # dataset = ["ImageNet10", "WISDM-W", "Gowalla"]
+    dataset = ["ImageNet10", "WISDM-W", "wikitext"]
+    # dataset = ["WISDM-W", "ImageNet10"]
     # dataset = ["EMNIST", "CIFAR10"]
     # models_names = ["cnn_c"]
-    model_name = ["gru", "CNN"]
+    model_name = ["CNN", "gru", "lstm"]
+    # model_name = ["gru"]
+    # model_name = ["CNN", "gru"]
     fraction_fit = 0.3
     number_of_rounds = 100
     local_epochs = 1
-    fraction_new_clients = alphas[0]
     round_new_clients = 0
     train_test = "test"
     # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
-    solutions = ["MultiFedAvg+MFP"]
+    # solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg"]
+    # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
+    solutions = ["MultiFedAvg+MFP_v2"]
 
-    read_solutions, write_path, read_dataset_order = files(cd, total_clients, fraction_fit, number_of_rounds,
-                                                           local_epochs, train_test, dataset, model_name,
-                                                           fraction_new_clients, round_new_clients, alphas)
+    read_solutions = {solution: [] for solution in solutions}
+    read_dataset_order = []
+    for solution in solutions:
+        for dt in dataset:
+            algo = dt + "_" + solution
 
-    df_metrics, hue_order = read_data(read_solutions, read_dataset_order)
+            read_path = """../system/results/experiment_id_{}/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/{}/""".format(
+                experiment_id,
+                total_clients,
+                alphas,
+                dataset,
+                model_name,
+                fraction_fit,
+                number_of_rounds,
+                local_epochs,
+                train_test)
+            read_dataset_order.append(dt)
 
-    read_solutions, write_path, read_dataset_order = files(cd, total_clients, fraction_fit, number_of_rounds,
-                                                           local_epochs, train_test, dataset, model_name,
-                                                           fraction_new_clients, round_new_clients, alphas, "original")
+            # read_solutions[solution].append("""{}{}_{}.csv""".format(read_path, dt, solution.replace("MultiFedAvg-MDH", "HMultiFedAvg")))
+            read_solutions[solution].append(
+                """{}{}_{}.csv""".format(read_path, dt, solution))
+
+    write_path = """plots/MEFL/experiment_id_{}/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/""".format(
+        experiment_id,
+        total_clients,
+        alphas,
+        dataset,
+        model_name,
+        fraction_fit,
+        number_of_rounds,
+        local_epochs)
+
+    print(read_solutions)
 
     df, hue_order = read_data(read_solutions, read_dataset_order)
+
     cp_rounds = [20, 50, 80]
     cp_window = []
     window = 5
     for i in range(len(cp_rounds)):
         cp_round = cp_rounds[i]
         cp_window += [round_ for round_ in range(cp_round, cp_round + window + 1)]
-    df = df[df["Round (t)"].isin(cp_window)]
+    # df = df[df["Round (t)"].isin(cp_window)]
     print(df)
 
     y_list = ["fc", "il", "dh", "ps"]
 
-    bar(df_metrics, df, write_path, x="\u03B1", y_list=y_list)
-    bar(df_metrics, df, write_path, x="\u03B1", y_list=y_list)
+    bar(df, write_path, x="\u03B1", y_list=y_list)
+    bar(df, write_path, x="\u03B1", y_list=y_list)

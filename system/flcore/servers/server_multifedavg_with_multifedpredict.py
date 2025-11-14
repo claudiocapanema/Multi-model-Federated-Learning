@@ -182,11 +182,16 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             num_samples_list = {me: [] for me in range(self.ME)}
             for i in range(len(results)):
                 parameter, num_examples, result = results[i]
+                alpha = result["alpha"]
                 me = result["me"]
+                client_id = result["client_id"]
                 fc = result["non_iid"]["fc"]
                 il = result["non_iid"]["il"]
                 ps = result["non_iid"]["ps"]
                 similarity = result["non_iid"]["similarity"]
+                self.client_metrics[client_id][me][alpha]["fc"] = fc
+                self.client_metrics[client_id][me][alpha]["il"] = il
+                self.client_metrics[client_id][me][alpha]["similarity"] = similarity
                 fc_list[me].append(fc)
                 il_list[me].append(il)
                 ps_list[me].append(ps)
@@ -528,6 +533,35 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 self.results_test_metrics[me][metric].append(metrics_aggregated[me][metric])
         except Exception as e:
             print("add_metrics error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+    def _save_data_metrics(self):
+
+        try:
+            for me in range(self.ME):
+                algo = self.dataset[me] + "_" + self.strategy_name
+                result_path = self.get_result_path("test")
+                file_path = result_path + "{}_metrics.csv".format(algo)
+                rows = []
+                head = ["cid", "me", "Alpha", "fc", "il", "ps", "dh"]
+                self._write_header(file_path, head, mode='w')
+                for cid in range(1, self.total_clients + 1):
+                    for alpha in [0.1, 1.0, 10.0]:
+                        fc = self.client_metrics[cid][me][alpha]["fc"]
+                        il = self.client_metrics[cid][me][alpha]["il"]
+                        if fc is not None and il is not None:
+                            dh = (fc + (1 - il)) / 2
+                        else:
+                            dh = None
+                        row = [cid, me, alpha, fc, il, self.client_metrics[cid][me][alpha]["similarity"], dh]
+                        rows.append(row)
+
+                self._write_outputs(file_path, rows)
+
+                print(f"rows {rows}")
+
+        except Exception as e:
+            print("_save_data_metrics error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def _get_results(self, train_test, mode, me):

@@ -379,17 +379,19 @@ def idmax(df, n_solutions):
 if __name__ == "__main__":
     # experiment_id = "label_shift#1"
     # experiment_id = "label_shift#2"
-    # experiment_id = "label_shift#3"
+    experiment_id = "label_shift#3_sudden"
     # experiment_id = "label_shift#3_gradual"
-    # experiment_id = "label_shift#4"
+    # experiment_id = "label_shift#3_recurrent"
+    # experiment_id = "label_shift#4_sudden"
     # experiment_id = "label_shift#4_gradual"
-    experiment_id = "label_shift#5"
+    # experiment_id = "label_shift#4_recurrent"
+    # experiment_id = "label_shift#5"
     # experiment_id = "label_shift#6"
-    # experiment_id = "concept_drift#1"
-    # experiment_id = "concept_drift#2"
-    # experiment_id = "concept_drift#1_gradual"
-    # experiment_id = "concept_drift#2_gradual"
+    # experiment_id = "concept_drift#1_sudden"
     # experiment_id = "concept_drift#1_recurrent"
+    # experiment_id = "concept_drift#1_gradual"
+    # experiment_id = "concept_drift#2_sudden"
+    # experiment_id = "concept_drift#2_gradual"
     # experiment_id = "concept_drift#2_recurrent"
     total_clients = 40
     # alphas = [10.0, 10.0]
@@ -419,7 +421,7 @@ if __name__ == "__main__":
     # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
     # solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg"]
     # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
-    solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+MFP",
+    solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+MFP", "MultiFedAvg+FPD",
                  "MultiFedAvg+FP", "DMA-FL", "AdaptiveFedAvg", "MultiFedAvg"]
 
     read_solutions = {solution: [] for solution in solutions}

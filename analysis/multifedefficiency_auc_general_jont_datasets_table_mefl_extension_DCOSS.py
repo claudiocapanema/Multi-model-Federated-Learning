@@ -66,6 +66,14 @@ def read_data(read_solutions, read_dataset_order):
 
 def group_by(df, metric):
 
+    dt = df["Dataset"].iloc[0]
+    if dt == "ImageNet10":
+        df = df[df['Round (t)'].isin([30, 31])]
+    elif dataset == "WISDM-W":
+        df = df[df['Round (t)'].isin([50, 51])]
+    elif dataset == "wikitext":
+        df = df[df['Round (t)'].isin([70, 71])]
+
     area = trapz(df[metric].to_numpy(), dx=1)
 
     return area
@@ -83,6 +91,17 @@ def table(df, write_path, metric, t=None):
     model_report = {i: {} for i in alphas}
     if t is not None:
         df = df[df['Round (t)'].isin(t)]
+
+        # df_a = df.query("Dataset == 'ImageNet10'")
+        # df_a = df_a[df_a['Round (t)'].isin([30, 31, 32, 33, 34, 35])]
+        #
+        # df_b = df.query("Dataset == 'WISDM-W'")
+        # df_b = df_b[df_b['Round (t)'].isin([50, 51, 52, 53, 54, 55])]
+        #
+        # df_c = df.query("Dataset == 'wikitext'")
+        # df_c = df_c[df_c['Round (t)'].isin([70, 71, 72, 73, 74, 75])]
+        #
+        # df = pd.concat([df_a, df_b, df_c], ignore_index=True)
 
     df_test = df[
         ['Round (t)', 'Table', 'Balanced accuracy (%)', 'Accuracy (%)', 'Fraction fit', 'Dataset',
@@ -361,7 +380,7 @@ if __name__ == "__main__":
     # experiment_id = "label_shift#3_sudden"
     # experiment_id = "label_shift#3_gradual"
     # experiment_id = "label_shift#3_recurrent"
-    # experiment_id = "label_shift#4_sudden"
+    experiment_id = "label_shift#4_sudden"
     # experiment_id = "label_shift#4_gradual"
     # experiment_id = "label_shift#4_recurrent"
     # experiment_id = "label_shift#5"
@@ -369,7 +388,7 @@ if __name__ == "__main__":
     # experiment_id = "concept_drift#1_sudden"
     # experiment_id = "concept_drift#1_recurrent"
     # experiment_id = "concept_drift#1_gradual"
-    experiment_id = "concept_drift#2_sudden"
+    # experiment_id = "concept_drift#2_sudden"
     # experiment_id = "concept_drift#2_gradual"
     # experiment_id = "concept_drift#2_recurrent"
     total_clients = 40
@@ -400,7 +419,7 @@ if __name__ == "__main__":
     # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
     # solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg"]
     # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
-    solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+MFP",
+    solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+MFP", "MultiFedAvg+FPD",
                  "MultiFedAvg+FP", "DMA-FL", "AdaptiveFedAvg", "MultiFedAvg"]
 
     read_solutions = {solution: [] for solution in solutions}
@@ -439,4 +458,4 @@ if __name__ == "__main__":
 
     table(df, write_path, "Balanced accuracy (%)", t=None)
     table(df, write_path, "Accuracy (%)", t=None)
-    table(df, write_path, "Accuracy (%)", t=[39,40])
+    table(df, write_path, "Accuracy (%)", t=[30,31,32,33,34,50,51,52,53,54,70,71,72,73,74])
