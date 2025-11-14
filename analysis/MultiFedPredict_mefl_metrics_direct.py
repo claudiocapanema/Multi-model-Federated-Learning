@@ -53,21 +53,24 @@ def read_data(alphas, datasets, total_clients):
 
 
                 p_ME, fc_ME, il_ME = get_datasets_metrics(trainloader[alpha], ME, n_classes)
-                similarity_ME = []
-
-                for me in range(ME):
-                    if i>0:
-                        similarity_me = cosine_similarity(p_ME[me], p_ME_old[me])
-                    else:
-                        similarity_me = 1
-                    similarity_ME.append(similarity_me)
+                # similarity_ME = []
+                #
+                # for me in range(ME):
+                #     if i>0:
+                #         similarity_me = cosine_similarity(p_ME[me], p_ME_old[me])
+                #     else:
+                #         similarity_me = 1
+                #     similarity_ME.append(similarity_me)
 
                 for me in range(ME):
                     client_metrics[client_id][me][alpha]["fc"] = fc_ME[me]
                     client_metrics[client_id][me][alpha]["il"] = il_ME[me]
-                    client_metrics[client_id][me][alpha]["similarity"] = similarity_ME[me]
+                    # client_metrics[client_id][me][alpha]["similarity"] = similarity_ME[me]
 
         rows = []
+        alpha_tuples = [(0.1, 1.0), (0.1, 10.0), (1.0, 10.0)]
+        alpha_tuples_string = [f"{alpha_tuple[0]}<->{alpha_tuple[1]}" for alpha_tuple in alpha_tuples]
+        general_metrics_dict = {alpha: {"fc": None, "il": None, "dh": None} for alpha in [0.1, 1.0, 10.0]}
         for me in range(ME):
             for cid in range(1, total_clients + 1):
                 for alpha in [0.1, 1.0, 10.0]:
@@ -77,10 +80,29 @@ def read_data(alphas, datasets, total_clients):
                         dh = (fc + (1 - il)) / 2
                     else:
                         dh = None
-                    row = [cid, me, datasets[me], alpha, round(fc, 2), round(il, 2), round(dh, 2), round(client_metrics[cid][me][alpha]["similarity"], 2)]
+                    general_metrics_dict[alpha] = {"fc": round(fc, 2), "il": round(il, 2), "dh": round(dh, 2)}
+
+                similarity_ALPHA = {alpha_tuple: None for alpha_tuple in alpha_tuples_string}
+                for alpha_tuple in alpha_tuples:
+                    alpha_a = alpha_tuple[0]
+                    alpha_b = alpha_tuple[1]
+
+                    p_ME_a, fc_ME, il_ME = get_datasets_metrics(trainloader[alpha_a], ME, n_classes)
+                    p_ME_b, fc_ME, il_ME = get_datasets_metrics(trainloader[alpha_b], ME, n_classes)
+                    similarity_me = 1 - cosine_similarity(p_ME_a[me], p_ME_b[me])
+                    similarity_ALPHA[f"{alpha_tuple[0]}<->{alpha_tuple[1]}"] = round(similarity_me, 2)
+
+
+                for alpha in [0.1, 1.0, 10.0]:
+                    row = [cid, me, datasets[me].replace("WISDM-W", "WISDM").replace("ImageNet10", "ImageNet-10"),
+                           alpha, general_metrics_dict[alpha]["fc"], general_metrics_dict[alpha]["il"],
+                           general_metrics_dict[alpha]["dh"], similarity_ALPHA["0.1<->1.0"],
+                           similarity_ALPHA["0.1<->10.0"], similarity_ALPHA["1.0<->10.0"]]
                     rows.append(row)
 
-        df = pd.DataFrame(data=rows, columns = ["cid", "me", "Dataset", "\u03B1", "fc", "il", "dh", "similarity"])
+        df = pd.DataFrame(data=rows,
+                          columns=["cid", "me", "Dataset", "\u03B1", "fc", "il", "dh", "0.1<->1.0",
+                                   "0.1<->10.0", "1.0<->10.0"])
 
         df.to_csv(filename, index=False)
 
@@ -165,40 +187,23 @@ def write_outputs(self, filename, data, mode='a'):
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 
-def bar(df, base_dir, x, y_list, hue=None, style=None, ci=None, hue_order=None):
+def bar_general_metrics(df, base_dir, x, y_list, hue=None, style=None, ci=None, hue_order=None):
 
     datasets = df["Dataset"].unique().tolist()
 
-    fig, axs = plt.subplots(2, 2, sharex='all', figsize=(10, 7))
+    fig, axs = plt.subplots(3, sharex='all', figsize=(10, 7))
     hue_order = ["MultiFedAvg", "MultiFedAvgRR"]
 
-    for k in range(len(y_list)):
+    for i in range(len(y_list)):
 
-        if k <= 2:
-         df_plot = df
-        else:
-            df_plot = df
-        y = y_list[k]
-        tipo = ""
-        if k == 0:
-            i, j = 0, 0
-        elif k == 1:
-            i, j = 0, 1
-        elif k == 2:
-            i, j = 1, 0
-        elif k == 3:
-            i, j = 1, 1
-            tipo = "original"
-        # , style=style, ci=ci
-        print(df_plot)
-        bar_plot(df=df_plot, base_dir=base_dir, ax=axs[i, j],
-                  file_name="""solutions_{}""".format(y_list), x_column=x, y_column=y,
-                 hue="Dataset", title="", tipo=tipo, y_lim=True, y_max=1, palette=sns.color_palette())
-        axs[i, j].set_ylim(0, 1.15)
+        bar_plot(df=df, base_dir=base_dir, ax=axs[i],
+                  file_name="""solutions_{}""".format(y_list), x_column=x, y_column=y_list[i],
+                 hue="Dataset", title="", tipo="", y_lim=True, y_max=1, palette=sns.color_palette())
+        axs[i].set_ylim(0, 1.15)
         # axs[j].set_title(r"""Dataset: {}""".format(datasets[j]), size=10)
 
-        if not (i == 0 and j == 1):
-            axs[i, j].get_legend().remove()
+        if not (i == 0):
+            axs[i].get_legend().remove()
 
 
     # axs[1].legend(handles, labels, fontsize=9)
@@ -209,12 +214,43 @@ def bar(df, base_dir, x, y_list, hue=None, style=None, ci=None, hue_order=None):
     plt.tight_layout()
     # plt.subplots_adjust(wspace=0.2, hspace=0.3)
     fig.savefig(
-        """{}{}_metrics.png""".format(base_dir, y_list), bbox_inches='tight',
+        """{}{}_general_metrics.png""".format(base_dir, y_list), bbox_inches='tight',
         dpi=400)
     fig.savefig(
-        """{}{}_metrics.svg""".format(base_dir, y_list), bbox_inches='tight',
+        """{}{}_general_metrics.svg""".format(base_dir, y_list), bbox_inches='tight',
         dpi=400)
-    print("""{}{}_metrics.png""".format(base_dir, y_list))
+    print("""{}{}_general_metrics.png""".format(base_dir, y_list))
+
+def bar_ps(df, base_dir, x, y_list, hue=None, style=None, ci=None, hue_order=None):
+
+    datasets = df["Dataset"].unique().tolist()
+    alpha_tuples = [(0.1, 1.0), (0.1, 10.0), (1.0, 10.0)]
+
+    alpha_tuples_string = [f"{alpha_tuple[0]}<->{alpha_tuple[1]}" for alpha_tuple in alpha_tuples]
+
+    columns = ["cid", "me", "Dataset", "ps", "Type"]
+    new_df = []
+
+    for i in range(len(df)):
+
+        row = df.iloc[i]
+        print(row)
+        print(row["Dataset"])
+        print(row["dh"])
+        for alpha_tuple in alpha_tuples_string:
+            new_row = [row["cid"], row["me"], row["Dataset"], row[alpha_tuple], alpha_tuple]
+            new_df.append(new_row)
+
+
+    df = pd.DataFrame(new_df, columns=columns)
+
+    print(df)
+
+    fig = plt.figure(figsize=(10, 7))
+
+    bar_plot(df=df, base_dir=base_dir,
+              file_name="""{}_ps""".format(y_list), x_column="Type", y_column="ps",
+             hue="Dataset", title="", tipo="", y_lim=False, y_max=1.1, sci=True, palette=sns.color_palette())
 
 
 if __name__ == "__main__":
@@ -226,7 +262,11 @@ if __name__ == "__main__":
 
     df = read_data(alphas, dataset, total_clients)
 
-    y_list = ["fc", "il", "dh", "similarity"]
+    y_list = ["fc", "il", "dh"]
 
-    bar(df, write_path, x="\u03B1", y_list=y_list)
-    bar(df, write_path, x="\u03B1", y_list=y_list)
+    bar_general_metrics(df, write_path, x="\u03B1", y_list=y_list)
+    bar_general_metrics(df, write_path, x="\u03B1", y_list=y_list)
+
+    y_list = ["0.1<->1.0", "0.1<->10.0", "1.0<->10.0"]
+    bar_ps(df, write_path, x="\u03B1", y_list=y_list)
+    bar_ps(df, write_path, x="\u03B1", y_list=y_list)

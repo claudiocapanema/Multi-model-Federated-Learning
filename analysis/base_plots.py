@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 # sns.color_palette()
 
-def bar_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, hue_order=None, y_lim=False, y_min=0, y_max=100, log_scale=False, sci=False, x_order=None, ax=None, tipo=None, palette=None):
+def bar_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, hue_order=None, y_lim=False, y_min=0, y_max=1, log_scale=False, sci=False, x_order=None, ax=None, tipo=None, palette=None):
     Path(base_dir + "png/").mkdir(parents=True, exist_ok=True)
     Path(base_dir + "svg/").mkdir(parents=True, exist_ok=True)
     params = {'mathtext.default': 'regular'}
@@ -22,13 +22,13 @@ def bar_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, hue_o
     if log_scale:
         plt.yscale('log')
         log = "_log_"
-    if sci:
-        from matplotlib import ticker
-        formatter = ticker.ScalarFormatter(useMathText=True)
-        formatter.set_scientific(True)
-        # formatter.set_powerlimits((-1, 1))
-        ax.yaxis.set_major_formatter(formatter)
-        # ax.set_ylim([0, 130000])
+    # if sci:
+    #     from matplotlib import ticker
+    #     formatter = ticker.ScalarFormatter(useMathText=True)
+    #     formatter.set_scientific(True)
+    #     # formatter.set_powerlimits((-1, 1))
+    #     ax.yaxis.set_major_formatter(formatter)
+    #     # ax.set_ylim([0, 130000])
     if y_lim:
         print("limite", y_max, y_column)
 
@@ -52,7 +52,7 @@ def bar_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, hue_o
     else:
         for bars in figure.containers:
             figure.bar_label(bars, fmt='%.2f', padding=15, fontsize=10)
-        figure.set_ylim(top=115)
+        figure.set_ylim(top=y_max)
     figure.set_title(title)
     figure.legend(loc='upper right')
     if tipo == "auc":
