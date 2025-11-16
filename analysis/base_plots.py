@@ -7,9 +7,10 @@ import numpy as np
 import pandas as pd
 # sns.color_palette()
 
-def bar_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, hue_order=None, y_lim=False, y_min=0, y_max=1, log_scale=False, sci=False, x_order=None, ax=None, tipo=None, palette=None):
+def bar_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, hue_order=None, y_lim=False, y_min=0, y_max=1, log_scale=False, sci=False, x_order=None, ax=None, tipo=None, palette=None, padding=None):
     Path(base_dir + "png/").mkdir(parents=True, exist_ok=True)
     Path(base_dir + "svg/").mkdir(parents=True, exist_ok=True)
+    Path(base_dir + "pdf/").mkdir(parents=True, exist_ok=True)
     params = {'mathtext.default': 'regular'}
     plt.rcParams.update(params)
     max_value = df[y_column].max()
@@ -51,7 +52,10 @@ def bar_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, hue_o
             figure.bar_label(bars, fmt='%.2f', padding=40, fontsize=10)
     else:
         for bars in figure.containers:
-            figure.bar_label(bars, fmt='%.2f', padding=15, fontsize=10)
+            if padding is not None:
+                figure.bar_label(bars, fmt='%.2f', padding=padding, fontsize=10)
+            else:
+                figure.bar_label(bars, fmt='%.2f', padding=14, fontsize=10)
         figure.set_ylim(top=y_max)
     figure.set_title(title)
     figure.legend(loc='upper right')
@@ -63,6 +67,7 @@ def bar_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, hue_o
         figure = figure.get_figure()
         figure.savefig(base_dir + "png/" + file_name + log + ".png", bbox_inches='tight', dpi=400)
         figure.savefig(base_dir + "svg/" + file_name + log + ".svg", bbox_inches='tight', dpi=400)
+        figure.savefig(base_dir + "pdf/" + file_name + log + ".pdf", bbox_inches='tight', dpi=400)
 
 def box_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, log_scale=False, ax=None, tipo=None, hue_order=None, y_lim=False, y_min=0, y_max=1, n=None, x_order=None, palette=None):
     Path(base_dir).mkdir(parents=True, exist_ok=True)

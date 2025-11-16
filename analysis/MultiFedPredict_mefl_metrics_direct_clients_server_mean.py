@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 
 def read_data(alphas, datasets, total_clients):
 
-    filename = f"clients_{total_clients}_datasets_{datasets}_alphas_{alphas}_metrics.csv"
+    filename = f"clients_{total_clients}_datasets_{datasets}_alphas_{alphas}_metrics_clients_server_mean.csv"
 
     if os.path.exists(filename):
         print("O arquivo existe!")
@@ -29,18 +29,18 @@ def read_data(alphas, datasets, total_clients):
             datasets]
         ME = len(datasets)
         client_metrics = {
-                cid: {me: {alpha: {"fc": None, "il": None, "similarity": None} for alpha in [0.1, 1.0, 10.0]} for me in
+                cid: {me: {alpha: {"fc": None, "il": None, "similarity": None, "size": None} for alpha in [0.1, 1.0, 10.0]} for me in
                       range(ME)} for cid in range(1, total_clients + 1)}
+        clients_train_loader = {cid:  {alpha: {me: None for me in range(ME)} for alpha in alphas} for cid in range(1, total_clients + 1)}
+        rows = []
         for client_id in range(1, total_clients + 1):
 
-            trainloader = {alpha: {me: None for me in range(ME)} for alpha in alphas}
-            valloader = {alpha: {me: None for me in range(ME)} for alpha in alphas}
             for i in range(len(alphas)):
                 alpha = alphas[i]
                 if i > 0:
                     p_ME_old = copy.deepcopy(p_ME)
                 for me in range(ME):
-                    trainloader[alpha][me], valloader[alpha][me] = load_data(
+                    clients_train_loader[client_id][alpha][me], a = load_data(
                         dataset_name=datasets[me],
                         alpha=alpha,
                         data_sampling_percentage=0.8,
@@ -49,10 +49,10 @@ def read_data(alphas, datasets, total_clients):
                         batch_size=32,
                     )
                     print("""leu dados cid: {} dataset: {} size:  {}""".format(client_id, datasets[me],
-                                                                               len(trainloader[alpha][me].dataset)))
+                                                                               len(clients_train_loader[client_id][alpha][me].dataset)))
 
 
-                p_ME, fc_ME, il_ME = get_datasets_metrics(trainloader[alpha], ME, n_classes)
+                p_ME, fc_ME, il_ME = get_datasets_metrics(clients_train_loader[client_id][alpha], ME, n_classes)
                 # similarity_ME = []
                 #
                 # for me in range(ME):
@@ -65,9 +65,10 @@ def read_data(alphas, datasets, total_clients):
                 for me in range(ME):
                     client_metrics[client_id][me][alpha]["fc"] = fc_ME[me]
                     client_metrics[client_id][me][alpha]["il"] = il_ME[me]
+                    client_metrics[client_id][me][alpha]["size"] = len(clients_train_loader[client_id][alpha][me].dataset)
                     # client_metrics[client_id][me][alpha]["similarity"] = similarity_ME[me]
 
-        rows = []
+
         alpha_tuples = [(0.1, 1.0), (0.1, 10.0), (1.0, 10.0)]
         alpha_tuples_string = [f"{alpha_tuple[0]}<->{alpha_tuple[1]}" for alpha_tuple in alpha_tuples]
         general_metrics_dict = {alpha: {"fc": None, "il": None, "dh": None} for alpha in [0.1, 1.0, 10.0]}
@@ -76,19 +77,20 @@ def read_data(alphas, datasets, total_clients):
                 for alpha in [0.1, 1.0, 10.0]:
                     fc = client_metrics[cid][me][alpha]["fc"]
                     il = client_metrics[cid][me][alpha]["il"]
-                    if fc is not None and il is not None:
-                        dh = (fc + (1 - il)) / 2
-                    else:
-                        dh = None
-                    general_metrics_dict[alpha] = {"fc": round(fc, 2), "il": round(il, 2), "dh": round(dh, 2)}
+                    size = client_metrics[cid][me][alpha]["size"]
+                    # if fc is not None and il is not None:
+                    #     dh = ((1 - fc) + il) / 2
+                    # else:
+                    #     dh = None
+                    general_metrics_dict[alpha] = {"fc": round(fc, 2), "il": round(il, 2), "size": size}
 
                 similarity_ALPHA = {alpha_tuple: None for alpha_tuple in alpha_tuples_string}
                 for alpha_tuple in alpha_tuples:
                     alpha_a = alpha_tuple[0]
                     alpha_b = alpha_tuple[1]
 
-                    p_ME_a, fc_ME, il_ME = get_datasets_metrics(trainloader[alpha_a], ME, n_classes)
-                    p_ME_b, fc_ME, il_ME = get_datasets_metrics(trainloader[alpha_b], ME, n_classes)
+                    p_ME_a, fc_ME, il_ME = get_datasets_metrics(clients_train_loader[cid][alpha_a], ME, n_classes)
+                    p_ME_b, fc_ME, il_ME = get_datasets_metrics(clients_train_loader[cid][alpha_b], ME, n_classes)
                     similarity_me = 1 - cosine_similarity(p_ME_a[me], p_ME_b[me])
                     similarity_ALPHA[f"{alpha_tuple[0]}<->{alpha_tuple[1]}"] = round(similarity_me, 2)
 
@@ -96,18 +98,38 @@ def read_data(alphas, datasets, total_clients):
                 for alpha in [0.1, 1.0, 10.0]:
                     row = [cid, me, datasets[me].replace("WISDM-W", "WISDM").replace("ImageNet10", "ImageNet-10"),
                            alpha, general_metrics_dict[alpha]["fc"], general_metrics_dict[alpha]["il"],
-                           general_metrics_dict[alpha]["dh"], similarity_ALPHA["0.1<->1.0"],
+                           general_metrics_dict[alpha]["size"], similarity_ALPHA["0.1<->1.0"],
                            similarity_ALPHA["0.1<->10.0"], similarity_ALPHA["1.0<->10.0"]]
                     rows.append(row)
 
         df = pd.DataFrame(data=rows,
-                          columns=["cid", "me", "Dataset", "\u03B1", "fc", "il", "dh", "0.1<->1.0",
+                          columns=["cid", "me", "Dataset", "\u03B1", "fc", "il", "size", "0.1<->1.0",
                                    "0.1<->10.0", "1.0<->10.0"])
 
-        df.to_csv(filename, index=False)
+        df_weighted_mean = df.groupby(["me", "Dataset", "\u03B1"]).apply(lambda e: weighted_average(e)).reset_index()[["Dataset", "me", "\u03B1", "fc", "il", "dh", "0.1<->1.0", "0.1<->10.0", "1.0<->10.0"]]
+
+        print(df_weighted_mean)
+
+        df_weighted_mean.to_csv(filename, index=False)
+        df = df_weighted_mean
 
     return df
 
+def weighted_average(df):
+
+    columns = ["fc", "il", "0.1<->1.0", "0.1<->10.0", "1.0<->10.0"]
+    total_samples = df["size"].sum()
+    results = {column: 0 for column in columns}
+    for column in columns:
+        result = df[column].to_numpy() * df["size"].to_numpy()
+        result = np.sum(result, axis=0) / total_samples
+        results[column] = result
+
+    dh = ((1 - results["fc"]) + results["il"]) / 2
+
+    df = pd.DataFrame({"fc": [results["fc"]], "il": [results["il"]], "dh": [dh], "0.1<->1.0": [results["0.1<->1.0"]], "0.1<->10.0": [results["0.1<->10.0"]], "1.0<->10.0": [results["1.0<->10.0"]]})
+
+    return df
 
 def get_datasets_metrics(trainloader, ME, n_classes, concept_drift_window=None):
 
@@ -191,18 +213,21 @@ def bar_general_metrics(df, base_dir, x, y_list, hue=None, style=None, ci=None, 
 
     datasets = df["Dataset"].unique().tolist()
 
-    fig, axs = plt.subplots(3, sharex='all', figsize=(10, 7))
+    fig, axs = plt.subplots(3, sharex='all', figsize=(7, 7))
     hue_order = ["MultiFedAvg", "MultiFedAvgRR"]
+
+    # print(df)
+    # exit()
 
     for i in range(len(y_list)):
 
         bar_plot(df=df, base_dir=base_dir, ax=axs[i],
-                  file_name="""solutions_{}""".format(y_list), x_column=x, y_column=y_list[i],
-                 hue="Dataset", title="", tipo="", y_lim=True, y_max=1, palette=sns.color_palette())
-        axs[i].set_ylim(0, 1.15)
+                  file_name="""solutions_{}_server_mean""".format(y_list), x_column=x, y_column=y_list[i],
+                 hue="Dataset", title="", tipo="", y_lim=True, y_max=1.15, palette=sns.color_palette())
+        axs[i].set_ylim(0, 1.24)
         # axs[j].set_title(r"""Dataset: {}""".format(datasets[j]), size=10)
 
-        if not (i == 0):
+        if not (i == 2):
             axs[i].get_legend().remove()
 
 
@@ -214,12 +239,15 @@ def bar_general_metrics(df, base_dir, x, y_list, hue=None, style=None, ci=None, 
     plt.tight_layout()
     # plt.subplots_adjust(wspace=0.2, hspace=0.3)
     fig.savefig(
-        """{}{}_general_metrics.png""".format(base_dir, y_list), bbox_inches='tight',
+        """{}{}_general_metrics_server_mean.png""".format(base_dir, y_list), bbox_inches='tight',
         dpi=400)
     fig.savefig(
-        """{}{}_general_metrics.svg""".format(base_dir, y_list), bbox_inches='tight',
+        """{}{}_general_metrics_server_mean.svg""".format(base_dir, y_list), bbox_inches='tight',
         dpi=400)
-    print("""{}{}_general_metrics.png""".format(base_dir, y_list))
+    fig.savefig(
+        """{}{}_general_metrics_server_mean.pdf""".format(base_dir, y_list), bbox_inches='tight',
+        dpi=400)
+    print("""{}{}_general_metrics_server_mean.png""".format(base_dir, y_list))
 
 def bar_ps(df, base_dir, x, y_list, hue=None, style=None, ci=None, hue_order=None):
 
@@ -228,7 +256,7 @@ def bar_ps(df, base_dir, x, y_list, hue=None, style=None, ci=None, hue_order=Non
 
     alpha_tuples_string = [f"{alpha_tuple[0]}<->{alpha_tuple[1]}" for alpha_tuple in alpha_tuples]
 
-    columns = ["cid", "me", "Dataset", "ps", "Type"]
+    columns = ["me", "Dataset", "ps", "Type"]
     new_df = []
 
     for i in range(len(df)):
@@ -238,7 +266,7 @@ def bar_ps(df, base_dir, x, y_list, hue=None, style=None, ci=None, hue_order=Non
         print(row["Dataset"])
         print(row["dh"])
         for alpha_tuple in alpha_tuples_string:
-            new_row = [row["cid"], row["me"], row["Dataset"], row[alpha_tuple], alpha_tuple]
+            new_row = [row["me"], row["Dataset"], row[alpha_tuple], alpha_tuple]
             new_df.append(new_row)
 
 
@@ -249,8 +277,8 @@ def bar_ps(df, base_dir, x, y_list, hue=None, style=None, ci=None, hue_order=Non
     fig = plt.figure(figsize=(10, 7))
 
     bar_plot(df=df, base_dir=base_dir,
-              file_name="""{}_ps""".format(y_list), x_column="Type", y_column="ps",
-             hue="Dataset", title="", tipo="", y_lim=False, y_max=1.1, sci=True, palette=sns.color_palette())
+              file_name="""{}_ps_server_mean""".format(y_list), x_column="Type", y_column="ps",
+             hue="Dataset", title="", tipo="", y_lim=False, y_max=1.1, sci=True, palette=sns.color_palette(), padding=26)
 
 
 if __name__ == "__main__":

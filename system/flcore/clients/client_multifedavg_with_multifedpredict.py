@@ -212,11 +212,16 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             homogeneity_degree = metrics["homogeneity_degree"]
             ps = metrics["ps"]
             s = cosine_similarity(self.p_ME[me], p_ME[me])
-            a = 0.67
+            # a = 0.67  # fc > a gw=1
             # b = [0.54, 0.56]
-            b = [0.76, 0.76, 0.76]
-            c = [0.47, 0.47, 0.47]
-            d = 0.55
+            # b = [0.76, 0.76, 0.76]  # il < b gw=1
+            # c = [0.47, 0.47, 0.47]  # dh > c gw=1
+            # d = 0.55  # ps < d gw=1
+            a = 0.65  # fc > a gw=1
+            # b = [0.54, 0.56]
+            b = [0.67, 0.67, 0.67]  # il < b gw=1
+            c = [0.47, 0.47, 0.47]  # dh > c gw=1
+            d = 0.55  # ps < d gw=1
             # if t <= 10:
             #     similarity = 1
             if similarity > 1:
