@@ -217,11 +217,11 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             # b = [0.76, 0.76, 0.76]  # il < b gw=1
             # c = [0.47, 0.47, 0.47]  # dh > c gw=1
             # d = 0.55  # ps < d gw=1
-            a = 0.65  # fc > a gw=1
+            a = 0.8  # fc > a gw=1
             # b = [0.54, 0.56]
-            b = [0.67, 0.67, 0.67]  # il < b gw=1
-            c = [0.47, 0.47, 0.47]  # dh > c gw=1
-            d = 0.55  # ps < d gw=1
+            b = [0.65, 0.65, 0.65]  # il < b gw=1
+            c = [0.36, 0.36, 0.36]  # dh > c gw=1
+            d = 0.49  # ps < d gw=1
             # if t <= 10:
             #     similarity = 1
             if similarity > 1:
