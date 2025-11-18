@@ -209,9 +209,9 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             fc = metrics["fc"]
             il = metrics["il"]
             similarity = metrics["similarity"]
-            homogeneity_degree = metrics["homogeneity_degree"]
+            data_heterogeneity_degree = metrics["homogeneity_degree"]
             ps = metrics["ps"]
-            s = cosine_similarity(self.p_ME[me], p_ME[me])
+            s = cosine_similarity(self.p_ME[me], p_ME[me]) # the lower its value the higher the personalization
             # a = 0.67  # fc > a gw=1
             # b = [0.54, 0.56]
             # b = [0.76, 0.76, 0.76]  # il < b gw=1
@@ -220,8 +220,8 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             a = 0.8  # fc > a gw=1
             # b = [0.54, 0.56]
             b = [0.65, 0.65, 0.65]  # il < b gw=1
-            c = [0.36, 0.36, 0.36]  # dh > c gw=1
-            d = 0.49  # ps < d gw=1
+            c = [0.36, 0.36, 0.36]  # dh < c gw=1
+            d = 0.0  # ps > d gw=1
             # if t <= 10:
             #     similarity = 1
             if similarity > 1:
@@ -229,22 +229,31 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             elif similarity < 0:
                 similarity = 0
 
+            # if t in (np.array([0, 1, 2, 3, 4]) + self.data_shift_config[me]["data_shift_rounds"]).tolist() and nt > 0:
+            #     if t - nt in (np.array([0, 1, 2, 3, 4]) + self.data_shift_config[me]["data_shift_rounds"]).tolist():
+            #         t_hat = t
+            #     else:
+            #         t_hat = 1
+            # else:
+            #     t_hat = t
+
             print(f"valor t {t} nt {nt} tamanho {len(global_model)}")
-            combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
+            combined_model, gw, lw = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
                                                      t=t, T=self.T, nt=nt, s=round(float(similarity), 2),
                                                      fc={'global': fc, 'reference': a},
                                                      il={'global': il, 'reference': b[me]},
-                                                     dh={'global': homogeneity_degree, 'reference': c[me]},
+                                                     dh={'global': data_heterogeneity_degree, 'reference': c[me]},
                                                      ps={'global': ps, 'reference': d},
                                                      device=self.device,
-                                                     global_model_original_shape=self.model_shape_mefl[me])
-            if (fc >= a and il < b[me] and homogeneity_degree > c[me]) or (
-                    ps < d and nt > 0 and t > 10 and homogeneity_degree > c[me]):
-                s = 1
+                                                     global_model_original_shape=self.model_shape_mefl[me],
+                                                    return_gw_lw=True)
+            if (fc >= a and il < b[me] and data_heterogeneity_degree < c[me]) or (
+                    ps > d and nt > 0 and t > 10 and data_heterogeneity_degree < c[me]):
+                s = 1 # keeps the standard degree of personalization and does not apply weighted predictions (used for data shift and delayed labeling)
                 set_weights(self.global_model[me], global_model)
                 combined_model = self.global_model[me]
 
-            print(f"rodada {t} recebido fc{fc} il{il} homogeneity degree {homogeneity_degree} ps {ps} nt {nt}")
+            print(f"rodada {t} recebido fc{fc} il{il} homogeneity degree {data_heterogeneity_degree} ps {ps} nt {nt}")
 
             loss, metrics = test_fedpredict(combined_model, self.valloader[me], self.device, self.client_id, t,
                                             self.args.dataset[me], self.n_classes[me], s, p_ME[me],
@@ -254,6 +263,8 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             metrics["Dataset size"] = len(self.valloader[me].dataset)
             metrics["me"] = me
             metrics["Alpha"] = self.alpha[me]
+            metrics["gw"] = float(gw)
+            metrics["lw"] = float(lw)
             tuple_me = (loss, len(self.valloader[me].dataset), metrics)
             return loss, len(self.valloader[me].dataset), tuple_me
         except Exception as e:

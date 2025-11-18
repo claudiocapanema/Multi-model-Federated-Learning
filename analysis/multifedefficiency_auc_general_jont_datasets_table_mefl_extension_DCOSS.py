@@ -380,9 +380,10 @@ if __name__ == "__main__":
     # experiment_id = "label_shift#3_sudden"
     # experiment_id = "label_shift#3_gradual"
     # experiment_id = "label_shift#3_recurrent"
-    experiment_id = "label_shift#4_sudden"
+    # experiment_id = "label_shift#4_sudden"
     # experiment_id = "label_shift#4_gradual"
     # experiment_id = "label_shift#4_recurrent"
+    experiment_id = "label_shift#5_recurrent"
     # experiment_id = "label_shift#5"
     # experiment_id = "label_shift#6"
     # experiment_id = "concept_drift#1_sudden"
@@ -393,8 +394,8 @@ if __name__ == "__main__":
     # experiment_id = "concept_drift#2_recurrent"
     total_clients = 40
     # alphas = [10.0, 10.0]
-    # alphas = [0.1, 0.1, 0.1]
-    alphas = [10.0, 10.0, 10.0]
+    alphas = [0.1, 0.1, 0.1]
+    # alphas = [10.0, 10.0, 10.0]
     # alphas = [1.0, 0.1, 0.1]
     # alphas = [0.1, 0.1]
     # alphas = [10.0]
@@ -416,11 +417,10 @@ if __name__ == "__main__":
     local_epochs = 1
     round_new_clients = 0
     train_test = "test"
-    # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
-    # solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg"]
-    # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
     solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+MFP", "MultiFedAvg+FPD",
                  "MultiFedAvg+FP", "DMA-FL", "AdaptiveFedAvg", "MultiFedAvg"]
+
+    solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg"]
 
     read_solutions = {solution: [] for solution in solutions}
     read_dataset_order = []

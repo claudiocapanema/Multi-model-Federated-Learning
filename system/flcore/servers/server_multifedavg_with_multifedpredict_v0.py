@@ -25,6 +25,7 @@ from flcore.clients.client_multifedavg_with_fedpredict_dynamic import ClientMult
 from flcore.servers.server_multifedavg import MultiFedAvg
 import sys
 from fedpredict import fedpredict_server, fedpredict_layerwise_similarity
+from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, weighted_loss_avg
 import flwr
 from flwr.common import (
     EvaluateIns,
@@ -91,7 +92,7 @@ class MultiFedAvgWithMultiFedPredictv0(MultiFedAvg):
     def __init__(self, args, times):
         super().__init__(args, times)
         self.test_metrics_names = ["Accuracy", "Balanced accuracy", "Loss", "Round (t)", "Fraction fit",
-                                   "# training clients", "training clients and models", "Model size", "Alpha", "fc", "il", "dh", "ps"]
+                                   "# training clients", "training clients and models", "Model size", "fc", "il", "dh", "ps", "Alpha", "gw", "lw"]
         self.results_test_metrics = {me: {metric: [] for metric in self.test_metrics_names} for me in range(self.ME)}
         self.compression = ""
         self.similarity_list_per_layer = {me: {} for me in range(self.ME)}
@@ -107,6 +108,8 @@ class MultiFedAvgWithMultiFedPredictv0(MultiFedAvg):
         self.fc = {me: 0 for me in range(self.ME)}
         self.il = {me: 0 for me in range(self.ME)}
         self.ps =  {me: 0 for me in range(self.ME)}
+        self.lw = {me: [] for me in range(self.ME)}
+        self.gw = {me: [] for me in range(self.ME)}
         self.increased_training_intensity = {me: 0 for me in range(self.ME)}
         self.max_number_of_rounds_data_drift_adaptation = 5
         self.similarity = {me: 0 for me in range(self.ME)}
@@ -302,6 +305,57 @@ class MultiFedAvgWithMultiFedPredictv0(MultiFedAvg):
             print("evaluate error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
+    def aggregate_evaluate(
+        self,
+        server_round,
+        results,
+        failures,
+    ):
+        """Aggregate evaluation losses using weighted average."""
+        try:
+
+            print("""inicio aggregate evaluate {}""".format(server_round))
+
+            results_mefl = {me: [] for me in range(self.ME)}
+            for i in range(len(results)):
+                parameters, num_examples, result = results[i]
+                me = result[2]["me"]
+                results_mefl[me].append(result)
+
+
+            # Aggregate loss
+            # print("""metricas recebidas rodada {}: {}""".format(server_round, results_mefl[0]))
+            loss_aggregated_mefl = {me: 0. for me in range(self.ME)}
+            for me in results_mefl.keys():
+                loss_aggregated = weighted_loss_avg(
+                    [
+                        (num_examples, loss)
+                        for loss, num_examples, metrics in results_mefl[me]
+                    ]
+                )
+                loss_aggregated_mefl[int(me)] = loss_aggregated
+
+            # Aggregate custom metrics if aggregation fn was provided
+            metrics_aggregated_mefl = {me: {} for me in range(self.ME)}
+            if self.evaluate_metrics_aggregation_fn:
+                for me in results_mefl.keys():
+                    self.gw[me] = [metrics["gw"] for _, _, metrics in results_mefl[me]]
+                    self.lw[me] = [metrics["lw"] for _, _, metrics in results_mefl[me]]
+                    eval_metrics = [(num_examples, metrics) for loss, num_examples, metrics in results_mefl[me]]
+                    metrics_aggregated_mefl[int(me)] = self.evaluate_metrics_aggregation_fn(eval_metrics)
+
+            mode = "w"
+
+            for me in range(self.ME):
+                self.add_metrics(server_round, metrics_aggregated_mefl, me)
+                self._save_results(mode, me)
+
+
+            return loss_aggregated_mefl, metrics_aggregated_mefl
+        except Exception as e:
+            print("aggregate_evaluate error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
     def add_metrics(self, server_round, metrics_aggregated, me):
         try:
             metrics_aggregated[me]["Fraction fit"] = self.fraction_fit
@@ -311,6 +365,10 @@ class MultiFedAvgWithMultiFedPredictv0(MultiFedAvg):
             metrics_aggregated[me]["il"] = self.il[me]
             metrics_aggregated[me]["dh"] = self.homogeneity_degree[me]
             metrics_aggregated[me]["ps"] = self.ps[me]
+            metrics_aggregated[me]["gw"] = self.gw[me]
+            metrics_aggregated[me]["lw"] = self.lw[me]
+
+            print("gw lw: ", me, self.gw[me])
 
             for metric in metrics_aggregated[me]:
                 self.results_test_metrics[me][metric].append(metrics_aggregated[me][metric])
@@ -332,6 +390,8 @@ class MultiFedAvgWithMultiFedPredictv0(MultiFedAvg):
             if len(compression) > 0:
                 compression = "_" + compression
             file_path = result_path + "{}{}.csv".format(algo, compression)
+
+            print("arquivo nome: ", file_path)
 
             if train_test == 'test':
 

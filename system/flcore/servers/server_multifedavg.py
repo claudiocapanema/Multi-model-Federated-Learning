@@ -341,7 +341,7 @@ class MultiFedAvg:
                 rows = []
                 head = ["cid", "me", "Alpha", "fc", "il", "ps", "dh"]
                 self._write_header(file_path, head, mode='w')
-                for cid in range(1, self.total_clients + 1):
+                for cid in range(0, self.total_clients):
                     for alpha in [0.1, 1.0, 10.0]:
                         fc = self.client_metrics[cid][me][alpha]["fc"]
                         il = self.client_metrics[cid][me][alpha]["il"]

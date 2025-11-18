@@ -88,21 +88,16 @@ def label_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_r
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "type": type_} for me in range(ME)}
             elif experiment_id == "label_shift#5_recurrent":
-                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5)],
-                                           [int(n_rounds * 0.3), int(n_rounds * 0.6)],
-                                           [int(n_rounds * 0.4), int(n_rounds * 0.7)]]
-                new_alphas = [[10.0, 0.1], [10.0, 0.1], [10.0, 0.1]]
-                type_ = "label_shift"
-                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
-                               "type": type_} for me in range(ME)}
-            elif experiment_id == "label_shift#5_gradual":
-                ME_concept_drift_rounds = [[int(n_rounds * 0.2) + client_id // gradual_rounds,
-                                            int(n_rounds * 0.5) + client_id // gradual_rounds],
+                ME_concept_drift_rounds = [[int(n_rounds * 0.1) + client_id // gradual_rounds,
+                                            int(n_rounds * 0.4) + client_id // gradual_rounds,
+                                            int(n_rounds * 0.7) + client_id // gradual_rounds],
+                                           [int(n_rounds * 0.2) + client_id // gradual_rounds,
+                                            int(n_rounds * 0.5) + client_id // gradual_rounds,
+                                            int(n_rounds * 0.8) + client_id // gradual_rounds],
                                            [int(n_rounds * 0.3) + client_id // gradual_rounds,
-                                            int(n_rounds * 0.6) + client_id // gradual_rounds],
-                                           [int(n_rounds * 0.4) + client_id // gradual_rounds,
-                                            int(n_rounds * 0.7) + client_id // gradual_rounds]]
-                new_alphas = [[10.0, 0.1], [10.0, 0.1], [10.0, 0.1]]
+                                            int(n_rounds * 0.6) + client_id // gradual_rounds,
+                                            int(n_rounds * 0.9) + client_id // gradual_rounds]]
+                new_alphas = [[1.0, 10.0, 0.1], [1.0, 10.0, 0.1], [1.0, 10.0, 0.1]]
                 type_ = "label_shift"
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "type": type_} for me in range(ME)}

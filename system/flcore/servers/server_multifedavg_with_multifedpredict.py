@@ -375,6 +375,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             drift_degree = [0] * self.ME
             drift_ps = [0] * self.ME
             for me in range(self.ME):
+                # step 1
                 if len(self.reduced[me]) > 0:
                     # reduction_fraction = self.reduced[me].count(True) / len(self.reduced[me])
                     n_clients_reduced = self.reduced[me].count(True)
@@ -388,6 +389,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                         drift_degree[me] = 0
                         self.reduction_fraction_list[me].append(reduction_probability)
                     self.reduction_fraction_list[me].append(reduction_probability)
+                # step 2
                 if len(self.ps_list[me]) == 0:
                     self.ps_list[me].append(self.ps[me])
                 else:
@@ -519,21 +521,21 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
     #         print("evaluate error")
     #         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def add_metrics(self, server_round, metrics_aggregated, me):
-        try:
-            metrics_aggregated[me]["Fraction fit"] = self.fraction_fit
-            metrics_aggregated[me]["# training clients"] = self.n_trained_clients
-            metrics_aggregated[me]["training clients and models"] = self.selected_clients_m[me]
-            metrics_aggregated[me]["fc"] = self.fc[me]
-            metrics_aggregated[me]["il"] = self.il[me]
-            metrics_aggregated[me]["dh"] = self.homogeneity_degree[me]
-            metrics_aggregated[me]["ps"] = self.ps[me]
-
-            for metric in metrics_aggregated[me]:
-                self.results_test_metrics[me][metric].append(metrics_aggregated[me][metric])
-        except Exception as e:
-            print("add_metrics error")
-            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+    # def add_metrics(self, server_round, metrics_aggregated, me):
+    #     try:
+    #         metrics_aggregated[me]["Fraction fit"] = self.fraction_fit
+    #         metrics_aggregated[me]["# training clients"] = self.n_trained_clients
+    #         metrics_aggregated[me]["training clients and models"] = self.selected_clients_m[me]
+    #         metrics_aggregated[me]["fc"] = self.fc[me]
+    #         metrics_aggregated[me]["il"] = self.il[me]
+    #         metrics_aggregated[me]["dh"] = self.homogeneity_degree[me]
+    #         metrics_aggregated[me]["ps"] = self.ps[me]
+    #
+    #         for metric in metrics_aggregated[me]:
+    #             self.results_test_metrics[me][metric].append(metrics_aggregated[me][metric])
+    #     except Exception as e:
+    #         print("add_metrics error")
+    #         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def _save_data_metrics(self):
 
@@ -545,7 +547,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 rows = []
                 head = ["cid", "me", "Alpha", "fc", "il", "ps", "dh"]
                 self._write_header(file_path, head, mode='w')
-                for cid in range(1, self.total_clients + 1):
+                for cid in range(0, self.total_clients):
                     for alpha in [0.1, 1.0, 10.0]:
                         fc = self.client_metrics[cid][me][alpha]["fc"]
                         il = self.client_metrics[cid][me][alpha]["il"]
@@ -578,6 +580,9 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             if len(compression) > 0:
                 compression = "_" + compression
             file_path = result_path + "{}{}.csv".format(algo, compression)
+
+            print("arquivo nome v2: ", file_path)
+            print(self.results_test_metrics[me])
 
             if train_test == 'test':
 
