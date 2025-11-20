@@ -77,6 +77,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
         self.max_number_of_rounds_data_drift_adaptation = len(self.clients) //  self.num_training_clients
         self.increased_training_intensity = [0] * self.ME
         self.reduced_training_intensity_flag = [False] * self.ME
+        self.last_round_increased_training_intensity = [0] * self.ME
         self.version = version
         # self.clients_ids = [i.client_id for i in self.clients]
         # self.clients_ids_uniform_selection = dict(copy.deepcopy(self.clients_ids))
@@ -383,7 +384,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     reduction_probability = self.binomial(n_clients_reduced, n_clients)
                     reduction_fraction_list = copy.deepcopy(self.reduction_fraction_list[me])
                     reduction_fraction_list.append(reduction_probability)
-                    if self.detect_drift_ks(reduction_fraction_list, window=5, alpha=0.05):
+                    if self.detect_drift_ks(reduction_fraction_list, window=5, alpha=0.1):
                         drift_degree[me] = reduction_probability
                     else:
                         drift_degree[me] = 0
@@ -395,12 +396,15 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 else:
                     ps_list = copy.deepcopy(self.ps_list[me])
                     ps_list.append(self.ps[me])
-                    if self.detect_drift_ks(ps_list, window=5, alpha=0.05):
+                    if self.detect_drift_ks(ps_list, window=5, alpha=0.1):
                         drift_ps[me] = self.ps[me]
                     else:
                         self.ps_list[me].append(self.ps[me])
-                        drift_ps[me] = 0
-                if (drift_degree[me] > 0.5 and drift_ps[me] > 0) or self.increased_training_intensity[me] > 0:
+                        # drift_ps[me] = 0
+                        drift_ps[me] = self.ps[me]
+                #  or t in {0: [10, 40, 70], 1: [20, 50, 80], 2: [30, 60, 90]}[me]
+                print(f"Rodada {t} modelo {me} resultado drift degree = {drift_degree[me]} ps = {drift_ps[me]}")
+                if (drift_degree[me] >= 0.5 or self.ps[me] > 0) or self.increased_training_intensity[me] > 0:
                         data_drift_model = me
                         if drift_degree[me] > 0.5 and drift_ps[me] > 0:
                             data_shift_untrained_clients = (self.total_clients - len(self.reduced[me])) * drift_degree[me]
@@ -581,8 +585,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 compression = "_" + compression
             file_path = result_path + "{}{}.csv".format(algo, compression)
 
-            print("arquivo nome v2: ", file_path)
-            print(self.results_test_metrics[me])
+            # print("arquivo nome v2: ", file_path)
+            # print(self.results_test_metrics[me])
 
             if train_test == 'test':
 
