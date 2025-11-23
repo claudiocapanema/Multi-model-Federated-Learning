@@ -384,7 +384,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     reduction_probability = self.binomial(n_clients_reduced, n_clients)
                     reduction_fraction_list = copy.deepcopy(self.reduction_fraction_list[me])
                     reduction_fraction_list.append(reduction_probability)
-                    if self.detect_drift_ks(reduction_fraction_list, window=5, alpha=0.1):
+                    if self.detect_drift_ks(reduction_fraction_list, window=5, alpha=0.01):
                         drift_degree[me] = reduction_probability
                     else:
                         drift_degree[me] = 0
@@ -396,7 +396,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 else:
                     ps_list = copy.deepcopy(self.ps_list[me])
                     ps_list.append(self.ps[me])
-                    if self.detect_drift_ks(ps_list, window=5, alpha=0.1):
+                    if self.detect_drift_ks(ps_list, window=5, alpha=0.01):
                         drift_ps[me] = self.ps[me]
                     else:
                         self.ps_list[me].append(self.ps[me])
