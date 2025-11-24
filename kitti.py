@@ -1,40 +1,7 @@
 """
 Federated Multi-modal Driver Activity Recognition
-Single-file Python script that simulates federated learning (FedAvg) for driver activity
-recognition using a multimodal approach: RGB images + pose keypoints.
-
-Design choices (easy-to-use dataset):
-- This script is written to work with the popular "State Farm Distracted Driver" dataset
-  (10 classes) or any dataset organized as: root/train/<class_name>/*.jpg
-  (you can also use any custom dataset with >3 classes following that structure).
-
-Multimodality:
-- Modality A: RGB image fed to a CNN (ResNet18 backbone)
-- Modality B: 33 pose landmarks (x,y,visibility) obtained with MediaPipe Holistic/BlazePose
-  (if mediapipe isn't available or pose fails, the code falls back to a small placeholder vector)
-- Fusion: late fusion by concatenating image feature vector and keypoint embedding.
-
-Federated setup:
-- Partition using Dirichlet distribution (alpha parameter configurable) to create non-IID splits
-- Simulates NUM_CLIENTS clients on a single machine. Each client trains locally for LOCAL_EPOCHS
-  then the server averages weights (FedAvg).
-- Evaluates global model on a held-out test split each round.
-
-Requirements:
-- Python 3.8+
-- pip install torch torchvision tqdm scikit-learn pillow mediapipe
-  (mediapipe optional but recommended: pip install mediapipe)
-
-Usage:
-- Put dataset in DATA_ROOT with structure:
-    DATA_ROOT/train/<class_name>/*.jpg
-  or change variables below.
-- Run: python federated_multimodal_driver_activity.py
-
-Notes:
-- The script is intended as an automated starting point. It focuses on clarity and
-  reproducibility over extreme optimization. Adjust hyperparameters as needed.
-
+(Modified so that after each round the updated global model is tested on each client's local test data.
+ Each client returns loss, accuracy and number of local test samples; server computes weighted average.)
 """
 
 import os
@@ -76,11 +43,12 @@ BATCH_SIZE = 32
 LR = 1e-4
 MOMENTUM = 0.9
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-DIRICHLET_ALPHA = 0.1 # smaller -> more heterogeneous
+DIRICHLET_ALPHA = 0.5 # smaller -> more heterogeneous
 NUM_WORKERS = 4
 IMAGE_SIZE = 224
 RANDOM_SEED = 42
 NUM_CLASSES_MIN = 4  # ensure dataset has >3 classes
+TEST_LOCAL_RATIO = 0.15  # fraction of each client's local samples used as local test
 
 # =========================
 # Utilities
@@ -167,7 +135,7 @@ def build_dataset(root: str) -> Tuple[List[Tuple[str, int]], List[str]]:
 
 # Dirichlet partitioning
 def dirichlet_partition(labels: np.ndarray, n_clients: int, alpha: float) -> List[np.ndarray]:
-    """Return list of arrays with the sample indices for each client"""
+    """Return list of arrays with the sample indices for each client (indices refer to the labels array)"""
     n_classes = np.max(labels) + 1
     label_indices = [np.where(labels == i)[0] for i in range(n_classes)]
     client_indices = [[] for _ in range(n_clients)]
@@ -237,11 +205,20 @@ def set_model_params(model: nn.Module, params: Dict[str, torch.Tensor]):
 
 
 def average_params(param_list: List[Dict[str, torch.Tensor]], weights: List[float] = None) -> Dict[str, torch.Tensor]:
+    if len(param_list) == 0:
+        raise ValueError("param_list is empty")
     if weights is None:
         weights = [1.0 / len(param_list)] * len(param_list)
     avg = {}
     for k in param_list[0].keys():
-        avg[k] = sum(param_list[i][k].float() * weights[i] for i in range(len(param_list)))
+        acc = None
+        for i in range(len(param_list)):
+            term = param_list[i][k].float() * weights[i]
+            if acc is None:
+                acc = term.clone()
+            else:
+                acc += term
+        avg[k] = acc
     return avg
 
 
@@ -287,6 +264,8 @@ def evaluate(model: nn.Module, dataloader: DataLoader, device: torch.device) -> 
             preds = outputs.argmax(dim=1)
             correct += (preds == labels).sum().item()
             total += labels.size(0)
+    if total == 0:
+        return 0.0, 0.0
     return total_loss / total, correct / total
 
 
@@ -297,13 +276,12 @@ def main():
     samples, classes = build_dataset(DATA_ROOT)
     labels = np.array([s[1] for s in samples])
 
-    # train/test split centrally
-    train_idx, test_idx = train_test_split(np.arange(len(samples)), test_size=0.15, stratify=labels, random_state=RANDOM_SEED)
+    # train/test split centrally (we still keep a central held-out test if desired)
+    train_idx, central_test_idx = train_test_split(np.arange(len(samples)), test_size=0.2, stratify=labels, random_state=RANDOM_SEED)
     train_samples = [samples[i] for i in train_idx]
-    test_samples = [samples[i] for i in test_idx]
     train_labels = labels[train_idx]
 
-    # Dirichlet partition on train set
+    # Dirichlet partition on train set -> returns indices referencing train_samples array
     client_splits = dirichlet_partition(train_labels, NUM_CLIENTS, DIRICHLET_ALPHA)
 
     # transforms
@@ -314,22 +292,78 @@ def main():
         T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
-    # build datasets and dataloaders per client
-    client_loaders = []
-    for c in range(NUM_CLIENTS):
-        idx = client_splits[c]
-        client_samples = [train_samples[i] for i in idx]
-        ds = MultimodalImageKeypointsDataset(client_samples, classes, transform=transform)
-        loader = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS, pin_memory=True)
-        client_loaders.append(loader)
-
-    # test loader
-    test_ds = MultimodalImageKeypointsDataset(test_samples, classes, transform=T.Compose([
+    test_transform = T.Compose([
         T.Resize((IMAGE_SIZE, IMAGE_SIZE)),
         T.ToTensor(),
         T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ]))
-    test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
+    ])
+
+    # build per-client train and test loaders
+    client_train_loaders = []
+    client_test_loaders = []
+    client_train_sizes = []
+    client_test_sizes = []
+
+    for c in range(NUM_CLIENTS):
+        idx_in_train = client_splits[c]  # indices into train_samples
+        # if client has no samples, create empty loaders
+        if len(idx_in_train) == 0:
+            client_train_loaders.append(None)
+            client_test_loaders.append(None)
+            client_train_sizes.append(0)
+            client_test_sizes.append(0)
+            continue
+
+        # build the actual sample lists for this client
+        client_all_samples = [train_samples[i] for i in idx_in_train]
+        client_all_labels = np.array([s[1] for s in client_all_samples])
+
+        # decide split sizes: if too small, give all to train and zero to test
+        if len(client_all_samples) < 2:
+            # too small to split
+            train_subset = client_all_samples
+            test_subset = []
+        else:
+            # try stratified split; fallback to random if stratify fails
+            try:
+                local_train_idx, local_test_idx = train_test_split(
+                    np.arange(len(client_all_samples)),
+                    test_size=TEST_LOCAL_RATIO,
+                    stratify=client_all_labels,
+                    random_state=RANDOM_SEED
+                )
+            except Exception:
+                local_train_idx, local_test_idx = train_test_split(
+                    np.arange(len(client_all_samples)),
+                    test_size=TEST_LOCAL_RATIO,
+                    random_state=RANDOM_SEED
+                )
+            train_subset = [client_all_samples[i] for i in local_train_idx]
+            test_subset = [client_all_samples[i] for i in local_test_idx]
+
+        # create datasets/loaders
+        if len(train_subset) > 0:
+            train_ds = MultimodalImageKeypointsDataset(train_subset, classes, transform=transform)
+            train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS, pin_memory=True)
+            client_train_loaders.append(train_loader)
+            client_train_sizes.append(len(train_ds))
+        else:
+            client_train_loaders.append(None)
+            client_train_sizes.append(0)
+
+        if len(test_subset) > 0:
+            test_ds = MultimodalImageKeypointsDataset(test_subset, classes, transform=test_transform)
+            test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
+            client_test_loaders.append(test_loader)
+            client_test_sizes.append(len(test_ds))
+        else:
+            client_test_loaders.append(None)
+            client_test_sizes.append(0)
+
+    # optional central test loader (from held out central_test_idx)
+    central_test_samples = [samples[i] for i in central_test_idx]
+    central_test_ds = MultimodalImageKeypointsDataset(central_test_samples, classes, transform=test_transform)
+    central_test_loader = DataLoader(central_test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
 
     # initialize global model
     global_model = MultimodalNet(num_classes=len(classes))
@@ -339,41 +373,91 @@ def main():
     results = []
     for rnd in range(1, ROUNDS + 1):
         print(f"\n--- Round {rnd}/{ROUNDS} ---")
-        # sample clients (here: all clients participate)
-        # sample 30% of clients each round
+        # sample clients (here: FRACTION_CLIENTS each round)
         m = max(1, int(NUM_CLIENTS * FRACTION_CLIENTS))
         local_params = []
         local_sizes = []
-        # randomly select 30% of clients
+        # randomly select m clients
         selected_clients = random.sample(range(NUM_CLIENTS), m)
+
+        print("Selected clients:", selected_clients)
         for client_id in selected_clients:
             # clone global weights
             local_model = MultimodalNet(num_classes=len(classes))
             set_model_params(local_model, get_model_params(global_model))
-            # train locally
-            if len(client_loaders[client_id].dataset) == 0:
-                print(f"Client {client_id} has 0 samples, skipping")
+
+            train_loader = client_train_loaders[client_id]
+            if train_loader is None or len(train_loader.dataset) == 0:
+                print(f"Client {client_id} has 0 local train samples, skipping local training.")
+                # still append their params (same as global) with size 0 so weight will be zero
                 local_params.append(get_model_params(local_model))
                 local_sizes.append(0)
                 continue
-            local_model = train_local(local_model, client_loaders[client_id], LOCAL_EPOCHS, DEVICE)
+
+            # train locally
+            local_model = train_local(local_model, train_loader, LOCAL_EPOCHS, DEVICE)
             local_params.append(get_model_params(local_model))
-            local_sizes.append(len(client_loaders[client_id].dataset))
-        # aggregate
-        total_size = sum(local_sizes) if sum(local_sizes) > 0 else 1
-        weights = [s / total_size for s in local_sizes]
-        avg_params = average_params(local_params, weights)
-        set_model_params(global_model, avg_params)
+            local_sizes.append(len(train_loader.dataset))
 
-        # evaluate global
-        loss, acc = evaluate(global_model, test_loader, DEVICE)
-        print(f"Global eval -> Loss: {loss:.4f}, Acc: {acc*100:.2f}%")
-        results.append((rnd, loss, acc))
+        # aggregate (FedAvg) - handle case where sum local_sizes == 0
+        total_size = sum(local_sizes)
+        if total_size == 0:
+            print("No clients performed training this round; global model unchanged.")
+        else:
+            weights = [s / total_size for s in local_sizes]
+            avg_params = average_params(local_params, weights)
+            set_model_params(global_model, avg_params)
 
-    print("\nTraining finished. Summary per round:")
-    for r, l, a in results:
-        print(f"Round {r}: Loss {l:.4f}, Acc {a*100:.2f}%")
+        # --- NEW: evaluate global model on each client's local test set ---
+        per_client_results = []
+        sum_test_samples = 0
+        weighted_loss_accum = 0.0
+        weighted_acc_accum = 0.0
 
+        for cid in range(NUM_CLIENTS):
+            test_loader = client_test_loaders[cid]
+            n_test = client_test_sizes[cid]
+            if test_loader is None or n_test == 0:
+                # client has no test data -> skip (contributes 0 to weighted avg)
+                per_client_results.append((cid, 0.0, 0.0, 0))
+                continue
+            # evaluate global model on client's local test data
+            # ensure model params are the current global ones
+            eval_model = MultimodalNet(num_classes=len(classes))
+            set_model_params(eval_model, get_model_params(global_model))
+            loss_c, acc_c = evaluate(eval_model, test_loader, DEVICE)
+            per_client_results.append((cid, loss_c, acc_c, n_test))
+
+            sum_test_samples += n_test
+            weighted_loss_accum += loss_c * n_test
+            weighted_acc_accum += acc_c * n_test
+
+        # compute weighted averages
+        if sum_test_samples > 0:
+            round_loss = weighted_loss_accum / sum_test_samples
+            round_acc = weighted_acc_accum / sum_test_samples
+        else:
+            round_loss = 0.0
+            round_acc = 0.0
+
+        # optionally evaluate on central test set as well
+        central_loss, central_acc = evaluate(global_model, central_test_loader, DEVICE)
+
+        print(f"Round {rnd} weighted (by client local test size) -> Loss: {round_loss:.4f}, Acc: {round_acc*100:.2f}%")
+        print(f"Central held-out test -> Loss: {central_loss:.4f}, Acc: {central_acc*100:.2f}%")
+
+        # print per-client brief summary
+        for cid, l_c, a_c, n_c in per_client_results:
+            if n_c == 0:
+                print(f" Client {cid}: no local test samples")
+            else:
+                print(f" Client {cid}: n_test={n_c}, loss={l_c:.4f}, acc={a_c*100:.2f}%")
+
+        results.append((rnd, round_loss, round_acc, central_loss, central_acc))
+
+    print("\nTraining finished. Summary per round (weighted client-local test):")
+    for r, l, a, cl, ca in results:
+        print(f"Round {r}: Loss {l:.4f}, Acc {a*100:.2f}%; Central Loss {cl:.4f}, Central Acc {ca*100:.2f}%")
 
 if __name__ == '__main__':
     main()
