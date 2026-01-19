@@ -219,9 +219,20 @@ if __name__ == "__main__":
 
     total_start = time.time()
 
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    # PyTorch >= 1.8
+    torch.use_deterministic_algorithms(True)
+
+    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+
     parser = argparse.ArgumentParser(description="Generated Docker Compose")
     parser.add_argument(
         "--total_clients", type=int, default=20, help="Total clients to spawn (default: 2)"
+    )
+    parser.add_argument(
+        "--k_fold", type=int, default=1, help="Total clients to spawn (default: 2)"
     )
     parser.add_argument(
         "--number_of_rounds", type=int, default=5, help="Number of FL rounds (default: 5)"
