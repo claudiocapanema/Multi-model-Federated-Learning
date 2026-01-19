@@ -44,9 +44,9 @@ def cosine_similarity(p_1, p_2):
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 class ClientMultiFedAvgWithFedPredict(ClientMultiFedAvgWithMultiFedPredict):
-    def __init__(self, args, id, model):
+    def __init__(self, args, id, model, fold_id):
         try:
-            super().__init__(args, id,  model)
+            super().__init__(args, id,  model, fold_id)
         except Exception as e:
             print("__init__ error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
@@ -116,10 +116,10 @@ class ClientMultiFedAvgWithFedPredict(ClientMultiFedAvgWithMultiFedPredict):
         """Evaluate the model on the data this client has."""
         try:
             g = torch.Generator()
-            g.manual_seed(t+self.args.k_fold)
-            random.seed(t+self.args.k_fold)
-            np.random.seed(t+self.args.k_fold)
-            torch.manual_seed(t+self.args.k_fold)
+            g.manual_seed(t+self.fold_id)
+            random.seed(t+self.fold_id)
+            np.random.seed(t+self.fold_id)
+            torch.manual_seed(t+self.fold_id)
             tuple_me = {}
             nt = t - self.lt[me]
             self.update_local_test_data(t, me)

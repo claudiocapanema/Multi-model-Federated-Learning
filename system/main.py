@@ -134,85 +134,85 @@ def load_model(model_name, dataset, strategy, device):
 def run(args):
 
     time_list = []
-    i = 1
-    print(f"\n============= Running time: {i}th =============")
-    print("Creating server and clients ...")
-    start = time.time()
-    models = []
-    ME = len(args.model)
+    for fold_id in range(1, args.k_fold + 1):
+        print(f"=============== Fold ID {fold_id} of {args.k_fold} ============")
+        print("Creating server and clients ...")
+        start = time.time()
+        models = []
+        ME = len(args.model)
 
-    for m in range(ME):
-        # Generate args.model
-        model_name = args.model[m]
-        dataset = args.dataset[m]
-        model = load_model(model_name, dataset, args.strategy, args.device)
+        for m in range(ME):
+            # Generate args.model
+            model_name = args.model[m]
+            dataset = args.dataset[m]
+            model = load_model(model_name, dataset, args.strategy, args.device)
 
-        print(model)
-        models.append(model)
+            print(model)
+            models.append(model)
 
-    # select algorithm
-    if args.strategy == "MultiFedAvg":
-        server = MultiFedAvg
-    elif args.strategy == "MultiFedAvg-MDH":
-        server = MultiFedAvgMDH
-    elif args.strategy == "DMA-FL":
-        server = DMAFLSynchronous
-    elif args.strategy == "AdaptiveFedAvg":
-        server = AdaptiveFedAvg
-    elif args.strategy == "MultiFedAvgRR":
-        server = MultiFedAvgRR
-    elif args.strategy == "FedFairMMFL":
-        server = FedFairMMFL
-    elif args.strategy == "MultiFedAvg+FP":
-        version = None
-        server = MultiFedAvgWithFedPredict
-    elif args.strategy == "MultiFedAvg+FPD":
-        version = None
-        server = MultiFedAvgWithFedPredictDynamic
-    elif args.strategy == "MultiFedAvg+MFP":
-        server = MultiFedAvgWithMultiFedPredictv0
-    elif args.strategy == "MultiFedAvg+MFP_v2":
-        version = "full"
-        server = MultiFedAvgWithMultiFedPredict
-    elif args.strategy == "MultiFedAvg+MFP_v2_dh":
-        version = "dh"
-        server = MultiFedAvgWithMultiFedPredict
-    elif args.strategy == "MultiFedAvg+MFP_v2_iti":
-        version = "iti"
-        server = MultiFedAvgWithMultiFedPredict
+        # select algorithm
+        if args.strategy == "MultiFedAvg":
+            server = MultiFedAvg
+        elif args.strategy == "MultiFedAvg-MDH":
+            server = MultiFedAvgMDH
+        elif args.strategy == "DMA-FL":
+            server = DMAFLSynchronous
+        elif args.strategy == "AdaptiveFedAvg":
+            server = AdaptiveFedAvg
+        elif args.strategy == "MultiFedAvgRR":
+            server = MultiFedAvgRR
+        elif args.strategy == "FedFairMMFL":
+            server = FedFairMMFL
+        elif args.strategy == "MultiFedAvg+FP":
+            version = None
+            server = MultiFedAvgWithFedPredict
+        elif args.strategy == "MultiFedAvg+FPD":
+            version = None
+            server = MultiFedAvgWithFedPredictDynamic
+        elif args.strategy == "MultiFedAvg+MFP":
+            server = MultiFedAvgWithMultiFedPredictv0
+        elif args.strategy == "MultiFedAvg+MFP_v2":
+            version = "full"
+            server = MultiFedAvgWithMultiFedPredict
+        elif args.strategy == "MultiFedAvg+MFP_v2_dh":
+            version = "dh"
+            server = MultiFedAvgWithMultiFedPredict
+        elif args.strategy == "MultiFedAvg+MFP_v2_iti":
+            version = "iti"
+            server = MultiFedAvgWithMultiFedPredict
 
-    # elif args.strategy == "MultiFedEfficiency":
-    #     server = MultiFedEfficiency
-    #
-    # elif args.strategy == "MultiFedAvg+FP":
-    #     server = MultiFedAvgWithFedPredict
-    #
-    # elif args.strategy == "FedFairMMFL":
-    #     server = FedFairMMFL
-    # elif args.strategy == "MultiFedAvgRR":
-    #     server = MultiFedAvgRR
+        # elif args.strategy == "MultiFedEfficiency":
+        #     server = MultiFedEfficiency
+        #
+        # elif args.strategy == "MultiFedAvg+FP":
+        #     server = MultiFedAvgWithFedPredict
+        #
+        # elif args.strategy == "FedFairMMFL":
+        #     server = FedFairMMFL
+        # elif args.strategy == "MultiFedAvgRR":
+        #     server = MultiFedAvgRR
 
-    else:
-        print(args.strategy)
-        raise NotImplementedError
+        else:
+            print(args.strategy)
+            raise NotImplementedError
 
-    if args.strategy not in ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+FP", "MultiFedAvg+FPD"]:
-        server = server(args, models)
-    else:
-        server = server(args, models, version)
-    server.train()
+        if args.strategy not in ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+FP", "MultiFedAvg+FPD"]:
+            server = server(args, models, fold_id)
+        else:
+            server = server(args, models, version, fold_id)
+        server.train()
 
-    time_list.append(time.time()-start)
+        time_list.append(time.time()-start)
 
-    print(f"\nAverage time cost: {round(np.average(time_list), 2)}s.")
-    
+        print(f"\nAverage time cost: {round(np.average(time_list), 2)}s.")
 
-    # Global average
-    # average_data(dataset=args.dataset, algorithm=args.algorithm, goal=args.goal, times=args.times, args=args)
 
-    print("All done!")
+        # Global average
+        # average_data(dataset=args.dataset, algorithm=args.algorithm, goal=args.goal, times=args.times, args=args)
 
-    # reporter.report()
+        print("All done!")
+
+        # reporter.report()
 
 
 if __name__ == "__main__":
@@ -232,7 +232,7 @@ if __name__ == "__main__":
         "--total_clients", type=int, default=20, help="Total clients to spawn (default: 2)"
     )
     parser.add_argument(
-        "--k_fold", type=int, default=1, help="Total clients to spawn (default: 2)"
+        "--k_fold", type=int, default=1, help="K fold"
     )
     parser.add_argument(
         "--number_of_rounds", type=int, default=5, help="Number of FL rounds (default: 5)"

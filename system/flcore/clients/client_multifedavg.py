@@ -267,14 +267,15 @@ def get_data_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradua
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 class MultiFedAvgClient:
-    def __init__(self, args, id, model):
+    def __init__(self, args, id, model, fold_id):
         try:
-            g = torch.Generator()
-            g.manual_seed(id+self.args.k_fold)
-            random.seed(id+self.args.k_fold)
-            np.random.seed(id+self.args.k_fold)
-            torch.manual_seed(id+self.args.k_fold)
             self.args = args
+            self.fold_id = fold_id
+            g = torch.Generator()
+            g.manual_seed(id + self.fold_id)
+            random.seed(id + self.fold_id)
+            np.random.seed(id + self.fold_id)
+            torch.manual_seed(id + self.fold_id)
             self.batch_size = []
             for dataset in args.dataset:
                 self.batch_size.append({"CIFAR10": 32, "WISDM-W": 16, "ImageNet10": 10, "Gowalla": 64, "wikitext": 256}[dataset])
@@ -318,7 +319,7 @@ class MultiFedAvgClient:
             # Concept drift parameters
             self.experiment_id = self.args.experiment_id
             self.gradual_rounds = 5
-            self.data_shift_config = get_data_shift_config(self.ME, self.number_of_rounds, self.alpha, self.experiment_id, self.client_id, gradual_rounds=self.total_clients // self.gradual_rounds, seed=self.args.k_fold)
+            self.data_shift_config = get_data_shift_config(self.ME, self.number_of_rounds, self.alpha, self.experiment_id, self.client_id, gradual_rounds=self.total_clients // self.gradual_rounds, seed=self.fold_id)
             self.concept_drift_window = [0] * self.ME
             self.data_shift_train_data = False
 
@@ -333,7 +334,7 @@ class MultiFedAvgClient:
                     partition_id=self.client_id,
                     num_partitions=self.args.total_clients + 1,
                     batch_size=self.batch_size[me],
-                    k_fold=self.args.k_fold,
+                    fold_id=self.fold_id,
                 )
                 self.recent_trainloader[me] = copy.deepcopy(self.trainloader[me])
                 self.optimizer[me] = self._get_optimizer(dataset_name=self.args.dataset[me], me=me)
@@ -372,10 +373,10 @@ class MultiFedAvgClient:
         try:
             self.lt[me] = t
             g = torch.Generator()
-            g.manual_seed(t+self.args.k_fold)
-            random.seed(t+self.args.k_fold)
-            np.random.seed(t+self.args.k_fold)
-            torch.manual_seed(t+self.args.k_fold)
+            g.manual_seed(t+self.fold_id)
+            random.seed(t+self.fold_id)
+            np.random.seed(t+self.fold_id)
+            torch.manual_seed(t+self.fold_id)
             # self.trainloader[me] = self.recent_trainloader[me]
             set_weights(self.model[me], global_model)
 
@@ -411,10 +412,10 @@ class MultiFedAvgClient:
         """Evaluate the model on the data this client has."""
         try:
             g = torch.Generator()
-            g.manual_seed(t+self.args.k_fold)
-            random.seed(t+self.args.k_fold)
-            np.random.seed(t+self.args.k_fold)
-            torch.manual_seed(t+self.args.k_fold)
+            g.manual_seed(t+self.fold_id)
+            random.seed(t+self.fold_id)
+            np.random.seed(t+self.fold_id)
+            torch.manual_seed(t+self.fold_id)
             tuple_me = {}
             nt = t - self.lt[me]
             self.update_local_test_data(t, me)
@@ -448,7 +449,7 @@ class MultiFedAvgClient:
                         partition_id=int((self.args.client_id + index) % self.args.total_clients),
                         num_partitions=self.args.total_clients + 1,
                         batch_size=self.args.batch_size,
-                        k_fold=self.args.k_fold
+                        fold_id=self.fold_id
                     )
                     self.trainloader[me] = self.recent_trainloader[me]
                     p_ME, fc_ME, il_ME = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id,
@@ -488,7 +489,7 @@ class MultiFedAvgClient:
                         partition_id=int((self.args.client_id + index) % self.args.total_clients),
                         num_partitions=self.args.total_clients + 1,
                         batch_size=self.args.batch_size,
-                        k_fold=self.args.k_fold
+                        fold_id=self.fold_id
                     )
                     p_ME, fc_ME, il_ME = self.p_ME, self.fc_ME, self.il_ME
                 elif t in self.data_shift_config[me][

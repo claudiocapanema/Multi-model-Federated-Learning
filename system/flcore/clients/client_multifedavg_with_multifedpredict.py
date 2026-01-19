@@ -70,9 +70,9 @@ def extract_labels(loader, label_key="label"):
 
 
 class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
-    def __init__(self, args, id, model):
+    def __init__(self, args, id, model, fold_id):
         try:
-            super().__init__(args, id,  model)
+            super().__init__(args, id,  model, fold_id)
             self.global_model = copy.deepcopy(self.model)
             print("quntidade de modelos: ", len(model), type(model))
             self.model_shape_mefl = []
@@ -196,10 +196,10 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
         """Evaluate the model on the data this client has."""
         try:
             g = torch.Generator()
-            g.manual_seed(t+self.args.k_fold)
-            random.seed(t+self.args.k_fold)
-            np.random.seed(t+self.args.k_fold)
-            torch.manual_seed(t+self.args.k_fold)
+            g.manual_seed(t+self.fold_id)
+            random.seed(t+self.fold_id)
+            np.random.seed(t+self.fold_id)
+            torch.manual_seed(t+self.fold_id)
             tuple_me = {}
             nt = t - self.lt[me]
             # if nt > 0:
