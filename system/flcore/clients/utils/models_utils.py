@@ -309,7 +309,7 @@ def get_transform(dataset_name, train_test):
     return pytorch_transforms
 
 def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions: int, batch_size: int,
-              data_sampling_percentage: int, get_from_volume: bool = True):
+              data_sampling_percentage: int, get_from_volume: bool = True, k_fold: int = 5, fold_id: int = 1):
     try:
         # Only initialize `FederatedDataset` once
         print(
@@ -329,7 +329,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
                          , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-1-Words-3743'}[dataset_name],
                     partitioners={"train": partitioner},
-                    seed=42
+                    seed=fold_id
                 )
         else:
             # dts = dt.load_from_disk(f"datasets/{dataset_name}")
@@ -345,7 +345,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                     dataset_name],
                 partitioners={"train": partitioner},
                 path=f"datasets/{dataset_name}",
-                seed=42
+                seed=1
             )
             fds[dataset_name] = fd
             print("passou dataset")
@@ -362,7 +362,24 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                 logger.info("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
                 time.sleep(1)
         test_size = 1 - data_sampling_percentage
-        partition_train_test = partition.train_test_split(test_size=test_size, seed=42)
+        # partition_train_test = partition.train_test_split(test_size=test_size, seed=1)
+        # ==============================
+        # K-FOLD LOCAL (intra-client)
+        # ==============================
+        num_samples = len(partition)
+        indices = np.arange(num_samples)
+
+        rng = np.random.default_rng(seed=k_fold)
+        rng.shuffle(indices)
+
+        folds = np.array_split(indices, k_fold)
+
+        val_idx = folds[fold_id-1]
+        train_idx = np.concatenate([f for i, f in enumerate(folds) if i != fold_id])
+
+        partition_train = partition.select(train_idx)
+        partition_test = partition.select(val_idx)
+
         if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla", "wikitext"]:
             # Divide data on each node: 80% train, 20% test
 
@@ -388,19 +405,23 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
             return batch
 
         if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla", "wikitext"]:
-            partition_train = partition_train_test["train"].with_transform(apply_transforms_train)
-            partition_test = partition_train_test["test"].with_transform(apply_transforms_test)
+            # partition_train = partition_train_test["train"].with_transform(apply_transforms_train)
+            # partition_test = partition_train_test["test"].with_transform(apply_transforms_test)
+            partition_train = partition_train.with_transform(apply_transforms_train)
+            partition_test = partition_test.with_transform(apply_transforms_test)
 
-        def seed_worker(worker_id):
-            np.random.seed(partition_id)
-            random.seed(partition_id)
+        GLOBAL_TORCH_GENERATOR = torch.Generator()
+        GLOBAL_TORCH_GENERATOR.manual_seed(fold_id)
 
-        g = torch.Generator()
-        g.manual_seed(partition_id)
+        random.seed(fold_id)
+        np.random.seed(fold_id)
+        torch.manual_seed(fold_id)
+        torch.cuda.manual_seed_all(fold_id)
+
         trainloader = DataLoader(
-            partition_train, batch_size=batch_size, shuffle=True, worker_init_fn=seed_worker, generator=g
+            partition_train, batch_size=batch_size, shuffle=True, generator=GLOBAL_TORCH_GENERATOR, num_workers=0
         )
-        testloader = DataLoader(partition_test, batch_size=batch_size)
+        testloader = DataLoader(partition_test, batch_size=batch_size, generator=GLOBAL_TORCH_GENERATOR, num_workers=0)
         return trainloader, testloader
 
     except Exception as e:
