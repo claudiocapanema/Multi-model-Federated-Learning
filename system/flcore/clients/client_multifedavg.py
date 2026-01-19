@@ -251,14 +251,14 @@ def global_concept_drift_config(ME, n_rounds, alphas, experiment_id, client_id, 
         print("global_concept_drift_config error")
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-def get_data_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds):
+def get_data_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds, seed):
 
     try:
 
         if "label_shift" in experiment_id:
-            return label_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds)
+            return label_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds, seed=seed)
         elif "concept_drift" in experiment_id:
-            return global_concept_drift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds)
+            return global_concept_drift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds, seed=seed)
         else:
             return {}
 
@@ -270,10 +270,10 @@ class MultiFedAvgClient:
     def __init__(self, args, id, model):
         try:
             g = torch.Generator()
-            g.manual_seed(id)
-            random.seed(id)
-            np.random.seed(id)
-            torch.manual_seed(id)
+            g.manual_seed(id+self.args.k_fold)
+            random.seed(id+self.args.k_fold)
+            np.random.seed(id+self.args.k_fold)
+            torch.manual_seed(id+self.args.k_fold)
             self.args = args
             self.batch_size = []
             for dataset in args.dataset:
@@ -318,7 +318,7 @@ class MultiFedAvgClient:
             # Concept drift parameters
             self.experiment_id = self.args.experiment_id
             self.gradual_rounds = 5
-            self.data_shift_config = get_data_shift_config(self.ME, self.number_of_rounds, self.alpha, self.experiment_id, self.client_id, gradual_rounds=self.total_clients // self.gradual_rounds)
+            self.data_shift_config = get_data_shift_config(self.ME, self.number_of_rounds, self.alpha, self.experiment_id, self.client_id, gradual_rounds=self.total_clients // self.gradual_rounds, seed=self.args.k_fold)
             self.concept_drift_window = [0] * self.ME
             self.data_shift_train_data = False
 
@@ -372,10 +372,10 @@ class MultiFedAvgClient:
         try:
             self.lt[me] = t
             g = torch.Generator()
-            g.manual_seed(t)
-            random.seed(t)
-            np.random.seed(t)
-            torch.manual_seed(t)
+            g.manual_seed(t+self.args.k_fold)
+            random.seed(t+self.args.k_fold)
+            np.random.seed(t+self.args.k_fold)
+            torch.manual_seed(t+self.args.k_fold)
             # self.trainloader[me] = self.recent_trainloader[me]
             set_weights(self.model[me], global_model)
 
@@ -411,10 +411,10 @@ class MultiFedAvgClient:
         """Evaluate the model on the data this client has."""
         try:
             g = torch.Generator()
-            g.manual_seed(t)
-            random.seed(t)
-            np.random.seed(t)
-            torch.manual_seed(t)
+            g.manual_seed(t+self.args.k_fold)
+            random.seed(t+self.args.k_fold)
+            np.random.seed(t+self.args.k_fold)
+            torch.manual_seed(t+self.args.k_fold)
             tuple_me = {}
             nt = t - self.lt[me]
             self.update_local_test_data(t, me)
