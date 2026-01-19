@@ -69,8 +69,8 @@ def weighted_average_fit(metrics):
 
 
 class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
-    def __init__(self, args, times, version):
-        super().__init__(args, times)
+    def __init__(self, args, times, version, fold_id):
+        super().__init__(args, times, fold_id)
         self.t_hat = [1] * self.ME
         self.reduced_training_intensity_flag = [False] * self.ME
         self.train_accuracy_list = {me: [] for me in range(self.ME)}
@@ -94,8 +94,9 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             client_class = ClientMultiFedAvgWithMultiFedPredict
             for i in range(self.total_clients):
                 client = client_class(self.args,
-                                id=i,
-                                   model=copy.deepcopy(self.global_model))
+                                        id=i,
+                                        model=copy.deepcopy(self.global_model),
+                                        fold_id=self.fold_id)
                 self.clients.append(client)
 
             self.clients_ids = [i.client_id for i in self.clients]

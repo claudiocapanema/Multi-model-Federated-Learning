@@ -72,7 +72,7 @@ def weighted_loss_avg(results):
     return sum(weighted_losses) / num_total_evaluation_examples
 
 class MultiFedAvg:
-    def __init__(self, args, models):
+    def __init__(self, args, models, fold_id):
 
         try:
             self.clients = []
@@ -80,6 +80,7 @@ class MultiFedAvg:
             self.evaluate_metrics_aggregation_fn = weighted_average
             self.fit_metrics_aggregation_fn = weighted_average_fit
             self.args = args
+            self.fold_id = fold_id
             self.global_model = models
             self.local_epochs = args.local_epochs
             self.total_clients = args.total_clients
@@ -96,7 +97,7 @@ class MultiFedAvg:
             self.cd = f"experiment_id_{args.experiment_id}"
             self.strategy_name = args.strategy
             self.test_metrics_names = ["Accuracy", "Balanced accuracy", "Loss", "Round (t)", "Fraction fit",
-                                       "# training clients", "training clients and models", "Model size", "Alpha"]
+                                       "# training clients", "training clients and models", "Model size", "Alpha", "Fold ID"]
             self.train_metrics_names = ["Accuracy", "Balanced accuracy", "Loss", "Round (t)", "Fraction fit",
                                         "# training clients", "training clients and models", "Model size", "Alpha"]
             self.rs_test_acc = {me: [] for me in range(self.ME)}
@@ -116,7 +117,7 @@ class MultiFedAvg:
                 cid: {me: {alpha: {"fc": None, "il": None, "similarity": None} for alpha in [0.1, 1.0, 10.0]} for me in
                       range(self.ME)} for cid in range(0, self.total_clients)}
 
-            print("Dowenload datasets")
+            print("Download datasets")
             download_datasets(self.dataset, self.alpha, self.total_clients)
             # Concept drift parameters
             self.experiment_id = args.experiment_id
@@ -134,7 +135,8 @@ class MultiFedAvg:
             for i in range(self.total_clients):
                 client = MultiFedAvgClient(self.args,
                                 id=i,
-                                   model=copy.deepcopy(self.global_model))
+                                model=copy.deepcopy(self.global_model),
+                                fold_id=self.fold_id)
                 self.clients.append(client)
 
         except Exception as e:
@@ -150,7 +152,7 @@ class MultiFedAvg:
             for t in range(1, self.number_of_rounds + 1):
                 s_t = time.time()
                 self.selected_clients = self.select_clients(t)
-                print(self.selected_clients)
+                print("selected clients: ", self.selected_clients)
                 fit_results = []
 
                 for me in range(len(self.selected_clients)):
@@ -285,11 +287,9 @@ class MultiFedAvg:
                     eval_metrics = [(num_examples, metrics) for loss, num_examples, metrics in results_mefl[me]]
                     metrics_aggregated_mefl[int(me)] = self.evaluate_metrics_aggregation_fn(eval_metrics)
 
-            mode = "w"
-
             for me in range(self.ME):
                 self.add_metrics(server_round, metrics_aggregated_mefl, me)
-                self._save_results(mode, me)
+                self._save_results(server_round, me)
 
 
             return loss_aggregated_mefl, metrics_aggregated_mefl
@@ -324,6 +324,7 @@ class MultiFedAvg:
             metrics_aggregated[me]["Fraction fit"] = self.fraction_fit
             metrics_aggregated[me]["# training clients"] = self.n_trained_clients
             metrics_aggregated[me]["training clients and models"] = self.selected_clients_m[me]
+            metrics_aggregated[me]["Fold ID"] = self.fold_id
 
             for metric in metrics_aggregated[me]:
                 self.results_test_metrics[me][metric].append(metrics_aggregated[me][metric])
@@ -360,20 +361,25 @@ class MultiFedAvg:
             print("_save_data_metrics error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def _save_results(self, mode, me):
+    def _save_results(self, server_round, me):
 
         # train
         try:
+
             # print("""save results: {}""".format(self.results_test_metrics[me]))
             file_path, header, data = self._get_results('train', '', me)
             # print("""dados: {} {}""".format(data, file_path))
-            self._write_header(file_path, header=header, mode=mode)
+            if self.fold_id == 1 and server_round == 1:
+                mode = "w"
+                self._write_header(file_path, header=header, mode=mode)
             self._write_outputs(file_path, data=data)
 
             # test
 
             file_path, header, data = self._get_results('test', '', me)
-            self._write_header(file_path, header=header, mode=mode)
+            if self.fold_id == 1 and server_round == 1:
+                mode = "w"
+                self._write_header(file_path, header=header, mode=mode)
             self._write_outputs(file_path, data=data)
         except Exception as e:
             print("save_results error")
@@ -435,7 +441,7 @@ class MultiFedAvg:
 
 
             # print("File path: " + file_path)
-            print(data)
+            print("data get results: ", data)
 
             return file_path, header, data
         except Exception as e:
@@ -452,7 +458,7 @@ class MultiFedAvg:
             print("_write_header error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def _write_outputs(self, filename, data, mode='a'):
+    def _write_outputs(self, filename, data: list, mode: list ='a'):
         try:
             for i in range(len(data)):
                 for j in range(len(data[i])):
@@ -462,7 +468,8 @@ class MultiFedAvg:
                         data[i][j] = element
             with open(filename, 'a') as server_log_file:
                 writer = csv.writer(server_log_file)
-                writer.writerows(data)
+                if len(data) > 0:
+                    writer.writerows([data[-1]])
         except Exception as e:
             print("_write_outputs error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))

@@ -89,10 +89,10 @@ def get_weights(net):
 
 
 class MultiFedAvgWithMultiFedPredictv0(MultiFedAvg):
-    def __init__(self, args, times):
-        super().__init__(args, times)
+    def __init__(self, args, times, fold_id):
+        super().__init__(args, times, fold_id)
         self.test_metrics_names = ["Accuracy", "Balanced accuracy", "Loss", "Round (t)", "Fraction fit",
-                                   "# training clients", "training clients and models", "Model size", "fc", "il", "dh", "ps", "Alpha", "gw", "lw"]
+                                   "# training clients", "training clients and models", "Model size", "Fold ID", "fc", "il", "dh", "ps", "Alpha", "gw", "lw"]
         self.results_test_metrics = {me: {metric: [] for metric in self.test_metrics_names} for me in range(self.ME)}
         self.compression = ""
         self.similarity_list_per_layer = {me: {} for me in range(self.ME)}
@@ -123,7 +123,8 @@ class MultiFedAvgWithMultiFedPredictv0(MultiFedAvg):
             for i in range(self.total_clients):
                 client = client_class(self.args,
                                 id=i,
-                                   model=copy.deepcopy(self.global_model))
+                                model=copy.deepcopy(self.global_model),
+                                fold_id=self.fold_id)
                 self.clients.append(client)
 
         except Exception as e:
@@ -344,11 +345,9 @@ class MultiFedAvgWithMultiFedPredictv0(MultiFedAvg):
                     eval_metrics = [(num_examples, metrics) for loss, num_examples, metrics in results_mefl[me]]
                     metrics_aggregated_mefl[int(me)] = self.evaluate_metrics_aggregation_fn(eval_metrics)
 
-            mode = "w"
-
             for me in range(self.ME):
                 self.add_metrics(server_round, metrics_aggregated_mefl, me)
-                self._save_results(mode, me)
+                self._save_results(server_round, me)
 
 
             return loss_aggregated_mefl, metrics_aggregated_mefl
@@ -361,6 +360,7 @@ class MultiFedAvgWithMultiFedPredictv0(MultiFedAvg):
             metrics_aggregated[me]["Fraction fit"] = self.fraction_fit
             metrics_aggregated[me]["# training clients"] = self.n_trained_clients
             metrics_aggregated[me]["training clients and models"] = self.selected_clients_m[me]
+            metrics_aggregated[me]["Fold ID"] = self.fold_id
             metrics_aggregated[me]["fc"] = self.fc[me]
             metrics_aggregated[me]["il"] = self.il[me]
             metrics_aggregated[me]["dh"] = self.homogeneity_degree[me]
