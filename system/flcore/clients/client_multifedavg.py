@@ -333,6 +333,7 @@ class MultiFedAvgClient:
                     partition_id=self.client_id,
                     num_partitions=self.args.total_clients + 1,
                     batch_size=self.batch_size[me],
+                    k_fold=self.args.k_fold,
                 )
                 self.recent_trainloader[me] = copy.deepcopy(self.trainloader[me])
                 self.optimizer[me] = self._get_optimizer(dataset_name=self.args.dataset[me], me=me)
@@ -447,6 +448,7 @@ class MultiFedAvgClient:
                         partition_id=int((self.args.client_id + index) % self.args.total_clients),
                         num_partitions=self.args.total_clients + 1,
                         batch_size=self.args.batch_size,
+                        k_fold=self.args.k_fold
                     )
                     self.trainloader[me] = self.recent_trainloader[me]
                     p_ME, fc_ME, il_ME = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id,
@@ -486,6 +488,7 @@ class MultiFedAvgClient:
                         partition_id=int((self.args.client_id + index) % self.args.total_clients),
                         num_partitions=self.args.total_clients + 1,
                         batch_size=self.args.batch_size,
+                        k_fold=self.args.k_fold
                     )
                     p_ME, fc_ME, il_ME = self.p_ME, self.fc_ME, self.il_ME
                 elif t in self.data_shift_config[me][

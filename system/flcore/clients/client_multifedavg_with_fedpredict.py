@@ -116,10 +116,10 @@ class ClientMultiFedAvgWithFedPredict(ClientMultiFedAvgWithMultiFedPredict):
         """Evaluate the model on the data this client has."""
         try:
             g = torch.Generator()
-            g.manual_seed(t)
-            random.seed(t)
-            np.random.seed(t)
-            torch.manual_seed(t)
+            g.manual_seed(t+self.args.k_fold)
+            random.seed(t+self.args.k_fold)
+            np.random.seed(t+self.args.k_fold)
+            torch.manual_seed(t+self.args.k_fold)
             tuple_me = {}
             nt = t - self.lt[me]
             self.update_local_test_data(t, me)
