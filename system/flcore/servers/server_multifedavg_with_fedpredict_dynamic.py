@@ -42,8 +42,8 @@ def get_weights(net):
 
 
 class MultiFedAvgWithFedPredictDynamic(MultiFedAvgWithMultiFedPredict):
-    def __init__(self, args, times, version):
-        super().__init__(args, times, version)
+    def __init__(self, args, times, version, fold_id):
+        super().__init__(args, times, version, fold_id)
 
     def set_clients(self):
 
@@ -52,7 +52,8 @@ class MultiFedAvgWithFedPredictDynamic(MultiFedAvgWithMultiFedPredict):
             for i in range(self.total_clients):
                 client = client_class(self.args,
                                 id=i,
-                                   model=copy.deepcopy(self.global_model))
+                                   model=copy.deepcopy(self.global_model),
+                                fold_id=self.fold_id)
                 self.clients.append(client)
 
         except Exception as e:

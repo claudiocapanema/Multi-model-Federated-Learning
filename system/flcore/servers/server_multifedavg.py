@@ -151,7 +151,7 @@ class MultiFedAvg:
                 self.parameters_aggregated_mefl[me] = get_weights(self.global_model[me])
             for t in range(1, self.number_of_rounds + 1):
                 s_t = time.time()
-                self.selected_clients = self.select_clients(t)
+                self.selected_clients = self.select_clients(t+self.fold_id)
                 print("selected clients: ", self.selected_clients)
                 fit_results = []
 
