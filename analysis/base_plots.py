@@ -172,7 +172,7 @@ def violin_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, lo
         figure.savefig(base_dir + "svg/" + file_name + log + ".svg", bbox_inches='tight', dpi=400)
 
 
-def line_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, log_scale=False, ax=None, tipo=None, hue_order=None, style=None, y_lim=False, y_min=0, y_max=1, n=None, markers=None, size=None, sizes=None, style_order=None, ci=95):
+def line_plot(df, base_dir, file_name, x_column, y_column, title, hue=None, log_scale=False, ax=None, tipo=None, hue_order=None, style=None, y_lim=False, y_min=0, y_max=1, n=None, markers=None, size=None, sizes=None, style_order=None, ci=None):
     Path(base_dir).mkdir(parents=True, exist_ok=True)
     file_name = """{}_lineplot""".format(file_name)
     params = {'mathtext.default': 'regular'}

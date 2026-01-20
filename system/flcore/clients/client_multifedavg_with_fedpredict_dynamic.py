@@ -66,9 +66,10 @@ class ClientMultiFedAvgWithFedPredictDynamic(ClientMultiFedAvgWithMultiFedPredic
             # global_model = pickle.loads(global_model)
             p_ME, fc_ME, il_ME = self.update_local_test_data(t, me)
             s = min(cosine_similarity(self.p_ME[me], p_ME[me]), 1)
-            combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
+            combined_model, gw, lw = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
                                                      t=t, T=self.T, nt=nt, s=round(float(s), 2), device=self.device,
-                                                     global_model_original_shape=self.model_shape_mefl[me])
+                                                     global_model_original_shape=self.model_shape_mefl[me],
+                                                    return_gw_lw=True)
             loss, metrics = test_fedpredict(combined_model, self.valloader[me], self.device, self.client_id, t,
                                             self.args.dataset[me], self.n_classes[me], s, p_ME[me],
                                             self.concept_drift_window[me])
@@ -76,6 +77,8 @@ class ClientMultiFedAvgWithFedPredictDynamic(ClientMultiFedAvgWithMultiFedPredic
             metrics["Dataset size"] = len(self.valloader[me].dataset)
             metrics["me"] = me
             metrics["Alpha"] = self.alpha[me]
+            metrics["gw"] = float(gw)
+            metrics["lw"] = float(lw)
             tuple_me = (loss, len(self.valloader[me].dataset), metrics)
             return loss, len(self.valloader[me].dataset), tuple_me
         except Exception as e:

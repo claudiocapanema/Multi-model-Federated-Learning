@@ -238,11 +238,13 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             #     t_hat = t
             data_shift_rounds = np.array([30, 50, 70])
             candidates = [v for v in data_shift_rounds if v <= t]
-            idx = max(candidates) if candidates else None
+            idx = max(candidates) if candidates else 100
 
             flag = t - idx >= nt
 
             if flag:
+                similarity = 1
+            else:
                 similarity = 0
 
             print(f"valor t {t} nt {nt} tamanho {len(global_model)}")

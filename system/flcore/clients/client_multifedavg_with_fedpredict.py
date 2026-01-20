@@ -51,67 +51,6 @@ class ClientMultiFedAvgWithFedPredict(ClientMultiFedAvgWithMultiFedPredict):
             print("__init__ error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def aggregate_fit(
-        self,
-        server_round: int,
-        results,
-        failures,
-    ):
-        """Aggregate fit results using weighted average."""
-        try:
-
-            self.selected_clients_m = [[] for me in range(self.ME)]
-
-            trained_models = []
-
-            results_mefl = {me: [] for me in range(self.ME)}
-            for i in range(len(results)):
-                parameter, num_examples, result = results[i]
-                me = result["me"]
-                if me not in trained_models:
-                    trained_models.append(me)
-                client_id = result["client_id"]
-                self.selected_clients_m[me].append(client_id)
-                results_mefl[me].append(results[i])
-
-
-            aggregated_ndarrays_mefl = {me: None for me in range(self.ME)}
-            aggregated_ndarrays_mefl = {me: [] for me in range(self.ME)}
-            weights_results_mefl = {me: [] for me in range(self.ME)}
-            # parameters_aggregated_mefl = {me: [] for me in range(self.ME)}
-
-            for me in trained_models:
-                # Convert results
-                weights_results = [
-                    (parameters, num_examples)
-                    for parameters, num_examples, fit_res in results_mefl[me]
-                ]
-                aggregated_ndarrays_mefl[me] = aggregate(weights_results)
-                if len(weights_results) > 1:
-                    aggregated_ndarrays_mefl[me] = aggregate(weights_results)
-                elif len(weights_results) == 1:
-                    aggregated_ndarrays_mefl[me] = results_mefl[me][0][0]
-
-            for me in trained_models:
-                self.parameters_aggregated_mefl[me] = aggregated_ndarrays_mefl[me]
-
-            # Aggregate custom metrics if aggregation fn was provided
-            metrics_aggregated_mefl = {me: [] for me in range(self.ME)}
-            for me in trained_models:
-                if self.fit_metrics_aggregation_fn:
-                    fit_metrics = [(num_examples, metrics) for _, num_examples, metrics in results_mefl[me]]
-                    metrics_aggregated_mefl[me] = self.fit_metrics_aggregation_fn(fit_metrics)
-
-            print("""finalizou aggregated fit""")
-
-            self.parameters_aggregated_mefl = self.parameters_aggregated_mefl
-            self.metrics_aggregated_mefl = metrics_aggregated_mefl
-
-            return self.parameters_aggregated_mefl, metrics_aggregated_mefl
-        except Exception as e:
-            print("aggregate_fit error")
-            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
-
     def evaluate(self, me, t, global_model, metrics):
         """Evaluate the model on the data this client has."""
         try:
@@ -123,15 +62,17 @@ class ClientMultiFedAvgWithFedPredict(ClientMultiFedAvgWithMultiFedPredict):
             tuple_me = {}
             nt = t - self.lt[me]
             self.update_local_test_data(t, me)
-            combined_model = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
+            combined_model, gw, lw = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
                                                      t=t, T=self.T, nt=nt, device=self.device,
-                                                     global_model_original_shape=self.model_shape_mefl[me])
+                                                     global_model_original_shape=self.model_shape_mefl[me], return_gw_lw=True)
             loss, metrics = test(combined_model, self.valloader[me], self.device, self.client_id, t,
                                  self.args.dataset[me], self.n_classes[me], self.concept_drift_window[me])
             metrics["Model size"] = self.models_size[me]
             metrics["Dataset size"] = len(self.valloader[me].dataset)
             metrics["me"] = me
             metrics["Alpha"] = self.alpha[me]
+            metrics["gw"] = float(gw)
+            metrics["lw"] = float(lw)
             tuple_me = (loss, len(self.valloader[me].dataset), metrics)
             return loss, len(self.valloader[me].dataset), tuple_me
         except Exception as e:
