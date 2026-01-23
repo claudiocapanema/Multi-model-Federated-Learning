@@ -194,6 +194,7 @@ class MultiFedAvgWithMultiFedPredictv0(MultiFedAvg):
                     self.model_shape_mefl[me] = [i.shape for i in parameters_aggregated_mefl[me]]
 
             clients_parameters_mefl = {me: [] for me in range(self.ME)}
+            alpha_list = {me: [] for me in range(self.ME)}
             fc_list = {me: [] for me in range(self.ME)}
             il_list = {me: [] for me in range(self.ME)}
             ps_list = {me: [] for me in range(self.ME)}
@@ -202,10 +203,12 @@ class MultiFedAvgWithMultiFedPredictv0(MultiFedAvg):
             for i in range(len(results)):
                 parameter, num_examples, result = results[i]
                 me = result["me"]
+                alpha = result["alpha"]
                 fc = result["non_iid"]["fc"]
                 il = result["non_iid"]["il"]
                 ps = result["non_iid"]["ps"]
                 similarity = result["non_iid"]["similarity"]
+                alpha_list[me].append(alpha)
                 fc_list[me].append(fc)
                 il_list[me].append(il)
                 ps_list[me].append(ps)
@@ -220,7 +223,7 @@ class MultiFedAvgWithMultiFedPredictv0(MultiFedAvg):
                 self.similarity[me] = self._weighted_average(il_list[me], num_samples_list[me])
                 self.homogeneity_degree[me] = round((self.fc[me] + (1 - self.il[me])) / 2, 2)
                 # if self.homogeneity_degree[me] > self.prediction_layer[me]["non_iid"]:
-                print(f"round {server_round} fc {self.fc[me]} il {self.il[me]} similarity {self.similarity[me]} ps {self.ps[me]} homogeneity_degree {self.homogeneity_degree[me]}")
+                print(f"round {server_round} fc {self.fc[me]} il {self.il[me]} similarity {self.similarity[me]} ps {self.ps[me]} homogeneity_degree {self.homogeneity_degree[me]} alpha {np.mean(alpha_list[me])}")
                 # n_layers = 2 * 1
                 # # n_layers = 2 * 2 # melhor cnn
                 # # n_layers = 1 # melhor gru
@@ -318,9 +321,12 @@ class MultiFedAvgWithMultiFedPredictv0(MultiFedAvg):
             print("""inicio aggregate evaluate {}""".format(server_round))
 
             results_mefl = {me: [] for me in range(self.ME)}
+            alpha_mefl = {me: [] for me in range(self.ME)}
             for i in range(len(results)):
                 parameters, num_examples, result = results[i]
                 me = result[2]["me"]
+                alpha = result[2]["Alpha"]
+                alpha_mefl[me].append(alpha)
                 results_mefl[me].append(result)
 
 
@@ -348,6 +354,8 @@ class MultiFedAvgWithMultiFedPredictv0(MultiFedAvg):
             for me in range(self.ME):
                 self.add_metrics(server_round, metrics_aggregated_mefl, me)
                 self._save_results(server_round, me)
+
+                print(f"Evaluate model {me} round {server_round} alpha {np.mean(alpha_mefl[me])}")
 
 
             return loss_aggregated_mefl, metrics_aggregated_mefl

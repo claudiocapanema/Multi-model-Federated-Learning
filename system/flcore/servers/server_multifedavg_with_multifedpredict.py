@@ -83,6 +83,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
         # self.clients_ids_uniform_selection = dict(copy.deepcopy(self.clients_ids))
         self.train_losses = {me: [] for me in range(self.ME)}
         self.fit_metrics_aggregation_fn = weighted_average_fit
+        self.data_drift_model = -1
         self.drift_flag = {me: [] for me in range(self.ME)}
         self.reduced = {me: [] for me in range(self.ME)}
         self.reduction_fraction_list = {me: [] for me in range(self.ME)}
@@ -405,26 +406,38 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                         drift_ps[me] = self.ps[me]
                 #  or t in {0: [10, 40, 70], 1: [20, 50, 80], 2: [30, 60, 90]}[me]
                 print(f"Rodada {t} modelo {me} resultado drift degree = {drift_degree[me]} ps = {drift_ps[me]}")
-                if (drift_degree[me] >= 0.5 or self.ps[me] > 0) or self.increased_training_intensity[me] > 0:
+                # if (drift_degree[me] >= 0.5 or self.ps[me] > 0) or self.increased_training_intensity[me] > 0:
+                if self.ps[me] > 0:
                         data_drift_model = me
-                        if drift_degree[me] > 0.5 and drift_ps[me] > 0:
-                            data_shift_untrained_clients = (self.total_clients - len(self.reduced[me])) * drift_degree[me]
-                            rounds_needed = data_shift_untrained_clients // self.num_training_clients
-                            self.max_number_of_rounds_data_drift_adaptation = rounds_needed
+                        # if drift_degree[me] > 0.5 and drift_ps[me] > 0:
+                        #     data_shift_untrained_clients = (self.total_clients - len(self.reduced[me])) * drift_degree[me]
+                        #     rounds_needed = data_shift_untrained_clients // self.num_training_clients
+                        #     self.max_number_of_rounds_data_drift_adaptation = rounds_needed
 
 
             print(f"##rodada {t} data_drift_model = {data_drift_model} drift_ps {drift_ps} drift degree = {drift_degree}")
             if data_drift_model > -1:
-                self.increased_training_intensity[data_drift_model] += 1
+                self.data_drift_model = data_drift_model
 
-                # selected_clients = list(np.random.choice(self.clients, self.num_training_clients, replace=False))
-                # selected_clients = [i.client_id for i in selected_clients]
-                to_remove = [i for i in sorted(random.sample(list(self.clients_ids_uniform_selection), self.num_training_clients))]
-                self.clients_ids_uniform_selection = [x for x in self.clients_ids_uniform_selection if x not in to_remove]
-                selected_clients = list(to_remove)
-                if self.increased_training_intensity[data_drift_model] == self.max_number_of_rounds_data_drift_adaptation:
-                    self.increased_training_intensity[data_drift_model] = 0
-                    self.clients_ids_uniform_selection = [i for i in copy.deepcopy(self.clients_ids)]
+            if self.data_drift_model > -1:
+
+                if self.increased_training_intensity[data_drift_model] < self.max_number_of_rounds_data_drift_adaptation:
+                    self.increased_training_intensity[data_drift_model] += 1
+
+                    # selected_clients = list(np.random.choice(self.clients, self.num_training_clients, replace=False))
+                    # selected_clients = [i.client_id for i in selected_clients]
+                    print(f"select clients rodada {t} clients ids uniform selection {list(self.clients_ids_uniform_selection)} num training clients {self.num_training_clients}")
+                    to_remove = [i for i in sorted(random.sample(list(self.clients_ids_uniform_selection), min(self.num_training_clients, len(list(self.clients_ids_uniform_selection)))))]
+                    self.clients_ids_uniform_selection = [x for x in self.clients_ids_uniform_selection if x not in to_remove]
+                    selected_clients = list(to_remove)
+                    if len(selected_clients) < self.num_training_clients:
+                        self.increased_training_intensity[data_drift_model] = 0
+                        self.clients_ids_uniform_selection = [i for i in copy.deepcopy(self.clients_ids)]
+                        self.data_drift_model = -1
+                    if self.increased_training_intensity[data_drift_model] >= self.max_number_of_rounds_data_drift_adaptation:
+                        self.increased_training_intensity[data_drift_model] = 0
+                        self.clients_ids_uniform_selection = [i for i in copy.deepcopy(self.clients_ids)]
+                        self.data_drift_model = -1
             else:
                 sc = super().select_clients(t)
 

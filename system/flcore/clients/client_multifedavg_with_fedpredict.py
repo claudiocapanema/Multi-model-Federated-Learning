@@ -70,7 +70,7 @@ class ClientMultiFedAvgWithFedPredict(ClientMultiFedAvgWithMultiFedPredict):
             metrics["Model size"] = self.models_size[me]
             metrics["Dataset size"] = len(self.valloader[me].dataset)
             metrics["me"] = me
-            metrics["Alpha"] = self.alpha[me]
+            metrics["Alpha"] = self.alpha_test[me]
             metrics["gw"] = float(gw)
             metrics["lw"] = float(lw)
             tuple_me = (loss, len(self.valloader[me].dataset), metrics)
