@@ -147,9 +147,9 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     (parameters, num_examples)
                     for parameters, num_examples, fit_res in results_mefl[me]
                 ]
-                aggregated_ndarrays_mefl[me] = self.aggregate(weights_results, self.homogeneity_degree[me], self.parameters_aggregated_mefl[me], server_round)
+                aggregated_ndarrays_mefl[me] = self.aggregate(weights_results, self.homogeneity_degree[me], self.parameters_aggregated_mefl[me], server_round, me)
                 if len(weights_results) > 1:
-                    aggregated_ndarrays_mefl[me] = self.aggregate(weights_results, self.homogeneity_degree[me], self.parameters_aggregated_mefl[me], server_round)
+                    aggregated_ndarrays_mefl[me] = self.aggregate(weights_results, self.homogeneity_degree[me], self.parameters_aggregated_mefl[me], server_round, me)
                 elif len(weights_results) == 1:
                     aggregated_ndarrays_mefl[me] = results_mefl[me][0][0]
 
@@ -265,7 +265,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def aggregate(self, results: list[tuple[NDArrays, int]], homogeneity_degree: float,
-                  current_parameters: list[tuple[NDArrays, int]], t: int) -> NDArrays:
+                  current_parameters: list[tuple[NDArrays, int]], t: int, me: int) -> NDArrays:
         try:
             """Compute weighted average."""
             # Calculate the total number of examples used during training
@@ -293,8 +293,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             ]
             # if t <= 59:
             #     homogeneity_degree = 1
-            if t in [1, 20, 40, 60, 80]:
-                homogeneity_degree = 1
+            # if t == 1 or (t==30 and me==0) or (t==1 and me==1) or (t==2 and me==2):
+            #     homogeneity_degree = 1
 
             if self.version in ["iti"]:
                 homogeneity_degree = 1
