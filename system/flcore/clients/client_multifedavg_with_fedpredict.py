@@ -66,7 +66,7 @@ class ClientMultiFedAvgWithFedPredict(ClientMultiFedAvgWithMultiFedPredict):
                                                      t=t, T=self.T, nt=nt, device=self.device,
                                                      global_model_original_shape=self.model_shape_mefl[me], return_gw_lw=True)
             loss, metrics = test(combined_model, self.valloader[me], self.device, self.client_id, t,
-                                 self.args.dataset[me], self.n_classes[me], self.concept_drift_window[me])
+                                 self.args.dataset[me], self.n_classes[me], self.concept_drift_window_test[me])
             metrics["Model size"] = self.models_size[me]
             metrics["Dataset size"] = len(self.valloader[me].dataset)
             metrics["me"] = me

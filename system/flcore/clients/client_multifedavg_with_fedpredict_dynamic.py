@@ -72,7 +72,7 @@ class ClientMultiFedAvgWithFedPredictDynamic(ClientMultiFedAvgWithMultiFedPredic
                                                     return_gw_lw=True)
             loss, metrics = test_fedpredict(combined_model, self.valloader[me], self.device, self.client_id, t,
                                             self.args.dataset[me], self.n_classes[me], s, p_ME[me],
-                                            self.concept_drift_window[me])
+                                            self.concept_drift_window_test[me])
             metrics["Model size"] = self.models_size[me]
             metrics["Dataset size"] = len(self.valloader[me].dataset)
             metrics["me"] = me
