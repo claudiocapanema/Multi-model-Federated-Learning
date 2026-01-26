@@ -23,9 +23,8 @@ import torch
 import numpy as np
 from .utils.models_utils import load_model, get_weights, load_data, set_weights, test, train
 
-def label_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds, seed=0):
+def label_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds):
     try:
-        np.random.seed(seed)
         if len(experiment_id) > 0:
             if experiment_id == "label_shift#1":
                 ME_concept_drift_rounds = [[int(n_rounds * 0.3), int(n_rounds * 0.6)], [int(n_rounds * 0.3), int(n_rounds * 0.6)]]
@@ -124,9 +123,8 @@ def label_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_r
         print("label_shift_config error")
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-def global_concept_drift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds, seed=0):
+def global_concept_drift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds):
     try:
-        np.random.seed(seed)
         if len(experiment_id) > 0:
             type_ = "no_drift"
             if experiment_id == "concept_drift#1_sudden":
@@ -157,7 +155,7 @@ def global_concept_drift_config(ME, n_rounds, alphas, experiment_id, client_id, 
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "type": type_} for me in range(ME)}
 
-            if experiment_id == "concept_drift#2_sudden":
+            elif experiment_id == "concept_drift#2_sudden":
                 ME_concept_drift_rounds = [[int(n_rounds * 0.3)],
                                            [int(n_rounds * 0.5)],
                                            [int(n_rounds * 0.7)]]
@@ -256,9 +254,9 @@ def get_data_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradua
     try:
 
         if "label_shift" in experiment_id:
-            return label_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds, seed=seed)
+            return label_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds)
         elif "concept_drift" in experiment_id:
-            return global_concept_drift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds, seed=seed)
+            return global_concept_drift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds)
         else:
             return {}
 
@@ -292,13 +290,14 @@ class MultiFedAvgClient:
                             "Gowalla": 0.001,
                             "wikitext": 0.001}
             self.model = model
-            self.alpha = [float(i) for i in args.alpha]
-            self.initial_alpha = self.alpha
+            self.alpha_train = [float(i) for i in args.alpha]
+            self.alpha_test = [float(i) for i in args.alpha]
+            self.initial_alpha = self.alpha_train
             self.total_clients  = args.total_clients
             self.ME = len(self.model)
             self.number_of_rounds = args.number_of_rounds
             print("Preparing data...")
-            print("""args do cliente: {} {}""".format(self.args.client_id, self.alpha))
+            print("""args do cliente: {} {}""".format(self.args.client_id, self.alpha_train))
             self.client_id = id
             self.trainloader = [None] * self.ME
             self.recent_trainloader = [None] * self.ME
@@ -319,7 +318,7 @@ class MultiFedAvgClient:
             # Concept drift parameters
             self.experiment_id = self.args.experiment_id
             self.gradual_rounds = 5
-            self.data_shift_config = get_data_shift_config(self.ME, self.number_of_rounds, self.alpha, self.experiment_id, self.client_id, gradual_rounds=self.total_clients // self.gradual_rounds, seed=self.fold_id)
+            self.data_shift_config = get_data_shift_config(self.ME, self.number_of_rounds, self.alpha_train, self.experiment_id, self.client_id, gradual_rounds=self.total_clients // self.gradual_rounds, seed=self.fold_id)
             self.concept_drift_window = [0] * self.ME
             self.data_shift_train_data = False
 
@@ -329,7 +328,7 @@ class MultiFedAvgClient:
             for me in range(self.ME):
                 self.trainloader[me], self.valloader[me] = load_data(
                     dataset_name=self.args.dataset[me],
-                    alpha=self.alpha[me],
+                    alpha=self.alpha_train[me],
                     data_sampling_percentage=self.args.data_percentage,
                     partition_id=self.client_id,
                     num_partitions=self.args.total_clients + 1,
@@ -401,7 +400,7 @@ class MultiFedAvgClient:
             results["me"] = me
             results["client_id"] = self.client_id
             results["Model size"] = self.models_size[me]
-            results["alpha"] = self.alpha[me]
+            results["alpha"] = self.alpha_train[me]
             self.loss_ME[me] = results["train_loss"]
             return get_weights(self.model[me]), len(self.trainloader[me].dataset), results
         except Exception as e:
@@ -425,7 +424,7 @@ class MultiFedAvgClient:
             metrics["Model size"] = self.models_size[me]
             metrics["Dataset size"] = len(self.valloader[me].dataset)
             metrics["me"] = me
-            metrics["Alpha"] = self.alpha[me]
+            metrics["Alpha"] = self.alpha_test[me]
             tuple_me = (loss, len(self.valloader[me].dataset), metrics)
             return loss, len(self.valloader[me].dataset), tuple_me
         except Exception as e:
@@ -435,16 +434,18 @@ class MultiFedAvgClient:
     def update_local_train_data(self, t, me):
 
         try:
-            alpha_me = self._get_current_alpha(t, me)
+            alpha_me = self._get_current_alpha(t, me, train=True)
+            print(f"Treinar modelo {me} rodada {t} cliente {self.client_id} - comparacao alpha {self.alpha_train[me]} novo {alpha_me}")
             if self.data_shift_config != {}:
-                if self.alpha[me] != alpha_me or (
+                if self.alpha_train[me] != alpha_me or (
                         t in self.data_shift_config[me]["data_shift_rounds"] and self.data_shift_config[me][
                     "type"] in ["label_shift"]):
-                    self.alpha[me] = alpha_me
+                    print(f"Atualizou dataset de treino do modelo {me} na rodada {t}. Alpha de {self.alpha_train[me]} para {alpha_me} - cliente {self.client_id}")
+                    self.alpha_train[me] = alpha_me
                     index = 0
                     self.recent_trainloader[me], self.valloader[me] = load_data(
                         dataset_name=self.args.dataset[me],
-                        alpha=self.alpha[me],
+                        alpha=self.alpha_train[me],
                         data_sampling_percentage=self.args.data_percentage,
                         partition_id=int((self.args.client_id + index) % self.args.total_clients),
                         num_partitions=self.args.total_clients + 1,
@@ -477,14 +478,15 @@ class MultiFedAvgClient:
 
         try:
             if self.data_shift_config != {}:
-                alpha_me = self._get_current_alpha(t, me)
-                if self.alpha[me] != alpha_me or (t in self.data_shift_config[me][
+                alpha_me = self._get_current_alpha(t, me, train=False)
+                if self.alpha_test[me] != alpha_me or (t in self.data_shift_config[me][
                     "data_shift_rounds"] and self.data_shift_config[me]["type"] in ["label_shift"]):
-                    self.alpha[me] = alpha_me
+                    print(f"Atualizou dataset de teste de {me}. Alpha de {self.alpha_test[me]} para {alpha_me} - cliente {self.client_id}")
+                    self.alpha_test[me] = alpha_me
                     index = 0
                     self.recent_trainloader[me], self.valloader[me] = load_data(
                         dataset_name=self.args.dataset[me],
-                        alpha=self.alpha[me],
+                        alpha=self.alpha_test[me],
                         data_sampling_percentage=self.args.data_percentage,
                         partition_id=int((self.args.client_id + index) % self.args.total_clients),
                         num_partitions=self.args.total_clients + 1,
@@ -515,11 +517,12 @@ class MultiFedAvgClient:
             print(f"update_local_train_data error {self.data_shift_config}")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def _get_current_alpha(self, server_round, me):
+    def _get_current_alpha(self, server_round, me, train):
 
         try:
+            reference_alpha = self.alpha_train[me] if train else self.alpha_test[me]
             if self.data_shift_config == {}:
-                return self.alpha[me]
+                return reference_alpha
             else:
                 config = self.data_shift_config[me]
                 alpha = None
@@ -529,7 +532,7 @@ class MultiFedAvgClient:
                         alpha = config["new_alphas"][i]
 
                 if alpha is None:
-                    alpha = self.alpha[me]
+                    alpha = reference_alpha
 
                 return alpha
         except Exception as e:

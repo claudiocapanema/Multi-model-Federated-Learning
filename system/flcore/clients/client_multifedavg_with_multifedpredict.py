@@ -240,12 +240,12 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             candidates = [v for v in data_shift_rounds if v <= t]
             idx = max(candidates) if candidates else 100
 
-            if me == 0 and t < 35 and t >=30 and (t-30) < nt:
-                similarity = 0
-            elif me == 1 and t < 55 and t >= 50 and (t - 50) < nt:
-                similarity = 0
-            elif me == 2 and t < 75 and t >= 70 and (t - 70) < nt:
-                similarity = 0
+            # if me == 0 and t < 35 and t >=30 and (t-30) < nt:
+            #     similarity = 0
+            # elif me == 1 and t < 55 and t >= 50 and (t - 50) < nt:
+            #     similarity = 0
+            # elif me == 2 and t < 75 and t >= 70 and (t - 70) < nt:
+            #     similarity = 0
 
 
             print(f"valor t {t} nt {nt} tamanho {len(global_model)}")
@@ -259,11 +259,11 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                                                      global_model_original_shape=self.model_shape_mefl[me],
                                                     return_gw_lw=True)
 
-            if (me == 0 and t < 35 and t >=30 and (t-30) < nt) or (me == 1 and t < 55 and t >= 50 and (t - 50) < nt) or (me == 2 and t < 75 and t >= 70 and (t - 70) < nt):
-                s = 1  # keeps the standard degree of personalization and does not apply weighted predictions (used for data shift and delayed labeling)
-                set_weights(self.global_model[me], global_model)
-                combined_model = self.global_model[me]
-            elif (fc >= a and il < b[me] and data_heterogeneity_degree < c[me]) or (
+            # if (me == 0 and t < 35 and t >=30 and (t-30) < nt) or (me == 1 and t < 55 and t >= 50 and (t - 50) < nt) or (me == 2 and t < 75 and t >= 70 and (t - 70) < nt):
+            #     s = 1  # keeps the standard degree of personalization and does not apply weighted predictions (used for data shift and delayed labeling)
+            #     set_weights(self.global_model[me], global_model)
+            #     combined_model = self.global_model[me]
+            if (fc >= a and il < b[me] and data_heterogeneity_degree < c[me]) or (
                     ps > d and nt > 0 and t > 10 and data_heterogeneity_degree < c[me]):
                 s = 1 # keeps the standard degree of personalization and does not apply weighted predictions (used for data shift and delayed labeling)
                 set_weights(self.global_model[me], global_model)
