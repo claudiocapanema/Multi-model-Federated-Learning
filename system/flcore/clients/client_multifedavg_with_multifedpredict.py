@@ -209,14 +209,9 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             fc = metrics["fc"]
             il = metrics["il"]
             similarity = metrics["similarity"]
-            data_heterogeneity_degree = metrics["homogeneity_degree"]
+            data_heterogeneity_degree = metrics["heterogeneity_degree"]
             ps = metrics["ps"]
-            s = cosine_similarity(self.p_ME[me], p_ME[me]) # the lower its value the higher the personalization
-            # a = 0.67  # fc > a gw=1
-            # b = [0.54, 0.56]
-            # b = [0.76, 0.76, 0.76]  # il < b gw=1
-            # c = [0.47, 0.47, 0.47]  # dh > c gw=1
-            # d = 0.55  # ps < d gw=1
+            s = cosine_similarity(self.p_ME[me], p_ME[me]) # the lower its value the lower the personalization
             a = 0.8  # fc > a gw=1
             # b = [0.54, 0.56]
             b = [0.65, 0.65, 0.65]  # il < b gw=1
@@ -228,24 +223,6 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 similarity = 1
             elif similarity < 0:
                 similarity = 0
-
-            # if t in (np.array([0, 1, 2, 3, 4]) + self.data_shift_config[me]["data_shift_rounds"]).tolist() and nt > 0:
-            #     if t - nt in (np.array([0, 1, 2, 3, 4]) + self.data_shift_config[me]["data_shift_rounds"]).tolist():
-            #         t_hat = t
-            #     else:
-            #         t_hat = 1
-            # else:
-            #     t_hat = t
-            data_shift_rounds = np.array([30, 50, 70])
-            candidates = [v for v in data_shift_rounds if v <= t]
-            idx = max(candidates) if candidates else 100
-
-            # if me == 0 and t < 35 and t >=30 and (t-30) < nt:
-            #     similarity = 0
-            # elif me == 1 and t < 55 and t >= 50 and (t - 50) < nt:
-            #     similarity = 0
-            # elif me == 2 and t < 75 and t >= 70 and (t - 70) < nt:
-            #     similarity = 0
 
 
             print(f"valor t {t} nt {nt} tamanho {len(global_model)}")

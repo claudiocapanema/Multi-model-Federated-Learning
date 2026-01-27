@@ -93,9 +93,9 @@ class ClientMultiFedAvgWithMultiFedPredictv0(MultiFedAvgClient):
             fc = metrics["fc"]
             il = metrics["il"]
             similarity = metrics["similarity"]
-            data_heterogeneity_degree = 1-metrics["homogeneity_degree"]
-            ps = 1-metrics["ps"]
-            s = cosine_similarity(self.p_ME[me], p_ME[me])
+            data_heterogeneity_degree = metrics["heterogeneity_degree"]
+            ps = metrics["ps"]
+            s = cosine_similarity(self.p_ME[me], p_ME[me]) # the lower its value the lower the personalization
             a = 0.8  # fc > a gw=1
             # b = [0.54, 0.56]
             b = [0.65, 0.65, 0.65]  # il < b gw=1

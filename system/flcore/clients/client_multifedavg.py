@@ -313,7 +313,7 @@ class MultiFedAvgClient:
                     )
                     self.trainloader[me] = self.recent_trainloader[me]
                     p_ME, fc_ME, il_ME = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id,
-                                                                    self.n_classes, self.concept_drift_window)
+                                                                    self.n_classes, self.concept_drift_window_train)
                     self.p_ME, self.fc_ME, self.il_ME = p_ME, fc_ME, il_ME
                 elif data_shift_flag and self.data_shift_config[me]["type"] in ["concept_drift"]:
                     print(
@@ -464,7 +464,18 @@ class MultiFedAvgClient:
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def _get_datasets_metrics(self, trainloader, ME, client_id, n_classes, concept_drift_window=None):
+        """
 
+        :param trainloader:
+        :param ME:
+        :param client_id:
+        :param n_classes:
+        :param concept_drift_window:
+        :return:
+            p_ME: proportion of samples per class per model
+            fc_ME: fraction of classes per model
+            il_ME: imbalance level per model
+        """
         try:
             p_ME = []
             fc_ME = []

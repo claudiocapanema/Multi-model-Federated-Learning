@@ -147,9 +147,9 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     (parameters, num_examples)
                     for parameters, num_examples, fit_res in results_mefl[me]
                 ]
-                aggregated_ndarrays_mefl[me] = self.aggregate(weights_results, self.homogeneity_degree[me], self.parameters_aggregated_mefl[me], server_round, me)
+                aggregated_ndarrays_mefl[me] = self.aggregate(weights_results, self.heterogeneity_degree[me], self.parameters_aggregated_mefl[me], server_round, me)
                 if len(weights_results) > 1:
-                    aggregated_ndarrays_mefl[me] = self.aggregate(weights_results, self.homogeneity_degree[me], self.parameters_aggregated_mefl[me], server_round, me)
+                    aggregated_ndarrays_mefl[me] = self.aggregate(weights_results, self.heterogeneity_degree[me], self.parameters_aggregated_mefl[me], server_round, me)
                 elif len(weights_results) == 1:
                     aggregated_ndarrays_mefl[me] = results_mefl[me][0][0]
 
@@ -207,16 +207,16 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 self.il[me] = self._weighted_average(il_list[me], num_samples_list[me])
                 self.ps[me] = self._weighted_average(ps_list[me], num_samples_list[me])
                 self.similarity[me] = self._weighted_average(il_list[me], num_samples_list[me])
-                self.homogeneity_degree[me] = round((self.fc[me] + (1 - self.il[me])) / 2, 2)
-                # if self.homogeneity_degree[me] > self.prediction_layer[me]["non_iid"]:
-                print(f"round {server_round} fc {self.fc[me]} il {self.il[me]} similarity {self.similarity[me]} ps {self.ps[me]} homogeneity_degree {self.homogeneity_degree[me]}")
+                self.heterogeneity_degree[me] = round(((1 - self.fc[me]) + (self.il[me])) / 2, 2)
+                # if self.heterogeneity_degree[me] > self.prediction_layer[me]["non_iid"]:
+                print(f"round {server_round} fc {self.fc[me]} il {self.il[me]} similarity {self.similarity[me]} ps {self.ps[me]} heterogeneity_degree {self.heterogeneity_degree[me]}")
                 # n_layers = 2 * 1
                 # # n_layers = 2 * 2 # melhor cnn
                 # # n_layers = 1 # melhor gru
                 # if server_round <= 59:
                 # # if server_round <= 29 or server_round >= 60:
-                #     print(f"Rodada {server_round} substituiu. Novo {self.homogeneity_degree[me]} antigo {self.prediction_layer[me]['non_iid']} diferença: {self.homogeneity_degree[me] - self.prediction_layer[me]["non_iid"]}")
-                #     self.prediction_layer[me]["non_iid"] = self.homogeneity_degree[me]
+                #     print(f"Rodada {server_round} substituiu. Novo {self.heterogeneity_degree[me]} antigo {self.prediction_layer[me]['non_iid']} diferença: {self.heterogeneity_degree[me] - self.prediction_layer[me]["non_iid"]}")
+                #     self.prediction_layer[me]["non_iid"] = self.heterogeneity_degree[me]
                 #     # label shift
                 #     self.prediction_layer[me]["parameters"] = parameters_aggregated_mefl[me][-n_layers:]
                 #     # concept drift
@@ -264,7 +264,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             print("aggregate_fit error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def aggregate(self, results: list[tuple[NDArrays, int]], homogeneity_degree: float,
+    def aggregate(self, results: list[tuple[NDArrays, int]], heterogeneity_degree: float,
                   current_parameters: list[tuple[NDArrays, int]], t: int, me: int) -> NDArrays:
         try:
             """Compute weighted average."""
@@ -292,13 +292,13 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 for layer_updates in zip(*weighted_weights)
             ]
             # if t <= 59:
-            #     homogeneity_degree = 1
+            #     heterogeneity_degree = 1
             # if t == 1 or (t==30 and me==0) or (t==1 and me==1) or (t==2 and me==2):
-            #     homogeneity_degree = 1
+            #     heterogeneity_degree = 1
 
-            if self.version in ["iti"]:
-                homogeneity_degree = 1
-            weighted_weights = [np.array(original_layer + homogeneity_degree * layer) for original_layer, layer in
+            if self.version in ["iti"] or heterogeneity_degree < 0.5:
+                heterogeneity_degree = 0
+            weighted_weights = [np.array(original_layer + (1 - heterogeneity_degree) * layer) for original_layer, layer in
                                 zip(current_parameters, weights_prime)]
             return weighted_weights
         except Exception as e:
@@ -483,7 +483,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             for me in range(self.ME):
                 clients_evaluate_list = []
                 freeze = True if len(self.selected_clients_m[me]) == 0 else False
-                metrics = {"fc": self.fc[me], "il": self.il[me], "homogeneity_degree": self.homogeneity_degree[me], "ps": self.ps[me], "similarity": self.similarity[me], "freeze": freeze, "freeze_round": self.t_hat[me]}
+                metrics = {"fc": self.fc[me], "il": self.il[me], "heterogeneity_degree": self.heterogeneity_degree[me], "ps": self.ps[me], "similarity": self.similarity[me], "freeze": freeze, "freeze_round": self.t_hat[me]}
                 for i in range(len(self.clients)):
                     client_dict = {}
                     client_dict["client"] = self.clients[i]
@@ -515,7 +515,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
     #         print("inicio s")
     #         for me in range(self.ME):
     #             clients_evaluate_list = []
-    #             metrics = {"fc": self.fc[me], "il": self.il[me], "homogeneity_degree": self.homogeneity_degree[me], "ps": self.ps[me], "similarity": self.similarity[me]}
+    #             metrics = {"fc": self.fc[me], "il": self.il[me], "heterogeneity_degree": self.heterogeneity_degree[me], "ps": self.ps[me], "similarity": self.similarity[me]}
     #             for i in range(len(self.clients)):
     #                 client_dict = {}
     #                 client_dict["client"] = self.clients[i]
@@ -546,7 +546,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
     #         metrics_aggregated[me]["training clients and models"] = self.selected_clients_m[me]
     #         metrics_aggregated[me]["fc"] = self.fc[me]
     #         metrics_aggregated[me]["il"] = self.il[me]
-    #         metrics_aggregated[me]["dh"] = self.homogeneity_degree[me]
+    #         metrics_aggregated[me]["dh"] = self.heterogeneity_degree[me]
     #         metrics_aggregated[me]["ps"] = self.ps[me]
     #
     #         for metric in metrics_aggregated[me]:
