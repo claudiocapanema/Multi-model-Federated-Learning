@@ -53,12 +53,13 @@ def read_data(read_solutions, read_dataset_order):
                     hue_order.append(strategy)
             except Exception as e:
                 print("\n######### \nFaltando", paths[i])
+                print(df.columns)
                 print(e)
 
     return df_concat, hue_order
 
 
-def line(df, base_dir, x, y, hue=None, style=None, ci=None, hue_order=None, y_max=100):
+def line(df, base_dir, x, y, hue=None, style=None, hue_order=None, y_max=100, ci=("ci", 95)):
 
     datasets = df["Dataset"].unique().tolist()
 
@@ -73,7 +74,7 @@ def line(df, base_dir, x, y, hue=None, style=None, ci=None, hue_order=None, y_ma
 
             line_plot(df=df_plot, base_dir=base_dir, ax=axs[j],
                       file_name="""solutions_{}""".format(datasets), x_column=x, y_column=y,
-                      hue=hue, hue_order=hue_order, ci=ci, title="", tipo=None, y_lim=True, y_max=y_max)
+                      hue=hue, hue_order=hue_order, title="", tipo=None, y_lim=True, y_max=y_max, ci=ci)
             axs[j].set_title(r"""Dataset: {}""".format(datasets[j]), size=10)
 
             if j > 0:
@@ -127,21 +128,23 @@ if __name__ == "__main__":
     # experiment_id = "label_shift#1"
     # experiment_id = "label_shift#2"
     # experiment_id = "label_shift#3"
-    experiment_id = "label_shift#3_gradual"
+    # experiment_id = "label_shift#3_gradual"
+    experiment_id = "label_shift#1_sudden"
+    experiment_id = "label_shift#2_sudden"
     # experiment_id = "label_shift#4"
     # experiment_id = "label_shift#4_gradual"
     # experiment_id = "label_shift#5"
     # experiment_id = "label_shift#6"
-    # experiment_id = "concept_drift#1"
     # experiment_id = "concept_drift#2"
+    # experiment_id = "concept_drift#1_sudden"
     # experiment_id = "concept_drift#1_gradual"
     # experiment_id = "concept_drift#2_gradual"
     # experiment_id = "concept_drift#1_recurrent"
     # experiment_id = "concept_drift#2_recurrent"
-    total_clients = 40
+    total_clients = 30
     # alphas = [10.0, 10.0]
-    alphas = [0.1, 0.1, 0.1]
-    # alphas = [10.0, 10.0, 10.0]
+    # alphas = [0.1, 0.1, 0.1]
+    alphas = [10.0, 10.0, 10.0]
     # alphas = [1.0, 0.1, 0.1]
     # alphas = [0.1, 0.1]
     # alphas = [10.0]
@@ -150,12 +153,13 @@ if __name__ == "__main__":
     # alphas = [10.0, 0.1]
     # dataset = ["CIFAR10", "WISDM-W"]
     # dataset = ["WISDM-W"]
-    # dataset = ["ImageNet10", "WISDM-W", "Gowalla"]
-    dataset = ["ImageNet10", "WISDM-W", "wikitext"]
+    dataset = ["WISDM-W", "ImageNet10", "Gowalla"]
+    # dataset = ["ImageNet10", "WISDM-W", "wikitext"]
     # dataset = ["WISDM-W", "ImageNet10"]
     # dataset = ["EMNIST", "CIFAR10"]
     # models_names = ["cnn_c"]
-    model_name = [ "CNN", "gru", "lstm"]
+    # model_name = [ "CNN", "gru", "lstm"]
+    model_name = ["gru", "CNN", "lstm"]
     # model_name = ["gru"]
     # model_name = ["CNN", "gru"]
     fraction_fit = 0.3
@@ -165,7 +169,8 @@ if __name__ == "__main__":
     train_test = "test"
     # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
     solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP"]
-    solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+MFP", "MultiFedAvg+FP", "MultiFedAvg"]
+    # solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+MFP", "MultiFedAvg+FP", "MultiFedAvg"]
+    solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg"]
 
     read_solutions = {solution: [] for solution in solutions}
     read_dataset_order = []
@@ -202,9 +207,11 @@ if __name__ == "__main__":
     df, hue_order = read_data(read_solutions, read_dataset_order)
     df = df[['Round (t)', 'Fraction fit', 'Alpha', 'Solution', 'Accuracy (%)', 'Dataset', 'Strategy', 'Version', 'Table']]
     print(df)
+    print(df["Table"].unique())
 
-    line(df, write_path, x="Round (t)", y="Accuracy (%)", hue="Table")
-    line(df, write_path, x="Round (t)", y="Accuracy (%)", hue="Table")
+    line(df, write_path, x="Round (t)", y="Accuracy (%)", hue="Table", hue_order=solutions, ci=None)
+    line(df, write_path, x="Round (t)", y="Accuracy (%)", hue="Table", hue_order=solutions, ci=None)
+    print(write_path)
     # line(df, write_path, x="Round (t)", y="Accuracy (%)", hue="Table")
     # line(df, write_path, x="Round (t)", y="Loss", hue="Strategy", style="Version", hue_order=hue_order, y_max=1)
     # line(df, write_path, x="Round (t)", y="Loss", hue="Strategy", style="Version", hue_order=hue_order, y_max=1)

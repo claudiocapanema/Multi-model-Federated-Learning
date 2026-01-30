@@ -88,6 +88,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
         self.reduced = {me: [] for me in range(self.ME)}
         self.reduction_fraction_list = {me: [] for me in range(self.ME)}
         self.ps_list = {me: [] for me in range(self.ME)}
+        self.heterogeneity_degree = [-1] * self.ME
 
     def set_clients(self):
 
@@ -135,10 +136,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 self.drift_flag[me].append(result["non_iid"]["drift"])
                 self.reduced[me].append(result["non_iid"]["reduced"])
 
-            aggregated_ndarrays_mefl = {me: None for me in range(self.ME)}
             aggregated_ndarrays_mefl = {me: [] for me in range(self.ME)}
-            weights_results_mefl = {me: [] for me in range(self.ME)}
-            # parameters_aggregated_mefl = {me: [] for me in range(self.ME)}
 
             print(f"modelos treinados rodada {server_round} trained models {trained_models}")
             for me in trained_models:
@@ -169,7 +167,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
             print("""finalizou aggregated fit""")
 
-            self.parameters_aggregated_mefl = self.parameters_aggregated_mefl
             self.metrics_aggregated_mefl = metrics_aggregated_mefl
 
             parameters_aggregated_mefl, metrics_aggregated_mefl = self.parameters_aggregated_mefl, self.metrics_aggregated_mefl
@@ -407,7 +404,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 #  or t in {0: [10, 40, 70], 1: [20, 50, 80], 2: [30, 60, 90]}[me]
                 print(f"Rodada {t} modelo {me} resultado drift degree = {drift_degree[me]} ps = {drift_ps[me]}")
                 # if (drift_degree[me] >= 0.5 or self.ps[me] > 0) or self.increased_training_intensity[me] > 0:
-                if self.ps[me] > 0:
+                if self.ps[me] > 0 and self.heterogeneity_degree[me] > 0.5:
                         data_drift_model = me
                         # if drift_degree[me] > 0.5 and drift_ps[me] > 0:
                         #     data_shift_untrained_clients = (self.total_clients - len(self.reduced[me])) * drift_degree[me]

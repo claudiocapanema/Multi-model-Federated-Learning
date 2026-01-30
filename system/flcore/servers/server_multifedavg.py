@@ -159,9 +159,9 @@ class MultiFedAvg:
 
                     for i in range(len(self.selected_clients[me])):
                         fit_results.append(self.clients[self.selected_clients[me][i]].fit(me, t, self.parameters_aggregated_mefl[me]))
-                print("antes ag")
+                # print("antes ag")
                 self.parameters_aggregated_mefl, metrics_aggregated_mefl = self.aggregate_fit(server_round=t, results=fit_results, failures=[])
-                print("passou agg")
+                # print("passou agg")
                 self.evaluate(t, self.parameters_aggregated_mefl)
 
         except Exception as e:
@@ -240,10 +240,12 @@ class MultiFedAvg:
             if server_round > 10:
                 self._save_data_metrics()
 
-            print("""finalizou aggregated fit""")
+            # print("""finalizou aggregated fit""")
 
             self.parameters_aggregated_mefl = self.parameters_aggregated_mefl
             self.metrics_aggregated_mefl = metrics_aggregated_mefl
+
+            print(f"rodada {server_round} metricas agregadas de treino {self.metrics_aggregated_mefl}")
 
             return self.parameters_aggregated_mefl, metrics_aggregated_mefl
         except Exception as e:
@@ -291,6 +293,7 @@ class MultiFedAvg:
                 self.add_metrics(server_round, metrics_aggregated_mefl, me)
                 self._save_results(server_round, me)
 
+            print(f"rodada {server_round} metricas agregadas de teste {metrics_aggregated_mefl}")
 
             return loss_aggregated_mefl, metrics_aggregated_mefl
         except Exception as e:
@@ -441,7 +444,7 @@ class MultiFedAvg:
 
 
             # print("File path: " + file_path)
-            print("data get results: ", data)
+            # print("data get results: ", data)
 
             return file_path, header, data
         except Exception as e:

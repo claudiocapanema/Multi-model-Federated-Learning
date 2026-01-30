@@ -51,7 +51,7 @@ def label_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_r
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "type": type_} for me in range(ME)}
             elif experiment_id == "label_shift#2_sudden":
-                ME_concept_drift_rounds = [[int(n_rounds * 0.1)],
+                ME_concept_drift_rounds = [[int(n_rounds * 0.3)],
                                            [int(n_rounds * 0.5)],
                                            [int(n_rounds * 0.7)]]
                 new_alphas = [[0.1], [0.1], [0.1]]
