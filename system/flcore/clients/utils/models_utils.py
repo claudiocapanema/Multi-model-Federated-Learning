@@ -329,7 +329,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
                          , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-1-Words-3743'}[dataset_name],
                     partitioners={"train": partitioner},
-                    seed=fold_id
+                    seed=1
                 )
         else:
             # dts = dt.load_from_disk(f"datasets/{dataset_name}")
@@ -362,23 +362,23 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                 logger.info("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
                 time.sleep(1)
         test_size = 1 - data_sampling_percentage
-        # partition_train_test = partition.train_test_split(test_size=test_size, seed=1)
+        partition_train_test = partition.train_test_split(test_size=test_size, seed=1)
         # ==============================
         # K-FOLD LOCAL (intra-client)
         # ==============================
-        num_samples = len(partition)
-        indices = np.arange(num_samples)
-
-        rng = np.random.default_rng(seed=k_fold)
-        rng.shuffle(indices)
-
-        folds = np.array_split(indices, k_fold)
-
-        val_idx = folds[fold_id-1]
-        train_idx = np.concatenate([f for i, f in enumerate(folds) if i != fold_id])
-
-        partition_train = partition.select(train_idx)
-        partition_test = partition.select(val_idx)
+        # num_samples = len(partition)
+        # indices = np.arange(num_samples)
+        #
+        # rng = np.random.default_rng(seed=k_fold)
+        # rng.shuffle(indices)
+        #
+        # folds = np.array_split(indices, k_fold)
+        #
+        # val_idx = folds[fold_id-1]
+        # train_idx = np.concatenate([f for i, f in enumerate(folds) if i != fold_id])
+        #
+        # partition_train = partition.select(train_idx)
+        # partition_test = partition.select(val_idx)
 
         if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla", "wikitext"]:
             # Divide data on each node: 80% train, 20% test
@@ -405,10 +405,11 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
             return batch
 
         if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla", "wikitext"]:
-            # partition_train = partition_train_test["train"].with_transform(apply_transforms_train)
-            # partition_test = partition_train_test["test"].with_transform(apply_transforms_test)
-            partition_train = partition_train.with_transform(apply_transforms_train)
-            partition_test = partition_test.with_transform(apply_transforms_test)
+            partition_train = partition_train_test["train"].with_transform(apply_transforms_train)
+            partition_test = partition_train_test["test"].with_transform(apply_transforms_test)
+
+            # partition_train = partition_train.with_transform(apply_transforms_train)
+            # partition_test = partition_test.with_transform(apply_transforms_test)
 
         GLOBAL_TORCH_GENERATOR = torch.Generator()
         GLOBAL_TORCH_GENERATOR.manual_seed(fold_id)

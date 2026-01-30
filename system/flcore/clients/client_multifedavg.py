@@ -50,6 +50,30 @@ def label_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_r
                 type_ = "label_shift"
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "type": type_} for me in range(ME)}
+            elif experiment_id == "label_shift#2_sudden":
+                ME_concept_drift_rounds = [[int(n_rounds * 0.1)],
+                                           [int(n_rounds * 0.5)],
+                                           [int(n_rounds * 0.7)]]
+                new_alphas = [[0.1], [0.1], [0.1]]
+                type_ = "label_shift"
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
+            elif experiment_id == "label_shift#2_gradual":
+                ME_concept_drift_rounds = [[int(n_rounds * 0.3) + client_id // gradual_rounds],
+                                           [int(n_rounds * 0.5) + client_id // gradual_rounds],
+                                           [int(n_rounds * 0.7) + client_id // gradual_rounds]]
+                new_alphas = [[0.1], [0.1], [0.1]]
+                type_ = "label_shift"
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
+            elif experiment_id == "label_shift#2_recurrent":
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5)],
+                                           [int(n_rounds * 0.3), int(n_rounds * 0.6)],
+                                           [int(n_rounds * 0.4), int(n_rounds * 0.7)]]
+                new_alphas = [[0.1, 10.0], [0.1, 10.0], [0.1, 10.0]]
+                type_ = "label_shift"
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
             else:
                 config = {}
 
@@ -155,7 +179,6 @@ class MultiFedAvgClient:
             self.ME = len(self.model)
             self.concept_drift_window_train = [0] * self.ME
             self.concept_drift_window_test = [0] * self.ME
-            self.initial_alpha = self.alpha_train
             self.total_clients  = args.total_clients
 
             self.number_of_rounds = args.number_of_rounds
@@ -163,8 +186,8 @@ class MultiFedAvgClient:
             print("""args do cliente: {} {}""".format(self.args.client_id, self.alpha_train))
             self.client_id = id
             self.trainloader = [None] * self.ME
-            self.recent_trainloader = [None] * self.ME
             self.valloader = [None] * self.ME
+            self.recent_trainloader = [None] * self.ME
             self.optimizer = [None] * self.ME
             self.index = 0
             self.local_epochs = self.args.local_epochs
@@ -185,27 +208,21 @@ class MultiFedAvgClient:
             print(f"concept drift config {self.data_shift_config} concept drift id {self.experiment_id}")
 
             for me in range(self.ME):
-                self.trainloader[me], self.valloader[me] = load_data(
-                    dataset_name=self.args.dataset[me],
-                    alpha=self.alpha_train[me],
-                    data_sampling_percentage=self.args.data_percentage,
-                    partition_id=self.client_id,
-                    num_partitions=self.args.total_clients + 1,
-                    batch_size=self.batch_size[me],
-                    fold_id=self.fold_id,
-                )
-                self.recent_trainloader[me] = copy.deepcopy(self.trainloader[me])
+                # self.trainloader[me], self.valloader[me] = load_data(
+                #     dataset_name=self.args.dataset[me],
+                #     alpha=self.alpha_train[me],
+                #     data_sampling_percentage=self.args.data_percentage,
+                #     partition_id=self.client_id,
+                #     num_partitions=self.args.total_clients + 1,
+                #     batch_size=self.batch_size[me],
+                #     fold_id=self.fold_id,
+                # )
+                self.update_local_train_data(1, me)
+                # self.update_local_test_data(1, me)
                 self.optimizer[me] = self._get_optimizer(dataset_name=self.args.dataset[me], me=me)
                 print("""leu dados cid: {} dataset: {} size:  {}""".format(self.client_id, self.args.dataset[me],
                                                                                  len(self.trainloader[me].dataset)))
 
-                classes = []
-                print("modelo: ", me)
-                for batch in self.trainloader[me]:
-                    labels = batch["label"]
-                    classes += labels.numpy().tolist()
-                # print("oi ", classes)
-                # print("classes : ", np.unique(classes, return_counts=True))
             self.p_ME, self.fc_ME, self.il_ME = self._get_datasets_metrics(self.trainloader, self.ME,
                                                                            self.client_id,
                                                                            self.n_classes)
@@ -235,11 +252,11 @@ class MultiFedAvgClient:
             random.seed(t+self.fold_id)
             np.random.seed(t+self.fold_id)
             torch.manual_seed(t+self.fold_id)
-            # self.trainloader[me] = self.recent_trainloader[me]
             set_weights(self.model[me], global_model)
 
             # Update alpha to simulate data shift
-            self.update_local_train_data(t, me)
+            if t > 1:
+                self.update_local_train_data(t, me)
 
             self.optimizer[me] = self._get_optimizer(dataset_name=self.args.dataset[me], me=me)
             results = train(
@@ -293,35 +310,67 @@ class MultiFedAvgClient:
     def update_local_train_data(self, t, me):
 
         try:
-            alpha_me, concept_drift_window, data_shift_flag = self._data_shift_flag(t, me, train=True)
-            print(f"Treinar modelo {me} rodada {t} cliente {self.client_id} - data drift flag {data_shift_flag} comparacao alpha {self.alpha_train[me]} novo {alpha_me} - concept drift_window antigo {self.concept_drift_window_train[me]} novo {concept_drift_window}")
-            if self.data_shift_config != {}:
-                print(self.data_shift_config)
-            if self.data_shift_config != {}:
-                if (data_shift_flag and self.data_shift_config[me]["type"] in ["label_shift"]):
-                    print(f"Atualizou dataset de treino do modelo {me} na rodada {t}. Alpha de {self.alpha_train[me]} para {alpha_me} - concept drift_window antigo {self.concept_drift_window_train[me]} novo {concept_drift_window} - cliente {self.client_id}")
-                    self.alpha_train[me] = alpha_me
-                    index = 0
-                    self.recent_trainloader[me], self.valloader[me] = load_data(
-                        dataset_name=self.args.dataset[me],
-                        alpha=self.alpha_train[me],
-                        data_sampling_percentage=self.args.data_percentage,
-                        partition_id=int((self.args.client_id + index) % self.args.total_clients),
-                        num_partitions=self.args.total_clients + 1,
-                        batch_size=self.args.batch_size,
-                        fold_id=self.fold_id
-                    )
-                    self.trainloader[me] = self.recent_trainloader[me]
-                    p_ME, fc_ME, il_ME = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id,
-                                                                    self.n_classes, self.concept_drift_window_train)
-                    self.p_ME, self.fc_ME, self.il_ME = p_ME, fc_ME, il_ME
-                elif data_shift_flag and self.data_shift_config[me]["type"] in ["concept_drift"]:
-                    print(
-                        f"Atualizou dataset de treino do modelo {me} na rodada {t}. Alpha de {self.alpha_train[me]} para {alpha_me} - concept drift_window {self.concept_drift_window_train[me]} - cliente {self.client_id}")
-                    self.concept_drift_window_train[me] = concept_drift_window
-                    p_ME, fc_ME, il_ME = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id,
-                                                                    self.n_classes, self.concept_drift_window_train)
-                    self.p_ME, self.fc_ME, self.il_ME = p_ME, fc_ME, il_ME
+            if t == 1:
+                self.trainloader[me], self.valloader[me] = load_data(
+                    dataset_name=self.args.dataset[me],
+                    alpha=self.alpha_train[me],
+                    data_sampling_percentage=self.args.data_percentage,
+                    partition_id=self.client_id,
+                    num_partitions=self.args.total_clients + 1,
+                    batch_size=self.batch_size[me],
+                    fold_id=self.fold_id,
+                )
+
+                self.recent_trainloader[me] = copy.deepcopy(self.trainloader[me])
+                p_ME, fc_ME, il_ME = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id,
+                                                                self.n_classes, self.concept_drift_window_train)
+                self.p_ME, self.fc_ME, self.il_ME = p_ME, fc_ME, il_ME
+
+            else:
+
+                alpha_me, concept_drift_window, data_shift_flag = self._data_shift_flag(t, me, train=True)
+                print(f"Treinar modelo {me} rodada {t} cliente {self.client_id} - data drift flag {data_shift_flag} comparacao alpha {self.alpha_train[me]} novo {alpha_me} - concept drift_window antigo {self.concept_drift_window_train[me]} novo {concept_drift_window}")
+
+                if self.data_shift_config != {}:
+                    print(self.data_shift_config)
+                    if (data_shift_flag and self.data_shift_config[me]["type"] in ["label_shift"]):
+                        if self.alpha_train[me] != self.alpha_test[me] and self.alpha_test[me] == alpha_me:
+                            self.alpha_train[me] = self.alpha_test[me]
+                            self.recent_trainloader[me] = copy.deepcopy(self.trainloader[me])
+                        else:
+                            print(f"Atualizou dataset de treino do modelo {me} na rodada {t}. Alpha de {self.alpha_train[me]} para {alpha_me} - concept drift_window antigo {self.concept_drift_window_train[me]} novo {concept_drift_window} - cliente {self.client_id}")
+                            self.alpha_train[me] = alpha_me
+                            self.alpha_test[me] = alpha_me
+                            index = 0
+                            # self.trainloader[me], self.valloader[me] = load_data(
+                            #     dataset_name=self.args.dataset[me],
+                            #     alpha=self.alpha_train[me],
+                            #     data_sampling_percentage=self.args.data_percentage,
+                            #     partition_id=int((self.args.client_id + index) % self.args.total_clients),
+                            #     num_partitions=self.args.total_clients + 1,
+                            #     batch_size=self.args.batch_size,
+                            #     fold_id=self.fold_id
+                            # )
+                            self.trainloader[me], self.valloader[me] = load_data(
+                                dataset_name=self.args.dataset[me],
+                                alpha=self.alpha_train[me],
+                                data_sampling_percentage=self.args.data_percentage,
+                                partition_id=self.client_id,
+                                num_partitions=self.args.total_clients + 1,
+                                batch_size=self.batch_size[me],
+                                fold_id=self.fold_id,
+                            )
+                            self.recent_trainloader[me] = copy.deepcopy(self.trainloader[me])
+                            p_ME, fc_ME, il_ME = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id,
+                                                                            self.n_classes, self.concept_drift_window_train)
+                            self.p_ME, self.fc_ME, self.il_ME = p_ME, fc_ME, il_ME
+                    elif data_shift_flag and self.data_shift_config[me]["type"] in ["concept_drift"]:
+                        print(
+                            f"Atualizou dataset de treino do modelo {me} na rodada {t}. Alpha de {self.alpha_train[me]} para {alpha_me} - concept drift_window {self.concept_drift_window_train[me]} - cliente {self.client_id}")
+                        self.concept_drift_window_train[me] = concept_drift_window
+                        p_ME, fc_ME, il_ME = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id,
+                                                                        self.n_classes, self.concept_drift_window_train)
+                        self.p_ME, self.fc_ME, self.il_ME = p_ME, fc_ME, il_ME
 
         except Exception as e:
             print(f"update_local_train_data error {self.data_shift_config}")
@@ -330,25 +379,25 @@ class MultiFedAvgClient:
     def update_local_test_data(self, t, me):
 
         try:
+
             if self.data_shift_config != {}:
                 alpha_me, concept_drift_window, data_shift_flag = self._data_shift_flag(t, me, train=False)
-                if (data_shift_flag and self.data_shift_config[me]["type"] in ["label_shift"]):
-                    print(f"Atualizou dataset de teste de {me}. Alpha de {self.alpha_test[me]} para {alpha_me} - cliente {self.client_id} - concept drift de {self.concept_drift_window_test} para {concept_drift_window}")
+                if (self.alpha_test[me] != alpha_me and data_shift_flag and self.data_shift_config[me]["type"] in ["label_shift"]):
+                    print(f"Atualizou dataset de teste de {me} rodada {t}. Alpha de {self.alpha_test[me]} para {alpha_me} - cliente {self.client_id} - concept drift de {self.concept_drift_window_test} para {concept_drift_window}")
                     self.alpha_test[me] = alpha_me
-                    index = 0
                     self.recent_trainloader[me], self.valloader[me] = load_data(
                         dataset_name=self.args.dataset[me],
-                        alpha=self.alpha_test[me],
+                        alpha=self.alpha_train[me],
                         data_sampling_percentage=self.args.data_percentage,
-                        partition_id=int((self.args.client_id + index) % self.args.total_clients),
+                        partition_id=self.client_id,
                         num_partitions=self.args.total_clients + 1,
-                        batch_size=self.args.batch_size,
-                        fold_id=self.fold_id
+                        batch_size=self.batch_size[me],
+                        fold_id=self.fold_id,
                     )
                     p_ME, fc_ME, il_ME = self.p_ME, self.fc_ME, self.il_ME
                 elif data_shift_flag and self.data_shift_config[me]["type"] in ["concept_drift"] and t - self.lt[me] > 0:
                     print(
-                        f"Atualizou dataset de teste de {me}. Alpha de {self.alpha_test[me]} para {alpha_me} - cliente {self.client_id} - concept drift de {self.concept_drift_window_test} para {concept_drift_window}")
+                        f"Atualizou dataset de teste de {me} rodada {t}. Alpha de {self.alpha_test[me]} para {alpha_me} - cliente {self.client_id} - concept drift de {self.concept_drift_window_test} para {concept_drift_window}")
                     # Since we assume every client is tested in every round, its local test data is updated once every
                     # time data shift occurs
                     # Recurrent
@@ -513,7 +562,7 @@ class MultiFedAvgClient:
 
 
 
-        
+
 
 
 
