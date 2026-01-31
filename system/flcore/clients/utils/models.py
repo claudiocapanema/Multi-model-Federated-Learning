@@ -87,6 +87,35 @@ class CNN(nn.Module):
             print("""CNN forward {}""".format(self.mid_dim))
             print('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
+class NextPlaceModel(nn.Module):
+    def __init__(self, num_classes, embed_dim, hidden_dim):
+        super().__init__()
+
+        self.venue_embedding = nn.Embedding(num_classes, embed_dim)
+        self.hour_embedding = nn.Embedding(24, embed_dim)
+        self.weekday_embedding = nn.Embedding(7, embed_dim)
+        self.delta_embedding = nn.Embedding(6, embed_dim)
+
+        self.lstm = nn.LSTM(embed_dim * 4, hidden_dim, batch_first=True, dropout=0.3)
+        self.fc = nn.Linear(hidden_dim, num_classes)
+
+    def forward(self, x):
+        venues = x[:,:,0]
+        hours = x[:,:,1]
+        weekdays = x[:,:,2]
+        deltas = x[:,:,3]
+
+        x = torch.cat([
+            self.venue_embedding(venues),
+            self.hour_embedding(hours),
+            self.weekday_embedding(weekdays),
+            self.delta_embedding(deltas)
+        ], dim=2)
+
+        out,_ = self.lstm(x)
+        out = out[:,-1,:]
+        return self.fc(out)
+
 import torch.nn as nn
 import torch.nn.functional as F
 

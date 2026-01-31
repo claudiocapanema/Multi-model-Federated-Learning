@@ -160,7 +160,7 @@ class MultiFedAvgClient:
             torch.manual_seed(id + self.fold_id)
             self.batch_size = []
             for dataset in args.dataset:
-                self.batch_size.append({"CIFAR10": 32, "WISDM-W": 16, "ImageNet10": 10, "Gowalla": 64, "wikitext": 256}[dataset])
+                self.batch_size.append({"CIFAR10": 32, "WISDM-W": 16, "ImageNet10": 10, "Gowalla": 64, "wikitext": 256, "Foursquare": 64}[dataset])
             self.lr_dict = {'EMNIST':0.01,
                             'MNIST': 0.01,
                             'CIFAR10': 0.01,
@@ -172,7 +172,8 @@ class MultiFedAvgClient:
                             'ImageNet10': 0.01,
                             "ImageNet_v2": 0.01,
                             "Gowalla": 0.001,
-                            "wikitext": 0.001}
+                            "wikitext": 0.001,
+                            "Foursquare": 1e-4}
             self.model = model
             self.alpha_train = [float(i) for i in args.alpha]
             self.alpha_test = [float(i) for i in args.alpha]
@@ -198,7 +199,7 @@ class MultiFedAvgClient:
             self.models_size = self._get_models_size()
             self.n_classes = [
                 {'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'ImageNet': 15,
-                 "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30}[dataset] for dataset in
+                 "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30, "Foursquare": 107}[dataset] for dataset in
                 self.args.dataset]
             self.loss_ME = [10] * self.ME
             # Concept drift parameters
@@ -327,11 +328,10 @@ class MultiFedAvgClient:
                 self.p_ME, self.fc_ME, self.il_ME = p_ME, fc_ME, il_ME
 
             else:
-
-                alpha_me, concept_drift_window, data_shift_flag = self._data_shift_flag(t, me, train=True)
-                print(f"Treinar modelo {me} rodada {t} cliente {self.client_id} - data drift flag {data_shift_flag} comparacao alpha {self.alpha_train[me]} novo {alpha_me} - concept drift_window antigo {self.concept_drift_window_train[me]} novo {concept_drift_window}")
-
                 if self.data_shift_config != {}:
+                    alpha_me, concept_drift_window, data_shift_flag = self._data_shift_flag(t, me, train=True)
+                    print(f"Treinar modelo {me} rodada {t} cliente {self.client_id} - data drift flag {data_shift_flag} comparacao alpha {self.alpha_train[me]} novo {alpha_me} - concept drift_window antigo {self.concept_drift_window_train[me]} novo {concept_drift_window}")
+
                     print(self.data_shift_config)
                     if (data_shift_flag and self.data_shift_config[me]["type"] in ["label_shift"]):
                         if self.alpha_train[me] != self.alpha_test[me] and self.alpha_test[me] == alpha_me:
@@ -507,7 +507,8 @@ class MultiFedAvgClient:
                     'ImageNet10': torch.optim.SGD(self.model[me].parameters(), self.lr_dict[dataset_name]),
                     "ImageNet_v2": torch.optim.Adam(self.model[me].parameters(), self.lr_dict[dataset_name]),
                     "Gowalla": torch.optim.RMSprop(self.model[me].parameters(), self.lr_dict[dataset_name]),
-                    "wikitext": torch.optim.RMSprop(self.model[me].parameters(), self.lr_dict[dataset_name])}[dataset_name]
+                    "wikitext": torch.optim.RMSprop(self.model[me].parameters(), self.lr_dict[dataset_name]),
+                    "Foursquare": torch.optim.Adam(self.model[me].parameters(), self.lr_dict[dataset_name]),}[dataset_name]
         except Exception as e:
             print("_get_optimizer error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
