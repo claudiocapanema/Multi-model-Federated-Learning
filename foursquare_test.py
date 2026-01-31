@@ -28,7 +28,7 @@ df = pd.read_csv(
     sep="\t",
     header=None,
     names=["userid", "venueid", "datetime", "lat", "lng"]
-).head(30000000)
+).head(6000000)
 
 print(df.head())
 print(df.columns)
