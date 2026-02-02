@@ -199,7 +199,7 @@ class MultiFedAvgClient:
             self.models_size = self._get_models_size()
             self.n_classes = [
                 {'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'ImageNet': 15,
-                 "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30, "Foursquare": 107}[dataset] for dataset in
+                 "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30, "Foursquare": 100}[dataset] for dataset in
                 self.args.dataset]
             self.loss_ME = [10] * self.ME
             # Concept drift parameters
@@ -323,9 +323,6 @@ class MultiFedAvgClient:
                 )
 
                 self.recent_trainloader[me] = copy.deepcopy(self.trainloader[me])
-                p_ME, fc_ME, il_ME = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id,
-                                                                self.n_classes, self.concept_drift_window_train)
-                self.p_ME, self.fc_ME, self.il_ME = p_ME, fc_ME, il_ME
 
             else:
                 if self.data_shift_config != {}:
@@ -397,7 +394,7 @@ class MultiFedAvgClient:
                     p_ME, fc_ME, il_ME = self.p_ME, self.fc_ME, self.il_ME
                 elif data_shift_flag and self.data_shift_config[me]["type"] in ["concept_drift"] and t - self.lt[me] > 0:
                     print(
-                        f"Atualizou dataset de teste de {me} rodada {t}. Alpha de {self.alpha_test[me]} para {alpha_me} - cliente {self.client_id} - concept drift de {self.concept_drift_window_test} para {concept_drift_window}")
+                        f"Atualizou dataset de teste de {me} rodada {t}. Alpha de {self.alpha_test[me]} para {alpha_me} - cliente {self.client_id} - concept drift de {self.concept_drift_window_test[me]} para {concept_drift_window}")
                     # Since we assume every client is tested in every round, its local test data is updated once every
                     # time data shift occurs
                     # Recurrent
@@ -559,6 +556,7 @@ class MultiFedAvgClient:
             return p_ME, fc_ME, il_ME
         except Exception as e:
            print("_get_datasets_metrics error")
+           print(f"Dataset {self.args.dataset[me]}")
            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 

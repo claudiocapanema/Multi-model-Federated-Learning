@@ -61,12 +61,12 @@ def fedpredict_client_weight_predictions_torch(output: torch.Tensor, t: int, cur
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 DATASET_INPUT_MAP = {"CIFAR10": "img", "MNIST": "image", "EMNIST": "image", "GTSRB": "image", "Gowalla": "sequence",
-                     "WISDM-W": "sequence", "ImageNet": "image", "ImageNet10": "image", "wikitext": "sequence"}
+                     "WISDM-W": "sequence", "ImageNet": "image", "ImageNet10": "image", "wikitext": "sequence", "Foursquare": "sequence"}
 
 def load_model(model_name, dataset, strategy, device):
     try:
         num_classes = {'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'Tiny-ImageNet': 200,
-         'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30}[dataset]
+         'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30, "Foursquare": 100}[dataset]
         if model_name == 'CNN':
             if dataset in ['MNIST']:
                 input_shape = 1
@@ -302,14 +302,16 @@ def get_transform(dataset_name, train_test):
                           "Gowalla": {"train": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32))),
                                       "test": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32)))},
                           "wikitext": {"train": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32))),
-                                      "test": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32)))}
+                                      "test": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32)))},
+                          "Foursquare": {"train": lambda x: torch.tensor(x, dtype=torch.float32),
+                                         "test": lambda x: torch.tensor(x, dtype=torch.float32)}
 
                           }[dataset_name][train_test]
 
     return pytorch_transforms
 
 def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions: int, batch_size: int,
-              data_sampling_percentage: int, get_from_volume: bool = True):
+              data_sampling_percentage: int, get_from_volume: bool = True, k_fold: int = 5, fold_id: int = 1):
     try:
         # Only initialize `FederatedDataset` once
         print(
@@ -341,7 +343,8 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                 dataset={"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "MNIST": "ylecun/mnist",
                          "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
-                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-1-Words-3743'}[
+                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-1-Words-3743',
+                         "Foursquare": "claudiogsc/foursquare_sequences_len_5_top_100_venues"}[
                     dataset_name],
                 partitioners={"train": partitioner},
                 path=f"/home/gustavo/PycharmProjects/Multi-model-Federated-Learning/system/datasets/{dataset_name}",
@@ -361,9 +364,25 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                 logger.info("""Tried to load dataset {} for the {} time for the client {} error""".format(dataset_name, attempts, partition_id))
                 logger.info("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
                 time.sleep(1)
-        test_size = 1 - data_sampling_percentage
-        partition_train_test = partition.train_test_split(test_size=test_size, seed=42)
-        if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla", "wikitext"]:
+
+        # ==============================
+        # K-FOLD LOCAL (intra-client)
+        # ==============================
+        num_samples = len(partition)
+        indices = np.arange(num_samples)
+
+        rng = np.random.default_rng(seed=k_fold)
+        rng.shuffle(indices)
+
+        folds = np.array_split(indices, k_fold)
+
+        val_idx = folds[fold_id - 1]
+        train_idx = np.concatenate([f for i, f in enumerate(folds) if i != fold_id])
+
+        partition_train = partition.select(train_idx)
+        partition_test = partition.select(val_idx)
+
+        if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla", "wikitext", "Forsquare"]:
             # Divide data on each node: 80% train, 20% test
 
             pytorch_transforms_train = get_transform(dataset_name, "train")
@@ -388,8 +407,11 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
             return batch
 
         if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla", "wikitext"]:
-            partition_train = partition_train_test["train"].with_transform(apply_transforms_train)
-            partition_test = partition_train_test["test"].with_transform(apply_transforms_test)
+            partition_train = partition_train.with_transform(apply_transforms_train)
+            partition_test = partition_train.with_transform(apply_transforms_test)
+        elif dataset_name == "Foursquare":
+            partition_train = partition_train.with_format("torch")
+            partition_test = partition_test.with_format("torch")
 
         def seed_worker(worker_id):
             np.random.seed(partition_id)
