@@ -293,7 +293,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             # if t == 1 or (t==30 and me==0) or (t==1 and me==1) or (t==2 and me==2):
             #     heterogeneity_degree = 1
 
-            if self.version in ["iti"] or heterogeneity_degree < 0.5:
+            if self.version in ["iti"] or heterogeneity_degree < 0.5 or me == 2:
                 heterogeneity_degree = 0
             weighted_weights = [np.array(original_layer + (1 - heterogeneity_degree) * layer) for original_layer, layer in
                                 zip(current_parameters, weights_prime)]
