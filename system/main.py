@@ -117,7 +117,7 @@ def load_model(model_name, dataset, strategy, device):
 
         elif model_name == "gru":
             if dataset in ["WISDM-W", "WISDM-P"]:
-                return GRU(6, num_layers=1, hidden_size=2, sequence_length=200, num_classes=num_classes)
+                return GRU(6, num_layers=1, hidden_size=10, sequence_length=200, num_classes=num_classes)
 
         elif model_name == "lstm":
             if dataset == "Foursquare":

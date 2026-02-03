@@ -226,7 +226,7 @@ class MultiFedAvgClient:
 
             self.p_ME, self.fc_ME, self.il_ME = self._get_datasets_metrics(self.trainloader, self.ME,
                                                                            self.client_id,
-                                                                           self.n_classes)
+                                                                           self.n_classes, me=None)
         except Exception as e:
             print("__init__ client error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
@@ -333,7 +333,10 @@ class MultiFedAvgClient:
                     if (data_shift_flag and self.data_shift_config[me]["type"] in ["label_shift"]):
                         if self.alpha_train[me] != self.alpha_test[me] and self.alpha_test[me] == alpha_me:
                             self.alpha_train[me] = self.alpha_test[me]
-                            self.recent_trainloader[me] = copy.deepcopy(self.trainloader[me])
+                            self.trainloader[me] = copy.deepcopy(self.recent_trainloader[me])
+                            self.p_ME[me], self.fc_ME[me], self.il_ME[me] = self._get_datasets_metrics(self.trainloader, self.ME,
+                                                                                           self.client_id,
+                                                                                           self.n_classes, me=me)
                         else:
                             print(f"Atualizou dataset de treino do modelo {me} na rodada {t}. Alpha de {self.alpha_train[me]} para {alpha_me} - concept drift_window antigo {self.concept_drift_window_train[me]} novo {concept_drift_window} - cliente {self.client_id}")
                             self.alpha_train[me] = alpha_me
@@ -358,16 +361,23 @@ class MultiFedAvgClient:
                                 fold_id=self.fold_id,
                             )
                             self.recent_trainloader[me] = copy.deepcopy(self.trainloader[me])
-                            p_ME, fc_ME, il_ME = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id,
-                                                                            self.n_classes, self.concept_drift_window_train)
-                            self.p_ME, self.fc_ME, self.il_ME = p_ME, fc_ME, il_ME
+                            self.p_ME[me], self.fc_ME[me], self.il_ME[me] = self._get_datasets_metrics(self.trainloader,
+                                                                                                       self.ME,
+                                                                                                       self.client_id,
+                                                                                                       self.n_classes,
+                                                                                                       me=me)
                     elif data_shift_flag and self.data_shift_config[me]["type"] in ["concept_drift"]:
                         print(
                             f"Atualizou dataset de treino do modelo {me} na rodada {t}. Alpha de {self.alpha_train[me]} para {alpha_me} - concept drift_window {self.concept_drift_window_train[me]} - cliente {self.client_id}")
                         self.concept_drift_window_train[me] = concept_drift_window
-                        p_ME, fc_ME, il_ME = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id,
-                                                                        self.n_classes, self.concept_drift_window_train)
-                        self.p_ME, self.fc_ME, self.il_ME = p_ME, fc_ME, il_ME
+                        self.concept_drift_window_test[me] = self.concept_drift_window_train[me]
+                        self.recent_trainloader[me] = copy.deepcopy(self.trainloader[me])
+                        self.p_ME[me], self.fc_ME[me], self.il_ME[me] = self._get_datasets_metrics(self.trainloader,
+                                                                                                   self.ME,
+                                                                                                   self.client_id,
+                                                                                                   self.n_classes,
+                                                                                                   concept_drift_window=self.concept_drift_window_train,
+                                                                                                   me=me)
 
         except Exception as e:
             print(f"update_local_train_data error {self.data_shift_config}")
@@ -384,7 +394,7 @@ class MultiFedAvgClient:
                     self.alpha_test[me] = alpha_me
                     self.recent_trainloader[me], self.valloader[me] = load_data(
                         dataset_name=self.args.dataset[me],
-                        alpha=self.alpha_train[me],
+                        alpha=self.alpha_test[me],
                         data_sampling_percentage=self.args.data_percentage,
                         partition_id=self.client_id,
                         num_partitions=self.args.total_clients + 1,
@@ -510,7 +520,7 @@ class MultiFedAvgClient:
             print("_get_optimizer error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def _get_datasets_metrics(self, trainloader, ME, client_id, n_classes, concept_drift_window=None):
+    def _get_datasets_metrics(self, trainloader, ME, client_id, n_classes, concept_drift_window=None, me=None):
         """
 
         :param trainloader:
@@ -527,7 +537,8 @@ class MultiFedAvgClient:
             p_ME = []
             fc_ME = []
             il_ME = []
-            for me in range(ME):
+            ME_LIST = [i for i in range(ME)] if me is None else [me]
+            for me in ME_LIST:
                 labels_me = []
                 n_classes_me = n_classes[me]
                 p_me = {i: 0 for i in range(n_classes_me)}
@@ -553,7 +564,11 @@ class MultiFedAvgClient:
                     fc_ME.append(fc_me)
                     il_ME.append(il_me)
                     # print(f"p_me {p_me} fc_me {fc_me} il_me {il_me} model {me} client {client_id}")
-            return p_ME, fc_ME, il_ME
+
+            if len(p_ME) == 1 and len(fc_ME) == 1 and len(il_ME) == 1:
+                return p_ME[0], fc_ME[0], il_ME[0]
+            else:
+                return p_ME, fc_ME, il_ME
         except Exception as e:
            print("_get_datasets_metrics error")
            print(f"Dataset {self.args.dataset[me]}")

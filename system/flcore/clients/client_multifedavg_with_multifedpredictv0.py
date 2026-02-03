@@ -64,7 +64,7 @@ class ClientMultiFedAvgWithMultiFedPredictv0(MultiFedAvgClient):
         """Train the model with data of this client."""
         try:
             self.lt[me] = t
-            p_old = self.p_ME
+            p_old = copy.deepcopy(self.p_ME)
             parameters, size, metrics = super().fit(me, t, global_model)
             similarity = min(cosine_similarity(self.p_ME[me], p_old[me]), 1)
             if 1 - similarity < 0:

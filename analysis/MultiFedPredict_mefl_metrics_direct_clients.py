@@ -25,7 +25,7 @@ def read_data(alphas, datasets, total_clients):
 
         n_classes = [
             {'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'ImageNet': 15,
-             "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30}[dataset] for dataset in
+             "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30, "Foursquare": 100}[dataset] for dataset in
             datasets]
         ME = len(datasets)
         client_metrics = {
@@ -260,7 +260,7 @@ if __name__ == "__main__":
     total_clients = 40
     alphas = [0.1, 1.0, 10.0]
     dataset = ["ImageNet10", "WISDM-W", "wikitext"]
-    dataset = ["ImageNet10", "WISDM-W", "Gowalla"]
+    dataset = ["ImageNet10", "WISDM-W", "Foursquare"]
     # dataset = ["WISDM-W"]
     write_path = f"plots/MEFL/clients_{total_clients}_datasets_{dataset}_alphas_{alphas}/"
 

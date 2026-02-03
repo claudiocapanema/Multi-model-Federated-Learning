@@ -25,7 +25,7 @@ def read_data(alphas, datasets, total_clients):
 
         n_classes = [
             {'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'ImageNet': 15,
-             "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30}[dataset] for dataset in
+             "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30, "Foursquare": 100}[dataset] for dataset in
             datasets]
         ME = len(datasets)
         client_metrics = {

@@ -168,7 +168,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
         """Train the model with data of this client."""
         try:
             self.lt[me] = t
-            p_old = self.p_ME
+            p_old = copy.deepcopy(self.p_ME)
             trainloader_A = copy.deepcopy(self.trainloader[me])
             parameters, size, metrics = super().fit(me, t, global_model)
             trainloader_B = self.trainloader[me]
@@ -240,8 +240,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             #     s = 1  # keeps the standard degree of personalization and does not apply weighted predictions (used for data shift and delayed labeling)
             #     set_weights(self.global_model[me], global_model)
             #     combined_model = self.global_model[me]
-            if (fc >= a and il < b[me] and data_heterogeneity_degree < c[me]) or (
-                    ps > d and nt > 0 and t > 10 and data_heterogeneity_degree < c[me]):
+            if (gw >= 0.9 and nt > 0 and t > 10 and data_heterogeneity_degree < c[me]):
                 s = 1 # keeps the standard degree of personalization and does not apply weighted predictions (used for data shift and delayed labeling)
                 set_weights(self.global_model[me], global_model)
                 combined_model = self.global_model[me]
