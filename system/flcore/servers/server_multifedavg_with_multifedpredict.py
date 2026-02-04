@@ -269,10 +269,10 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             num_examples_total = sum(num_examples for (_, num_examples) in results)
 
             # Create a list of weights, each multiplied by the related number of examples
-            weighted_weights = [
+            weighted_parameters_update_list = [
                 [layer * num_examples for layer in weights] for weights, num_examples in results
             ]
-            weighted_weights = []
+            weighted_parameters_update_list = []
             for i, r in enumerate(results):
                 weights, num_examples = r
                 client_update = []
@@ -281,23 +281,25 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     update = layer - original_layer
                     client_update.append(update * num_examples)
 
-                weighted_weights.append(client_update)
+                weighted_parameters_update_list.append(client_update)
 
             # Compute average weights of each layer
-            weights_prime: NDArrays = [
+            weighted_parameters_update: NDArrays = [
                 reduce(np.add, layer_updates) / num_examples_total
-                for layer_updates in zip(*weighted_weights)
+                for layer_updates in zip(*weighted_parameters_update_list)
             ]
             # if t <= 59:
             #     heterogeneity_degree = 1
             # if t == 1 or (t==30 and me==0) or (t==1 and me==1) or (t==2 and me==2):
             #     heterogeneity_degree = 1
 
-            if self.version in ["iti"] or heterogeneity_degree < 0.5 or me == 2:
+            # if self.version in ["iti"] or heterogeneity_degree < 0.5 or me == 2 or t == 1: # label shift 1
+            if self.version in ["iti"] or heterogeneity_degree < 0.5 or t == 1:
                 heterogeneity_degree = 0
-            weighted_weights = [np.array(original_layer + (1 - heterogeneity_degree) * layer) for original_layer, layer in
-                                zip(current_parameters, weights_prime)]
-            return weighted_weights
+            weighted_parameters_update_list = [np.array(original_layer + (1 - heterogeneity_degree) * layer) for original_layer, layer in
+                                zip(current_parameters, weighted_parameters_update)]
+
+            return weighted_parameters_update_list
         except Exception as e:
             print("aggregate error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))

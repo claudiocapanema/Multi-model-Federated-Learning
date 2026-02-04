@@ -224,6 +224,9 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             elif similarity < 0:
                 similarity = 0
 
+            # if t >= 50 and me == 1:
+            #     set_weights(self.model[me], global_model)
+
 
             print(f"valor t {t} nt {nt} tamanho {len(global_model)}")
             combined_model, gw, lw = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
@@ -240,7 +243,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             #     s = 1  # keeps the standard degree of personalization and does not apply weighted predictions (used for data shift and delayed labeling)
             #     set_weights(self.global_model[me], global_model)
             #     combined_model = self.global_model[me]
-            if (gw >= 0.9 and nt > 0 and t > 10 and data_heterogeneity_degree < c[me]):
+            if (gw == 1 and t > 10 and data_heterogeneity_degree < c[me]):
                 s = 1 # keeps the standard degree of personalization and does not apply weighted predictions (used for data shift and delayed labeling)
                 set_weights(self.global_model[me], global_model)
                 combined_model = self.global_model[me]
