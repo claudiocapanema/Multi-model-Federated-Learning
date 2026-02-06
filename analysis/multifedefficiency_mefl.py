@@ -77,7 +77,7 @@ def line(df, base_dir, x, y, hue=None, style=None, hue_order=None, y_max=100, ci
                       hue=hue, hue_order=hue_order, title="", tipo=None, y_lim=True, y_max=y_max, ci=ci)
             axs[j].set_title(r"""Dataset: {}""".format(datasets[j]), size=10)
 
-            if j > 0:
+            if j < 2:
                 axs[j].get_legend().remove()
 
         # lines_labels = [axs[0].get_legend_handles_labels()]
@@ -137,10 +137,12 @@ if __name__ == "__main__":
     # experiment_id = "label_shift#6"
     # experiment_id = "concept_drift#2"
     # experiment_id = "concept_drift#1_sudden"
+    # experiment_id = "concept_drift#1_sudden"
     # experiment_id = "concept_drift#1_gradual"
     # experiment_id = "concept_drift#2_gradual"
     # experiment_id = "concept_drift#1_recurrent"
     # experiment_id = "concept_drift#2_recurrent"
+    # experiment_id = "concept_drift#2_sudden"
     total_clients = 40
     # alphas = [10.0, 10.0]
     alphas = [0.1, 0.1, 0.1]
@@ -154,7 +156,7 @@ if __name__ == "__main__":
     # dataset = ["CIFAR10", "WISDM-W"]
     # dataset = ["WISDM-W"]
     dataset = ["WISDM-W", "ImageNet10", "Foursquare"]
-    # dataset = ["ImageNet10", "WISDM-W", "wikitext"]
+    dataset = ["WISDM-W", "ImageNet10", "wikitext"]
     # dataset = ["WISDM-W", "ImageNet10"]
     # dataset = ["EMNIST", "CIFAR10"]
     # models_names = ["cnn_c"]
@@ -171,7 +173,7 @@ if __name__ == "__main__":
     solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP"]
     # solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+MFP", "MultiFedAvg+FP", "MultiFedAvg"]
     # solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg"]
-    solutions = ["MultiFedAvg+MFP_v2",
+    solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP",
                  "MultiFedAvg+FP", "MultiFedAvg"]
 
     read_solutions = {solution: [] for solution in solutions}

@@ -11,6 +11,11 @@ import numpy as np
 import random
 from torch.utils.data import DataLoader, Subset
 
+import csv
+import os
+
+
+
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 NUM_CLIENTS = 40
@@ -143,8 +148,8 @@ def dirichlet_split(dataset, num_clients, alpha=0.5):
 
 
 # Create client splits
-cifar_clients = dirichlet_split(cifar_train, NUM_CLIENTS, alpha=0.5)
-gtsrb_clients = dirichlet_split(gtsrb_train, NUM_CLIENTS, alpha=0.5)
+cifar_clients = dirichlet_split(cifar_train, NUM_CLIENTS, alpha=0.1)
+gtsrb_clients = dirichlet_split(gtsrb_train, NUM_CLIENTS, alpha=0.1)
 
 
 # ==============================
@@ -298,6 +303,31 @@ def client_score(client, model_name, round_id):
 # ==============================
 # Federated training loop
 # ==============================
+cifar_log = []
+gtsrb_log = []
+
+CIFAR_CSV = "proposta_cifar.csv"
+GTSRB_CSV = "proposta_gtsrb.csv"
+
+csv_header = [
+    "round",
+    "loss",
+    "accuracy",
+    "avg_efficiency",
+    "effective_resource",
+    "fairness",
+    "switch_rate",
+    "avg_client_entropy",
+    "min_client_entropy",
+    "client_jain_fairness"
+]
+
+# Clean CSVs at start
+for file in [CIFAR_CSV, GTSRB_CSV]:
+    with open(file, mode="w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(csv_header)
+
 
 prev_assignments = {}
 
@@ -410,6 +440,38 @@ for rnd in range(ROUNDS):
     avg_eff_gtsrb = avg_efficiency(gtsrb_selected, "gtsrb")
     worst_acc = min(cifar_acc, gtsrb_acc)
 
+    # ================= CSV Logging (per round) =================
+
+    with open(CIFAR_CSV, mode="a", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            rnd + 1,
+            cifar_loss,
+            cifar_acc,
+            avg_eff_cifar,
+            R_eff_cifar,
+            fairness,
+            switch_rate,
+            avg_entropy,
+            min_entropy,
+            jain_clients
+        ])
+
+    with open(GTSRB_CSV, mode="a", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            rnd + 1,
+            gtsrb_loss,
+            gtsrb_acc,
+            avg_eff_gtsrb,
+            R_eff_gtsrb,
+            fairness,
+            switch_rate,
+            avg_entropy,
+            min_entropy,
+            jain_clients
+        ])
+
     print("\n--- Metrics ---")
     print(f"CIFAR   -> Loss: {cifar_loss:.4f}, Acc: {cifar_acc:.4f}")
     print(f"GTSRB   -> Loss: {gtsrb_loss:.4f}, Acc: {gtsrb_acc:.4f}")
@@ -423,4 +485,3 @@ for rnd in range(ROUNDS):
     print(f"Avg client entropy: {avg_entropy:.4f}")
     print(f"Min client entropy: {min_entropy:.4f}")
     print(f"Client Jain Fairness (usage): {jain_clients:.4f}")
-

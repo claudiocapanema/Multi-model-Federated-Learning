@@ -120,14 +120,12 @@ def load_model(model_name, dataset, strategy, device):
                 return GRU(6, num_layers=1, hidden_size=10, sequence_length=200, num_classes=num_classes)
 
         elif model_name == "lstm":
-            if dataset == "Foursquare":
-                return NextPlaceModel(num_classes, 64, 128)
-
-        elif model_name == "lstm":
             if dataset in ["Gowalla"]:
                 return LSTM(6, device=device, num_layers=1, hidden_size=1, sequence_length=4, num_classes=num_classes)
             elif dataset in ["wikitext"]:
                 return LSTMNextWord(vocab_size=num_classes, embed_dim=10, hidden_dim=10)
+            elif dataset == "Foursquare":
+                return NextPlaceModel(num_classes, 16, 128)
 
         raise ValueError("""Model not found for model {} and dataset {}""".format(model_name, dataset))
 
@@ -150,7 +148,7 @@ def run(args):
             model_name = args.model[m]
             dataset = args.dataset[m]
             model = load_model(model_name, dataset, args.strategy, args.device)
-
+            print("aqui : ", model_name, dataset)
             print(model)
             models.append(model)
 

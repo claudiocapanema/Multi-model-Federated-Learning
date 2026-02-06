@@ -89,6 +89,11 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
         self.reduction_fraction_list = {me: [] for me in range(self.ME)}
         self.ps_list = {me: [] for me in range(self.ME)}
         self.heterogeneity_degree = [-1] * self.ME
+        self.min_drift_interval = 10
+        self.last_drift_round = [-self.min_drift_interval] * self.ME
+        self.in_adaptation = [False] * self.ME
+        self.adaptation_until = [-1] * self.ME
+        self.data_drift_model = -1
 
     def set_clients(self):
 
@@ -294,7 +299,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             #     heterogeneity_degree = 1
 
             # if self.version in ["iti"] or heterogeneity_degree < 0.5 or me == 2 or t == 1: # label shift 1
-            if self.version in ["iti"] or heterogeneity_degree < 0.5 or t == 1:
+            if self.version in ["iti"] or heterogeneity_degree < 0.5 or t == 1 or self.ps[me] > 0:
                 heterogeneity_degree = 0
             weighted_parameters_update_list = [np.array(original_layer + (1 - heterogeneity_degree) * layer) for original_layer, layer in
                                 zip(current_parameters, weighted_parameters_update)]
@@ -372,101 +377,76 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             if self.version in ["dh"]:
                 return super().select_clients(t)
 
-            data_drift_model = -1
-            #  or self.drift_flag or self.reduced[me].count(True) > self.reduced[me].count(False)
-            drift_degree = [0] * self.ME
-            drift_ps = [0] * self.ME
+            # 🔄 Finaliza adaptação apenas no início do round
             for me in range(self.ME):
-                # step 1
-                if len(self.reduced[me]) > 0:
-                    # reduction_fraction = self.reduced[me].count(True) / len(self.reduced[me])
-                    n_clients_reduced = self.reduced[me].count(True)
-                    n_clients = len(self.reduced[me])
-                    reduction_probability = self.binomial(n_clients_reduced, n_clients)
-                    reduction_fraction_list = copy.deepcopy(self.reduction_fraction_list[me])
-                    reduction_fraction_list.append(reduction_probability)
-                    if self.detect_drift_ks(reduction_fraction_list, window=5, alpha=0.01):
-                        drift_degree[me] = reduction_probability
-                    else:
-                        drift_degree[me] = 0
-                        self.reduction_fraction_list[me].append(reduction_probability)
-                    self.reduction_fraction_list[me].append(reduction_probability)
-                # step 2
-                if len(self.ps_list[me]) == 0:
-                    self.ps_list[me].append(self.ps[me])
-                else:
-                    ps_list = copy.deepcopy(self.ps_list[me])
-                    ps_list.append(self.ps[me])
-                    if self.detect_drift_ks(ps_list, window=5, alpha=0.01):
-                        drift_ps[me] = self.ps[me]
-                    else:
-                        self.ps_list[me].append(self.ps[me])
-                        # drift_ps[me] = 0
-                        drift_ps[me] = self.ps[me]
-                #  or t in {0: [10, 40, 70], 1: [20, 50, 80], 2: [30, 60, 90]}[me]
-                print(f"Rodada {t} modelo {me} resultado drift degree = {drift_degree[me]} ps = {drift_ps[me]}")
-                # if (drift_degree[me] >= 0.5 or self.ps[me] > 0) or self.increased_training_intensity[me] > 0:
-                if self.ps[me] > 0 and self.heterogeneity_degree[me] > 0.5:
+                if self.in_adaptation[me]:
+                    if t > self.adaptation_until[me]: # atingiu a rodada limite de adaptação
+                        self.in_adaptation[me] = False
+                        if self.data_drift_model == me:
+                            self.data_drift_model = -1
+                    else: # pode continuar adaptando
+                        self.data_drift_model = me
+
+
+            # Detectar modelo com data shift caso nenhum esteja em adaptação
+            if self.data_drift_model == -1:
+
+                for me in range(self.ME):
+
+                    print(f"Rodada {t} modelo {me} resultado ps = {self.ps[me]}")
+                    can_detect = (t - self.last_drift_round[me]) >= self.min_drift_interval
+
+
+                    print(f"Rodada {t} modelo {me} | last_drift={self.last_drift_round[me]} | can_detect={can_detect}")
+
+                    if can_detect and not self.in_adaptation[me] \
+                            and self.ps[me] > 0 and self.heterogeneity_degree[me] > 0.5 and self.increased_training_intensity[self.data_drift_model] < self.max_number_of_rounds_data_drift_adaptation:
                         data_drift_model = me
-                        # if drift_degree[me] > 0.5 and drift_ps[me] > 0:
-                        #     data_shift_untrained_clients = (self.total_clients - len(self.reduced[me])) * drift_degree[me]
-                        #     rounds_needed = data_shift_untrained_clients // self.num_training_clients
-                        #     self.max_number_of_rounds_data_drift_adaptation = rounds_needed
-
-
-            print(f"##rodada {t} data_drift_model = {data_drift_model} drift_ps {drift_ps} drift degree = {drift_degree}")
-            if data_drift_model > -1:
-                self.data_drift_model = data_drift_model
+                        self.last_drift_round[me] = t
+                        self.in_adaptation[me] = True
+                        self.adaptation_until[me] = t + self.max_number_of_rounds_data_drift_adaptation
+                        self.data_drift_model = data_drift_model
 
             if self.data_drift_model > -1:
 
-                if self.increased_training_intensity[data_drift_model] < self.max_number_of_rounds_data_drift_adaptation:
-                    self.increased_training_intensity[data_drift_model] += 1
+                print(f"##rodada {t} data_drift_model = {self.data_drift_model} drift_ps {self.ps[self.data_drift_model]}")
+                self.increased_training_intensity[self.data_drift_model] += 1
 
-                    # selected_clients = list(np.random.choice(self.clients, self.num_training_clients, replace=False))
-                    # selected_clients = [i.client_id for i in selected_clients]
-                    print(f"select clients rodada {t} clients ids uniform selection {list(self.clients_ids_uniform_selection)} num training clients {self.num_training_clients}")
-                    to_remove = [i for i in sorted(random.sample(list(self.clients_ids_uniform_selection), min(self.num_training_clients, len(list(self.clients_ids_uniform_selection)))))]
-                    self.clients_ids_uniform_selection = [x for x in self.clients_ids_uniform_selection if x not in to_remove]
-                    selected_clients = list(to_remove)
-                    if len(selected_clients) < self.num_training_clients:
-                        self.increased_training_intensity[data_drift_model] = 0
-                        self.clients_ids_uniform_selection = [i for i in copy.deepcopy(self.clients_ids)]
-                        self.data_drift_model = -1
-                    if self.increased_training_intensity[data_drift_model] >= self.max_number_of_rounds_data_drift_adaptation:
-                        self.increased_training_intensity[data_drift_model] = 0
-                        self.clients_ids_uniform_selection = [i for i in copy.deepcopy(self.clients_ids)]
-                        self.data_drift_model = -1
+                print(f"select clients rodada {t} clients ids uniform selection {list(self.clients_ids_uniform_selection)} num training clients {self.num_training_clients}")
+                to_remove = [i for i in sorted(random.sample(list(self.clients_ids_uniform_selection), min(self.num_training_clients, len(list(self.clients_ids_uniform_selection)))))]
+                selected_clients = copy.deepcopy(list(to_remove))
+                # Remover os clientes da rodada onde ocorreu incialmente o data shift
+                if self.increased_training_intensity[self.data_drift_model] == 1:
+                    to_remove += self.selected_clients_m[self.data_drift_model]
+                self.clients_ids_uniform_selection = [x for x in self.clients_ids_uniform_selection if x not in to_remove]
+
+                if len(selected_clients) < self.num_training_clients or len(self.clients_ids_uniform_selection) == 0:
+                    remaining = self.num_training_clients - len(selected_clients)
+                    available_clients = list(set([i for i in copy.deepcopy(self.clients_ids)]) - set(selected_clients))
+                    additional_clients = sorted(random.sample(available_clients, remaining))
+                    selected_clients += additional_clients
+
+                sc = []
+                for me in range(self.ME):
+                    if me == self.data_drift_model:
+                        sc.append(selected_clients)
+                    else:
+                        sc.append([])
+
+                if len(selected_clients) < self.num_training_clients or len(self.clients_ids_uniform_selection) == 0:
+                    self.increased_training_intensity[self.data_drift_model] = 0
+                    self.in_adaptation[self.data_drift_model] = False
+                    self.clients_ids_uniform_selection = [i for i in copy.deepcopy(self.clients_ids)]
+                    self.data_drift_model = -1
+
+                    if len(selected_clients) == 0:
+                        return super().select_clients(t)
+
+
             else:
                 sc = super().select_clients(t)
 
-                for me in range(self.ME):
-                    if len(sc[me]) > 0:
-                        self.t_hat[me] = t
-                        self.reduced_training_intensity_flag[me] = False
-                    elif len(sc[me]) == 0 and not self.reduced_training_intensity_flag[me]:
-                        self.t_hat[me] = t - 1
-                        # self.t_hat[me] = t
-                        self.reduced_training_intensity_flag[me] = True
-
                 return sc
-
-            sc = []
-            for me in range(self.ME):
-                if me == data_drift_model:
-                    sc.append(selected_clients)
-                else:
-                    sc.append([])
-
-            for me in range(self.ME):
-                if len(sc[me]) > 0:
-                    self.t_hat[me] = t
-                    self.reduced_training_intensity_flag[me] = False
-                elif len(sc[me]) == 0 and not self.reduced_training_intensity_flag[me]:
-                    self.t_hat[me] = t - 1
-                    self.reduced_training_intensity_flag[me] = True
-
-            self.n_trained_clients = sum([len(i) for i in sc])
 
             return sc
 
