@@ -3,6 +3,47 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import LabelEncoder
+
+FOURSQUARE_HIGH_LEVEL = {
+    "Food": [
+        "Restaurant", "Fast Food Restaurant", "Sushi Restaurant",
+        "Italian Restaurant", "Brazilian Restaurant", "Mexican Restaurant",
+        "Pizza Place", "Burger Joint", "Coffee Shop", "Bakery",
+        "Sandwich Place", "Steakhouse", "Diner", "Café"
+    ],
+    "Nightlife Spot": [
+        "Bar", "Pub", "Nightclub", "Lounge"
+    ],
+    "Travel & Transport": [
+        "Gas Station", "Airport", "Train Station",
+        "Bus Station", "Subway", "Hotel"
+    ],
+    "Shop & Service": [
+        "Grocery Store", "Supermarket", "Mall",
+        "Pharmacy", "Convenience Store", "Clothing Store"
+    ],
+    "Outdoors & Recreation": [
+        "Park", "Playground", "Gym",
+        "Trail", "Plaza", "Stadium"
+    ],
+    "College & University": [
+        "University", "College", "High School"
+    ],
+    "Arts & Entertainment": [
+        "Movie Theater", "Museum", "Music Venue"
+    ],
+    "Professional & Other Places": [
+        "Office", "Coworking Space"
+    ],
+}
+
+def map_to_high_level_category(cat):
+    for high_level, fine_list in FOURSQUARE_HIGH_LEVEL.items():
+        if cat in fine_list:
+            return high_level
+    return "Other"
+
+
 def load_foursquare_us(csv_path):
     """
     Loader específico para o dataset Foursquare (TIST2015)
@@ -98,13 +139,14 @@ def build_sequences_per_user_with_time(
 
 def encode_categories(df):
     """
-    Converte categorias textuais em IDs inteiros.
+    Converte categorias de ALTO NÍVEL em IDs inteiros.
     """
     le = LabelEncoder()
-    df["category_id"] = le.fit_transform(df["category"])
+    df["category_id"] = le.fit_transform(df["category_high"])
 
     num_categories = len(le.classes_)
-    print(f"📊 Total de categorias: {num_categories}")
+    print(f"📊 Total de categorias (alto nível): {num_categories}")
+    print("Categorias:", list(le.classes_))
 
     return df, le, num_categories
 
@@ -147,8 +189,15 @@ def build_dataloaders_us_with_time(
 ):
     df = load_foursquare_us(csv_path)
 
-    # 🔥 FILTRO TOP-10
-    df = filter_top_k_categories(df, k=10)
+    # 🔥 MAPEAMENTO HIERÁRQUICO OFICIAL
+    df["category_high"] = df["category"].apply(map_to_high_level_category)
+
+    # (opcional, mas recomendado)
+    df = df[df["category_high"] != "Other"]
+
+    df, label_encoder, num_categories = encode_categories(df)
+
+    print_class_distribution(df)
 
     df, label_encoder, num_categories = encode_categories(df)
 
@@ -190,12 +239,12 @@ class NextCategoryLSTMWithTime(nn.Module):
     def __init__(
         self,
         num_categories,
-        cat_emb_dim=64,
-        hour_emb_dim=8,
-        day_emb_dim=4,
-        hidden_dim=128,
+        cat_emb_dim=3,
+        hour_emb_dim=3,
+        day_emb_dim=2,
+        hidden_dim=64,
         num_layers=1,
-        dropout=0.2
+        dropout=0.5
     ):
         super().__init__()
 
@@ -277,7 +326,7 @@ if __name__ == "__main__":
 
     train_loader, val_loader, num_categories = build_dataloaders_us_with_time(
         CSV_US,
-        seq_len=40,
+        seq_len=20,
         batch_size=256,
         min_checkins=60
     )

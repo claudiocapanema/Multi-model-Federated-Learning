@@ -91,10 +91,10 @@ class NextPlaceModel(nn.Module):
     def __init__(self, num_classes, embed_dim, hidden_dim):
         super().__init__()
 
-        self.venue_embedding = nn.Embedding(num_classes, embed_dim)
-        self.hour_embedding = nn.Embedding(24, embed_dim)
-        self.weekday_embedding = nn.Embedding(7, embed_dim)
-        self.delta_embedding = nn.Embedding(6, embed_dim)
+        self.venue_embedding = nn.Embedding(num_classes, 64)
+        self.hour_embedding = nn.Embedding(24, 3)
+        self.weekday_embedding = nn.Embedding(7, 3)
+        self.delta_embedding = nn.Embedding(6, 3)
 
         self.lstm = nn.LSTM(embed_dim * 4, hidden_dim, batch_first=True, dropout=0.3)
         self.fc = nn.Linear(hidden_dim, num_classes)
