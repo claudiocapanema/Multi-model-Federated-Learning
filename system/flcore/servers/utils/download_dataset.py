@@ -30,7 +30,7 @@ def download_datasets(datasets_name: list, alphas: list, num_partitions: int):
                          "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
                          , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-10-Words-30',
-                        "Foursquare": "claudiogsc/foursquare-us-sequences-highlevel"}[
+                        "Foursquare": "claudiogsc/foursquare-us-sequences-highlevel-200000-samples"}[
                         dataset_name])
                 if dataset_name in ["Gowalla"]:
                     dataset["train"] = dataset["train"].shuffle(seed=42).select(range(120000))

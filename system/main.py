@@ -35,7 +35,7 @@ from flcore.servers.server_multifedavg_with_fedpredict_dynamic import MultiFedAv
 from flcore.servers.server_multifedavg_with_fedpredict import MultiFedAvgWithFedPredict
 from flcore.servers.server_multifedavg_with_multifedpredict_v0 import MultiFedAvgWithMultiFedPredictv0
 
-from flcore.clients.utils.models import CNN, CNN_3, CNNDistillation, GRU, LSTM, TinyImageNetCNN, LSTMNextWord, NextPlaceModel
+from flcore.clients.utils.models import CNN, CNN_3, CNNDistillation, GRU, LSTM, TinyImageNetCNN, LSTMNextWord, NextCategoryLSTMWithTime
 
 logger = logging.getLogger()
 logger.setLevel(logging.ERROR)
@@ -54,7 +54,7 @@ emb_dim=32
 def load_model(model_name, dataset, strategy, device):
     try:
         num_classes = {'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'Tiny-ImageNet': 200,
-         'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 3743, "Foursquare": 107}[dataset]
+         'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 3743, "Foursquare": 10}[dataset]
         out_channel = 32
         if model_name == 'CNN':
             if dataset in ['MNIST']:
@@ -125,7 +125,7 @@ def load_model(model_name, dataset, strategy, device):
             elif dataset in ["wikitext"]:
                 return LSTMNextWord(vocab_size=num_classes, embed_dim=10, hidden_dim=10)
             elif dataset == "Foursquare":
-                return NextPlaceModel(num_classes, 16, 128)
+                return NextCategoryLSTMWithTime(num_classes)
 
         raise ValueError("""Model not found for model {} and dataset {}""".format(model_name, dataset))
 

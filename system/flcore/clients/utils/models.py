@@ -87,6 +87,9 @@ class CNN(nn.Module):
             print("""CNN forward {}""".format(self.mid_dim))
             print('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
+import torch
+import torch.nn as nn
+
 class NextCategoryLSTMWithTime(nn.Module):
     def __init__(
         self,
@@ -94,17 +97,25 @@ class NextCategoryLSTMWithTime(nn.Module):
         cat_emb_dim=3,
         hour_emb_dim=3,
         day_emb_dim=2,
+        delta_emb_dim=2,
         hidden_dim=8,
         num_layers=1,
         dropout=0.5
     ):
         super().__init__()
 
+        # Embeddings
         self.cat_emb = nn.Embedding(num_categories, cat_emb_dim)
         self.hour_emb = nn.Embedding(24, hour_emb_dim)
         self.day_emb = nn.Embedding(7, day_emb_dim)
+        self.delta_emb = nn.Embedding(6, delta_emb_dim)  # bins [0..5]
 
-        input_dim = cat_emb_dim + hour_emb_dim + day_emb_dim
+        input_dim = (
+            cat_emb_dim +
+            hour_emb_dim +
+            day_emb_dim +
+            delta_emb_dim
+        )
 
         self.lstm = nn.LSTM(
             input_size=input_dim,
@@ -116,13 +127,34 @@ class NextCategoryLSTMWithTime(nn.Module):
 
         self.fc = nn.Linear(hidden_dim, num_categories)
 
-    def forward(self, cat_seq, hour_seq, day_seq):
-        cat_e = self.cat_emb(cat_seq)
-        hour_e = self.hour_emb(hour_seq)
-        day_e = self.day_emb(day_seq)
+    def forward(self, sequence):
+        """
+        sequence: Tensor [B, T, 4]
+          [:, :, 0] -> category_id
+          [:, :, 1] -> hour
+          [:, :, 2] -> weekday
+          [:, :, 3] -> delta_t_bin
+        """
 
-        x = torch.cat([cat_e, hour_e, day_e], dim=-1)
+        # separa features
+        cat_seq   = sequence[:, :, 0]
+        hour_seq  = sequence[:, :, 1]
+        day_seq   = sequence[:, :, 2]
+        delta_seq = sequence[:, :, 3]
+
+        # embeddings
+        cat_e   = self.cat_emb(cat_seq)
+        hour_e  = self.hour_emb(hour_seq)
+        day_e   = self.day_emb(day_seq)
+        delta_e = self.delta_emb(delta_seq)
+
+        # concatena features
+        x = torch.cat([cat_e, hour_e, day_e, delta_e], dim=-1)
+
+        # LSTM
         _, (h_n, _) = self.lstm(x)
+
+        # última camada
         return self.fc(h_n[-1])
 
 import torch.nn as nn

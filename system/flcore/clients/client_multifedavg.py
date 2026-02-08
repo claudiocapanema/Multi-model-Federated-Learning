@@ -192,7 +192,7 @@ class MultiFedAvgClient:
             torch.manual_seed(id + self.fold_id)
             self.batch_size = []
             for dataset in args.dataset:
-                self.batch_size.append({"CIFAR10": 32, "WISDM-W": 16, "ImageNet10": 10, "Gowalla": 64, "wikitext": 256, "Foursquare": 64}[dataset])
+                self.batch_size.append({"CIFAR10": 32, "WISDM-W": 16, "ImageNet10": 10, "Gowalla": 64, "wikitext": 256, "Foursquare": 512}[dataset])
             self.lr_dict = {'EMNIST':0.01,
                             'MNIST': 0.01,
                             'CIFAR10': 0.01,

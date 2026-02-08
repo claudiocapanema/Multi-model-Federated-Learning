@@ -330,7 +330,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                          "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
                          , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-1-Words-3743',
-                             "Foursquare": "claudiogsc/foursquare-us-sequences-highlevel"}[dataset_name],
+                             "Foursquare": "claudiogsc/foursquare-us-sequences-highlevel-200000-samples"}[dataset_name],
                     partitioners={"train": partitioner},
                     seed=1
                 )
@@ -345,7 +345,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                          "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
                          , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-1-Words-3743',
-                         "Foursquare": "claudiogsc/foursquare-us-sequences-highlevel"}[
+                         "Foursquare": "claudiogsc/foursquare-us-sequences-highlevel-200000-samples"}[
                     dataset_name],
                 partitioners={"train": partitioner},
                 path=f"datasets/{dataset_name}",
