@@ -57,10 +57,10 @@ class NextCategoryLSTMWithTime(nn.Module):
     def __init__(
         self,
         num_categories,
-        cat_emb_dim=2,
-        hour_emb_dim=2,
+        cat_emb_dim=3,
+        hour_emb_dim=3,
         day_emb_dim=2,
-        hidden_dim=32,
+        hidden_dim=8,
         num_layers=1,
         dropout=0.5
     ):
@@ -148,6 +148,9 @@ if __name__ == "__main__":
             batch_size=256
         )
     )
+
+    print("tamanho ", len(train_loader.dataset))
+    exit()
 
     model = NextCategoryLSTMWithTime(num_categories).to(device)
 

@@ -87,34 +87,43 @@ class CNN(nn.Module):
             print("""CNN forward {}""".format(self.mid_dim))
             print('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-class NextPlaceModel(nn.Module):
-    def __init__(self, num_classes, embed_dim, hidden_dim):
+class NextCategoryLSTMWithTime(nn.Module):
+    def __init__(
+        self,
+        num_categories,
+        cat_emb_dim=3,
+        hour_emb_dim=3,
+        day_emb_dim=2,
+        hidden_dim=8,
+        num_layers=1,
+        dropout=0.5
+    ):
         super().__init__()
 
-        self.venue_embedding = nn.Embedding(num_classes, 64)
-        self.hour_embedding = nn.Embedding(24, 3)
-        self.weekday_embedding = nn.Embedding(7, 3)
-        self.delta_embedding = nn.Embedding(6, 3)
+        self.cat_emb = nn.Embedding(num_categories, cat_emb_dim)
+        self.hour_emb = nn.Embedding(24, hour_emb_dim)
+        self.day_emb = nn.Embedding(7, day_emb_dim)
 
-        self.lstm = nn.LSTM(embed_dim * 4, hidden_dim, batch_first=True, dropout=0.3)
-        self.fc = nn.Linear(hidden_dim, num_classes)
+        input_dim = cat_emb_dim + hour_emb_dim + day_emb_dim
 
-    def forward(self, x):
-        venues = x[:,:,0]
-        hours = x[:,:,1]
-        weekdays = x[:,:,2]
-        deltas = x[:,:,3]
+        self.lstm = nn.LSTM(
+            input_size=input_dim,
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0.0
+        )
 
-        x = torch.cat([
-            self.venue_embedding(venues),
-            self.hour_embedding(hours),
-            self.weekday_embedding(weekdays),
-            self.delta_embedding(deltas)
-        ], dim=2)
+        self.fc = nn.Linear(hidden_dim, num_categories)
 
-        out,_ = self.lstm(x)
-        out = out[:,-1,:]
-        return self.fc(out)
+    def forward(self, cat_seq, hour_seq, day_seq):
+        cat_e = self.cat_emb(cat_seq)
+        hour_e = self.hour_emb(hour_seq)
+        day_e = self.day_emb(day_seq)
+
+        x = torch.cat([cat_e, hour_e, day_e], dim=-1)
+        _, (h_n, _) = self.lstm(x)
+        return self.fc(h_n[-1])
 
 import torch.nn as nn
 import torch.nn.functional as F

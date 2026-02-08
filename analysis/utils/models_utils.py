@@ -66,7 +66,7 @@ DATASET_INPUT_MAP = {"CIFAR10": "img", "MNIST": "image", "EMNIST": "image", "GTS
 def load_model(model_name, dataset, strategy, device):
     try:
         num_classes = {'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'Tiny-ImageNet': 200,
-         'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30, "Foursquare": 100}[dataset]
+         'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30, "Foursquare": 10}[dataset]
         if model_name == 'CNN':
             if dataset in ['MNIST']:
                 input_shape = 1
@@ -344,7 +344,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                          "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
                          , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-1-Words-3743',
-                         "Foursquare": "claudiogsc/foursquare_sequences_len_5_top_100_venues"}[
+                         "Foursquare": "claudiogsc/foursquare-us-sequences-highlevel"}[
                     dataset_name],
                 partitioners={"train": partitioner},
                 path=f"/home/gustavo/PycharmProjects/Multi-model-Federated-Learning/system/datasets/{dataset_name}",
