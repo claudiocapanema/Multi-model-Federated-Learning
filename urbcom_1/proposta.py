@@ -1,487 +1,627 @@
-# ==============================
-# PART 1 - Imports, Metrics, Model, Datasets
-# ==============================
+# ===============================
+# PARTE 1 — IMPORTS E CONFIG
+# ===============================
+
+import copy
+import random
+import numpy as np
+from collections import defaultdict
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torchvision
-import torchvision.transforms as transforms
-import numpy as np
-import random
 from torch.utils.data import DataLoader, Subset
 
-import csv
-import os
+import torchvision
+import torchvision.transforms as transforms
+# ===============================
+# CONFIGURAÇÕES GERAIS
+# ===============================
 
-
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 NUM_CLIENTS = 40
-CLIENT_FRAC = 0.3
-NUM_SELECTED = int(NUM_CLIENTS * CLIENT_FRAC)  # 12
 ROUNDS = 50
 LOCAL_EPOCHS = 1
 BATCH_SIZE = 64
 LR = 0.01
 
-# Rotation hyperparameters
-LAMBDA = 0.3   # penalize repetition
-BETA = 0.2     # reward rotation
+# ===============================
+# REGIMES EXPERIMENTAIS RAWCS
+# ===============================
 
-BASE_SEED = 42
+def get_regime(name: str):
+    """
+    Retorna um dicionário com a configuração
+    do regime experimental.
+    """
+
+    regimes = {
+
+        "benign": {
+            "battery_init": (0.8, 1.0),
+            "compute": (0.6, 1.0),
+            "link": (0.6, 1.0),
+
+            "BATTERY_DECAY": 0.02,
+            "TIME_MAX": 3.0,
+            "LINK_MIN": 0.3,
+        },
+
+        "realistic": {
+            "battery_init": (0.6, 1.0),
+            "compute": (0.3, 1.0),
+            "link": (0.0, 1.0),
+
+            "BATTERY_DECAY": 0.05,
+            "TIME_MAX": 2.5,
+            "LINK_MIN": 0.3,
+        },
+
+        "severe": {
+            "battery_init": (0.4, 0.8),
+            "compute": (0.2, 0.6),
+            "link": (0.0, 0.6),
+
+            "BATTERY_DECAY": 0.08,
+            "TIME_MAX": 2.0,
+            "LINK_MIN": 0.4,
+        }
+    }
+
+    if name not in regimes:
+        raise ValueError(f"Regime desconhecido: {name}")
+
+    return regimes[name]
+
+# ===============================
+# APLICAR REGIME AO EXPERIMENTO
+# ===============================
+
+def apply_regime(name: str):
+    global BATTERY_DECAY, TIME_MAX, LINK_MIN
+
+    cfg = get_regime(name)
+
+    # parâmetros globais
+    BATTERY_DECAY = cfg["BATTERY_DECAY"]
+    TIME_MAX = cfg["TIME_MAX"]
+    LINK_MIN = cfg["LINK_MIN"]
+
+    # estado inicial dos clientes
+    for cid in range(NUM_CLIENTS):
+        client_resources[cid]["battery"] = np.random.uniform(
+            *cfg["battery_init"]
+        )
+
+        client_resources[cid]["compute"] = np.random.uniform(
+            *cfg["compute"]
+        )
+
+        client_resources[cid]["link"] = np.random.uniform(
+            *cfg["link"]
+        )
+
+    print(f"🧪 Regime experimental aplicado: {name.upper()}")
+
+def update_link(cid):
+    low, high = current_regime["link"]
+    client_resources[cid]["link"] = np.random.uniform(low, high)
 
 
 
-def set_seed(seed):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-set_seed(BASE_SEED)
-
-# ==============================
-# Metrics
-# ==============================
-
-def jain_fairness(x):
-    x = np.array(x)
-    return (x.sum() ** 2) / (len(x) * (x ** 2).sum() + 1e-8)
-
-def avg_efficiency(clients, model_name):
-    return np.mean([c.efficiency[model_name] for c in clients])
-
-def print_client_ids(client_list):
-    return [c.cid for c in client_list]
-
-def client_entropy(client):
-    total = client.train_count["cifar"] + client.train_count["gtsrb"]
-    if total == 0:
-        return 0.0
-    p_cifar = client.train_count["cifar"] / total
-    p_gtsrb = client.train_count["gtsrb"] / total
-
-    entropy = 0
-    for p in [p_cifar, p_gtsrb]:
-        if p > 0:
-            entropy -= p * np.log(p + 1e-8)
-    return entropy
-
-
-def compute_switch_rate(prev_assignments, curr_assignments):
-    switches = 0
-    total = 0
-    for cid in curr_assignments:
-        if cid in prev_assignments:
-            if prev_assignments[cid] != curr_assignments[cid]:
-                switches += 1
-            total += 1
-    return switches / max(total, 1)
-
-
-# ==============================
-# Simple CNN Model
-# ==============================
+# ===============================
+# MODELOS
+# ===============================
 
 class SimpleCNN(nn.Module):
     def __init__(self, num_classes):
         super().__init__()
-        self.net = nn.Sequential(
+        self.features = nn.Sequential(
             nn.Conv2d(3, 32, 3, padding=1),
             nn.ReLU(),
             nn.MaxPool2d(2),
             nn.Conv2d(32, 64, 3, padding=1),
             nn.ReLU(),
             nn.MaxPool2d(2),
-            nn.Flatten(),
-            nn.Linear(64*8*8, 256),
+        )
+
+        self.classifier = nn.Sequential(
+            nn.Linear(64 * 8 * 8, 128),
             nn.ReLU(),
-            nn.Linear(256, num_classes)
+            nn.Linear(128, num_classes)
         )
 
     def forward(self, x):
-        return self.net(x)
+        x = self.features(x)
+        x = x.view(x.size(0), -1)
+        return self.classifier(x)
 
-# ==============================
-# Load datasets
-# ==============================
-
-transform = transforms.Compose([
-    transforms.Resize((32,32)),
-    transforms.ToTensor()
-])
-
-cifar_train = torchvision.datasets.CIFAR10(root="./data", train=True, download=True, transform=transform)
-cifar_test = torchvision.datasets.CIFAR10(root="./data", train=False, download=True, transform=transform)
-
-gtsrb_train = torchvision.datasets.GTSRB(root="./data", split="train", download=True, transform=transform)
-gtsrb_test = torchvision.datasets.GTSRB(root="./data", split="test", download=True, transform=transform)
-# ==============================
-# PART 2 - Dirichlet Split, Client, Training, Evaluation
-# ==============================
-
-def dirichlet_split(dataset, num_clients, alpha=0.5):
-    labels = np.array([dataset[i][1] for i in range(len(dataset))])
-    num_classes = len(np.unique(labels))
-
-    class_indices = [np.where(labels == y)[0] for y in range(num_classes)]
-    client_indices = [[] for _ in range(num_clients)]
-
-    for c in range(num_classes):
-        np.random.shuffle(class_indices[c])
-        proportions = np.random.dirichlet(np.repeat(alpha, num_clients))
-        proportions = (np.cumsum(proportions) * len(class_indices[c])).astype(int)[:-1]
-        split = np.split(class_indices[c], proportions)
-
-        for i in range(num_clients):
-            client_indices[i].extend(split[i])
-
-    for i in range(num_clients):
-        np.random.shuffle(client_indices[i])
-
-    return client_indices
-
-
-# Create client splits
-cifar_clients = dirichlet_split(cifar_train, NUM_CLIENTS, alpha=0.1)
-gtsrb_clients = dirichlet_split(gtsrb_train, NUM_CLIENTS, alpha=0.1)
-
-
-# ==============================
-# Client class
-# ==============================
-
-class Client:
-    def __init__(self, cid, cifar_idxs, gtsrb_idxs):
-        self.cid = cid
-
-        self.cifar_loader = DataLoader(
-            Subset(cifar_train, cifar_idxs),
-            batch_size=BATCH_SIZE,
-            shuffle=True
-        )
-
-        self.gtsrb_loader = DataLoader(
-            Subset(gtsrb_train, gtsrb_idxs),
-            batch_size=BATCH_SIZE,
-            shuffle=True
-        )
-
-        # efficiency per model
-        self.efficiency = {
-            "cifar": 1.0,
-            "gtsrb": 1.0
-        }
-
-        # history for rotation
-        self.train_count = {"cifar": 0, "gtsrb": 0}
-        self.last_trained = {"cifar": -1, "gtsrb": -1}
-
-    def train_local(self, model, dataloader):
-        model.train()
-        optimizer = optim.SGD(model.parameters(), lr=LR)
-        criterion = nn.CrossEntropyLoss()
-
-        total_loss = 0
-        correct = 0
-        total = 0
-
-        for _ in range(LOCAL_EPOCHS):
-            for x, y in dataloader:
-                x, y = x.to(DEVICE), y.to(DEVICE)
-
-                optimizer.zero_grad()
-                out = model(x)
-                loss = criterion(out, y)
-                loss.backward()
-                optimizer.step()
-
-                total_loss += loss.item()
-                _, pred = out.max(1)
-                total += y.size(0)
-                correct += pred.eq(y).sum().item()
-
-        avg_loss = total_loss / len(dataloader)
-        acc = correct / total
-        return avg_loss, acc
-
-    def update_efficiency(self, model_name, loss_before, loss_after, cost):
-        # normalized relative improvement
-        delta = (loss_before - loss_after) / (loss_before + 1e-8)
-        new_eff = delta / cost
-        self.efficiency[model_name] = max(new_eff, 1e-6)
-
-    def update_history(self, model_name, round_id):
-        self.train_count[model_name] += 1
-        self.last_trained[model_name] = round_id
-
-
-# ==============================
-# Initialize clients
-# ==============================
-
-clients = []
-for i in range(NUM_CLIENTS):
-    clients.append(Client(i, cifar_clients[i], gtsrb_clients[i]))
-
-
-# ==============================
-# Evaluation function
-# ==============================
-
-def evaluate_global(model, dataset):
-    model.eval()
-    loader = DataLoader(dataset, batch_size=128, shuffle=False)
-
-    criterion = nn.CrossEntropyLoss()
-    total_loss = 0
-    correct = 0
-    total = 0
-
-    with torch.no_grad():
-        for x, y in loader:
-            x, y = x.to(DEVICE), y.to(DEVICE)
-            out = model(x)
-            loss = criterion(out, y)
-
-            total_loss += loss.item()
-            _, pred = out.max(1)
-            total += y.size(0)
-            correct += pred.eq(y).sum().item()
-
-    return total_loss / len(loader), correct / total
-
-# ==============================
-# PART 3 - Federated Loop
-# ==============================
-
-# Cost of each model
-COST = {
-    "cifar": 1.0,   # custo X
-    "gtsrb": 2.0    # custo 2X
+global_models = {
+    "cifar": SimpleCNN(10).to(DEVICE),
+    "gtsrb": SimpleCNN(43).to(DEVICE)
 }
 
-NUM_CIFAR_CLIENTS = int(NUM_CLIENTS * 0.15)   # 6
-NUM_GTSRB_CLIENTS = int(NUM_CLIENTS * 0.15)   # 6
+# ===============================
+# ESTADO DE RECURSOS POR CLIENTE
+# ===============================
+
+client_resources = {}
+
+for cid in range(NUM_CLIENTS):
+    client_resources[cid] = {
+        "battery": np.random.uniform(0.6, 1.0),     # cb inicial
+        "compute": np.random.uniform(0.3, 1.0),     # capacidade fixa
+        "link": 1.0                                 # atualizado por rodada
+    }
+
+# ===============================
+# CUSTO DOS MODELOS
+# ===============================
+
+MODEL_COST = {
+    "cifar": 1.0,
+    "gtsrb": 2.0   # deliberadamente mais pesado
+}
+
+def estimate_training_time(cid, model_name):
+    return MODEL_COST[model_name] / client_resources[cid]["compute"]
+
+# ===============================
+# CONSUMO DE BATERIA
+# ===============================
+
+BATTERY_DECAY = 0.05  # θ do artigo
+
+def consume_battery(cid, train_time):
+    client_resources[cid]["battery"] -= train_time * BATTERY_DECAY
+    client_resources[cid]["battery"] = max(
+        client_resources[cid]["battery"], 0.0
+    )
+
+def update_link(cid):
+    client_resources[cid]["link"] = np.random.uniform(0.0, 1.0)
+
+# ===============================
+# FUNÇÃO DE VIABILIDADE (RAWCS)
+# ===============================
+
+BATTERY_MIN = 0.2
+TIME_MAX = 2.5
+LINK_MIN = 0.3
+
+def R(cid, model_name):
+    train_time = estimate_training_time(cid, model_name)
+    battery_after = client_resources[cid]["battery"] - train_time * BATTERY_DECAY
+
+    return (
+        battery_after >= BATTERY_MIN and
+        train_time <= TIME_MAX and
+        client_resources[cid]["link"] >= LINK_MIN
+    )
+
+# ===============================
+# FUNÇÃO DE UTILIDADE
+# ===============================
+
+ALPHA = 0.4
+BETA  = 0.4
+GAMMA = 0.2
+
+TARGET_ACC = {
+    "cifar": 0.75,
+    "gtsrb": 0.90
+}
+
+# ===============================
+# FUNÇÃO DE UTILIDADE (MODELO-AWARE)
+# ===============================
+
+def compute_utility(cid, model_name):
+    train_time = estimate_training_time(cid, model_name)
+
+    cost = (
+        ALPHA * (1.0 - client_resources[cid]["battery"]) +
+        BETA  * min(train_time / TIME_MAX, 1.0) +
+        GAMMA * (1.0 - client_resources[cid]["link"])
+    )
+
+    acc_gap = max(
+        TARGET_ACC[model_name] - client_acc[cid][model_name],
+        0.0
+    )
+
+    # utilidade RAWCS (sem colapsar modelos)
+    return max((1.0 - cost) * acc_gap, 0.0)
+
+# ===============================
+# MÉTRICAS POR CLIENTE E MODELO
+# ===============================
+
+client_acc = {
+    cid: {"cifar": 0.0, "gtsrb": 0.0}
+    for cid in range(NUM_CLIENTS)
+}
+
+client_loss = {
+    cid: {"cifar": float("inf"), "gtsrb": float("inf")}
+    for cid in range(NUM_CLIENTS)
+}
+
+client_delta_acc = {
+    cid: {"cifar": 0.0, "gtsrb": 0.0}
+    for cid in range(NUM_CLIENTS)
+}
+
+# ===============================
+# LOGS RAWCS (MULTI-MODELO)
+# ===============================
+
+rawcs_logs = {
+    "viable_pairs": [],
+    "viable_clients": [],
+    "viable_pairs_per_model": [],   # <-- NOVO
+    "clients_per_model": [],
+    "avg_battery": [],
+    "avg_link": [],
+    "avg_cost": [],                 # agora por modelo
+    "avg_train_time": [],           # agora por modelo
+    "max_train_time": [],           # agora por modelo
+    "fallback_rate": []
+}
 
 
-# ==============================
-# Global models
-# ==============================
+# ===============================
+# RAWCS MULTI-MODELO (PADRÃO ARTIGO)
+# ===============================
 
-global_cifar = SimpleCNN(num_classes=10).to(DEVICE)
-global_gtsrb = SimpleCNN(num_classes=43).to(DEVICE)
+# ===============================
+# RAWCS MULTI-MODELO (PADRÃO RAWCS REAL)
+# ===============================
+
+def rawcs_multi_model():
+    assignments = {}
+
+    viable_pairs = 0
+    viable_clients = 0
+    fallback_count = 0
+
+    viable_pairs_per_model = {m: 0 for m in global_models}
+    costs_per_model = {m: [] for m in global_models}
+    train_times_per_model = {m: [] for m in global_models}
+
+    # 1) atualizar link (volátil)
+    for cid in range(NUM_CLIENTS):
+        update_link(cid)
+
+    # 2) decisão cliente -> modelo
+    for cid in range(NUM_CLIENTS):
+
+        utilities = {}
+        client_viable = False
+
+        for model_name in global_models:
+
+            if R(cid, model_name):
+                client_viable = True
+                viable_pairs += 1
+                viable_pairs_per_model[model_name] += 1
+
+                train_time = estimate_training_time(cid, model_name)
+
+                cost = (
+                    ALPHA * (1.0 - client_resources[cid]["battery"]) +
+                    BETA  * min(train_time / TIME_MAX, 1.0) +
+                    GAMMA * (1.0 - client_resources[cid]["link"])
+                )
+
+                utility = compute_utility(cid, model_name)
+
+                utilities[model_name] = utility
+                costs_per_model[model_name].append(cost)
+                train_times_per_model[model_name].append(train_time)
+
+        if client_viable:
+            viable_clients += 1
+
+        if utilities:
+            models = list(utilities.keys())
+            probs = np.array(list(utilities.values()))
+
+            if probs.sum() == 0:
+                probs = np.ones_like(probs) / len(probs)
+            else:
+                probs = probs / probs.sum()
+
+            chosen_model = np.random.choice(models, p=probs)
+        else:
+            fallback_count += 1
+            chosen_model = max(
+                global_models.keys(),
+                key=lambda m: client_loss[cid][m]
+            )
+
+        assignments[cid] = chosen_model
+
+    # 3) LOGS RAWCS (SEM COLAPSAR MODELOS)
+    rawcs_logs["viable_pairs"].append(viable_pairs)
+    rawcs_logs["viable_clients"].append(viable_clients)
+    rawcs_logs["viable_pairs_per_model"].append(viable_pairs_per_model)
+    rawcs_logs["fallback_rate"].append(fallback_count / NUM_CLIENTS)
+
+    rawcs_logs["avg_cost"].append({
+        m: float(np.mean(costs_per_model[m])) if costs_per_model[m] else None
+        for m in global_models
+    })
+
+    rawcs_logs["avg_train_time"].append({
+        m: float(np.mean(train_times_per_model[m])) if train_times_per_model[m] else None
+        for m in global_models
+    })
+
+    rawcs_logs["max_train_time"].append({
+        m: float(np.max(train_times_per_model[m])) if train_times_per_model[m] else None
+        for m in global_models
+    })
+
+    rawcs_logs["avg_battery"].append(
+        float(np.mean([client_resources[cid]["battery"] for cid in range(NUM_CLIENTS)]))
+    )
+
+    rawcs_logs["avg_link"].append(
+        float(np.mean([client_resources[cid]["link"] for cid in range(NUM_CLIENTS)]))
+    )
+
+    return assignments
+
+# ===============================
+# DATASETS E DATALOADERS
+# ===============================
+
+transform_train = transforms.Compose([
+    transforms.Resize((32, 32)),
+    transforms.ToTensor(),
+])
+
+transform_test = transforms.Compose([
+    transforms.Resize((32, 32)),
+    transforms.ToTensor(),
+])
+
+# CIFAR-10
+cifar_train = torchvision.datasets.CIFAR10(
+    root="./data", train=True, download=True, transform=transform_train
+)
+cifar_test = torchvision.datasets.CIFAR10(
+    root="./data", train=False, download=True, transform=transform_test
+)
+
+# GTSRB
+gtsrb_train = torchvision.datasets.GTSRB(
+    root="./data", split="train", download=True, transform=transform_train
+)
+gtsrb_test = torchvision.datasets.GTSRB(
+    root="./data", split="test", download=True, transform=transform_test
+)
+
+def split_dataset(dataset, num_clients):
+    idx = np.random.permutation(len(dataset))
+    splits = np.array_split(idx, num_clients)
+    return splits
+
+cifar_train_splits = split_dataset(cifar_train, NUM_CLIENTS)
+cifar_test_splits  = split_dataset(cifar_test, NUM_CLIENTS)
+gtsrb_train_splits = split_dataset(gtsrb_train, NUM_CLIENTS)
+gtsrb_test_splits  = split_dataset(gtsrb_test, NUM_CLIENTS)
+
+train_loaders = defaultdict(dict)
+test_loaders  = defaultdict(dict)
+
+for cid in range(NUM_CLIENTS):
+    train_loaders[cid]["cifar"] = DataLoader(
+        Subset(cifar_train, cifar_train_splits[cid]),
+        batch_size=BATCH_SIZE, shuffle=True
+    )
+    test_loaders[cid]["cifar"] = DataLoader(
+        Subset(cifar_test, cifar_test_splits[cid]),
+        batch_size=BATCH_SIZE, shuffle=False
+    )
+
+    train_loaders[cid]["gtsrb"] = DataLoader(
+        Subset(gtsrb_train, gtsrb_train_splits[cid]),
+        batch_size=BATCH_SIZE, shuffle=True
+    )
+    test_loaders[cid]["gtsrb"] = DataLoader(
+        Subset(gtsrb_test, gtsrb_test_splits[cid]),
+        batch_size=BATCH_SIZE, shuffle=False
+    )
+
+# ===============================
+# TREINO LOCAL
+# ===============================
+
+def client_update(model, loader, epochs, lr):
+    model = copy.deepcopy(model)
+    model.train()
+
+    opt = optim.SGD(model.parameters(), lr=lr)
+    loss_fn = nn.CrossEntropyLoss()
+
+    total_loss, total_samples = 0.0, 0
+
+    for _ in range(epochs):
+        for x, y in loader:
+            x, y = x.to(DEVICE), y.to(DEVICE)
+            opt.zero_grad()
+            out = model(x)
+            loss = loss_fn(out, y)
+            loss.backward()
+            opt.step()
+
+            total_loss += loss.item() * x.size(0)
+            total_samples += x.size(0)
+
+    return model.state_dict(), total_loss / total_samples, total_samples
 
 
-# ==============================
-# Federated Averaging
-# ==============================
+@torch.no_grad()
+def evaluate_model(model, loader):
+    model.eval()
+    correct, total = 0, 0
 
-def fedavg(weights):
+    for x, y in loader:
+        x, y = x.to(DEVICE), y.to(DEVICE)
+        preds = model(x).argmax(dim=1)
+        correct += (preds == y).sum().item()
+        total += y.size(0)
+
+    return correct / total
+
+# ===============================
+# AVALIAÇÃO GLOBAL (MODELO EM TODOS OS CLIENTES)
+# ===============================
+
+@torch.no_grad()
+def evaluate_global_model(model, test_loaders):
+    model.eval()
+
+    accs = []
+
+    for cid in range(NUM_CLIENTS):
+        acc = evaluate_model(model, test_loaders[cid])
+        accs.append(acc)
+
+    return float(np.mean(accs))
+
+
+def fedavg(updates):
+    total = sum(n for _, n in updates)
     avg = {}
-    for k in weights[0].keys():
-        avg[k] = sum(w[k] for w in weights) / len(weights)
+
+    for k in updates[0][0].keys():
+        avg[k] = sum(state[k] * (n / total) for state, n in updates)
+
     return avg
 
 
-# ==============================
-# Client score with rotation
-# ==============================
+@torch.no_grad()
+def evaluate_model(model, loader):
+    model.eval()
+    correct, total = 0, 0
 
-def client_score(client, model_name, round_id):
-    eff = client.efficiency[model_name] / COST[model_name]
-    penalty = LAMBDA * client.train_count[model_name]
-    rotation_bonus = BETA * (round_id - client.last_trained[model_name])
-    return eff - penalty + rotation_bonus
+    for x, y in loader:
+        x, y = x.to(DEVICE), y.to(DEVICE)
+        preds = model(x).argmax(dim=1)
+        correct += (preds == y).sum().item()
+        total += y.size(0)
 
+    return correct / total
 
-# ==============================
-# Federated training loop
-# ==============================
-cifar_log = []
-gtsrb_log = []
+# ===============================
+# LOOP FEDERADO (PADRÃO RAWCS)
+# ===============================
 
-CIFAR_CSV = "proposta_cifar.csv"
-GTSRB_CSV = "proposta_gtsrb.csv"
+current_regime = get_regime("realistic")
+apply_regime("realistic")
 
-csv_header = [
-    "round",
-    "loss",
-    "accuracy",
-    "avg_efficiency",
-    "effective_resource",
-    "fairness",
-    "switch_rate",
-    "avg_client_entropy",
-    "min_client_entropy",
-    "client_jain_fairness"
-]
+for rnd in range(1, ROUNDS + 1):
 
-# Clean CSVs at start
-for file in [CIFAR_CSV, GTSRB_CSV]:
-    with open(file, mode="w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(csv_header)
+    print(f"\n🔄 RODADA {rnd}")
 
+    # ---------------------------
+    # 1) RAWCS: decide cliente → modelo
+    # ---------------------------
+    assignments = rawcs_multi_model()
 
-prev_assignments = {}
+    # buffers de atualização por modelo
+    model_updates = {
+        "cifar": [],
+        "gtsrb": []
+    }
 
-for rnd in range(ROUNDS):
-    set_seed(BASE_SEED + rnd)
-    print(f"\n================ ROUND {rnd+1} ================")
+    # ---------------------------
+    # 2) Treino local + consumo
+    # ---------------------------
+    for cid, model_name in assignments.items():
 
-    # Step 1: randomly select clients (availability)
-    selected = random.sample(clients, NUM_SELECTED)
+        # cliente pode ter sido selecionado mesmo em fallback
+        if not R(cid, model_name):
+            continue
 
-    # Step 2: rank clients by best score among models
-    ranked = sorted(
-        selected,
-        key=lambda c: max(
-            client_score(c, "cifar", rnd),
-            client_score(c, "gtsrb", rnd)
-        ),
-        reverse=True
+        local_model = copy.deepcopy(global_models[model_name])
+
+        state_dict, loss, n_samples = client_update(
+            local_model,
+            train_loaders[cid][model_name],
+            epochs=LOCAL_EPOCHS,
+            lr=LR
+        )
+
+        model_updates[model_name].append((state_dict, n_samples))
+
+        # -----------------------
+        # consumo de bateria (RAWCS Eq. 4)
+        # -----------------------
+        train_time = estimate_training_time(cid, model_name)
+        consume_battery(cid, train_time)
+
+        # -----------------------
+        # métricas locais
+        # -----------------------
+        prev_acc = client_acc[cid][model_name]
+
+        acc = evaluate_model(
+            local_model,
+            test_loaders[cid][model_name]
+        )
+
+        client_acc[cid][model_name] = acc
+        client_loss[cid][model_name] = loss
+        client_delta_acc[cid][model_name] = acc - prev_acc
+
+    # ---------------------------
+    # 3) Agregação FedAvg (por modelo)
+    # ---------------------------
+    for model_name, updates in model_updates.items():
+        if updates:
+            new_state = fedavg(updates)
+            global_models[model_name].load_state_dict(new_state)
+
+    # ---------------------------
+    # 4) Avaliação global
+    # ---------------------------
+    for model_name, model in global_models.items():
+        global_acc = evaluate_global_model(
+            model,
+            test_loaders={
+                cid: test_loaders[cid][model_name]
+                for cid in range(NUM_CLIENTS)
+            }
+        )
+
+        print(
+            f"📊 Modelo {model_name.upper()} | "
+            f"Acurácia global média: {global_acc:.4f}"
+        )
+
+    print(
+        f"🧠 RAWCS | "
+        f"Viable pairs: {rawcs_logs['viable_pairs'][-1]} | "
+        f"Viable clients: {rawcs_logs['viable_clients'][-1]} | "
+        f"Fallback rate: {rawcs_logs['fallback_rate'][-1]:.2f}"
     )
 
-    cifar_selected = []
-    gtsrb_selected = []
+    print("🧠 Viable pairs por modelo:",
+          rawcs_logs["viable_pairs_per_model"][-1])
 
-    # Step 3: assign clients to the model where they score higher
-    for c in ranked:
-        score_cifar = client_score(c, "cifar", rnd)
-        score_gtsrb = client_score(c, "gtsrb", rnd)
+    print("⚙️ Custo médio por modelo:",
+          rawcs_logs["avg_cost"][-1])
 
-        if len(cifar_selected) < NUM_CIFAR_CLIENTS and score_cifar >= score_gtsrb:
-            cifar_selected.append(c)
-        elif len(gtsrb_selected) < NUM_GTSRB_CLIENTS:
-            gtsrb_selected.append(c)
+    print("⏱️ Tempo médio por modelo:",
+          rawcs_logs["avg_train_time"][-1])
 
-        if len(cifar_selected) == NUM_CIFAR_CLIENTS and len(gtsrb_selected) == NUM_GTSRB_CLIENTS:
-            break
-
-    # Print selected clients
-    print(f"CIFAR selected clients ({len(cifar_selected)}): {print_client_ids(cifar_selected)}")
-    print(f"GTSRB selected clients ({len(gtsrb_selected)}): {print_client_ids(gtsrb_selected)}")
-
-    # Current assignments
-    current_assignments = {}
-
-    for c in cifar_selected:
-        current_assignments[c.cid] = "cifar"
-    for c in gtsrb_selected:
-        current_assignments[c.cid] = "gtsrb"
-
-    # Diversity metrics
-    if rnd == 0:
-        switch_rate = 0.0
-    else:
-        switch_rate = compute_switch_rate(prev_assignments, current_assignments)
-
-    entropies = [client_entropy(c) for c in clients]
-    avg_entropy = np.mean(entropies)
-    min_entropy = np.min(entropies)
-
-    client_usage = [c.train_count["cifar"] + c.train_count["gtsrb"] for c in clients]
-    jain_clients = jain_fairness(client_usage)
-
-    prev_assignments = current_assignments.copy()
-
-    cifar_weights = []
-    gtsrb_weights = []
-
-    # ================= CIFAR =================
-    for client in cifar_selected:
-        local_model = SimpleCNN(num_classes=10).to(DEVICE)
-        local_model.load_state_dict(global_cifar.state_dict())
-
-        loss_before, _ = evaluate_global(local_model, cifar_test)
-        loss_after, acc = client.train_local(local_model, client.cifar_loader)
-
-        client.update_efficiency("cifar", loss_before, loss_after, COST["cifar"])
-        client.update_history("cifar", rnd)
-
-        cifar_weights.append(local_model.state_dict())
-
-    # ================= GTSRB =================
-    for client in gtsrb_selected:
-        local_model = SimpleCNN(num_classes=43).to(DEVICE)
-        local_model.load_state_dict(global_gtsrb.state_dict())
-
-        loss_before, _ = evaluate_global(local_model, gtsrb_test)
-        loss_after, acc = client.train_local(local_model, client.gtsrb_loader)
-
-        client.update_efficiency("gtsrb", loss_before, loss_after, COST["gtsrb"])
-        client.update_history("gtsrb", rnd)
-
-        gtsrb_weights.append(local_model.state_dict())
-
-    # ================= Aggregate =================
-    if cifar_weights:
-        global_cifar.load_state_dict(fedavg(cifar_weights))
-    if gtsrb_weights:
-        global_gtsrb.load_state_dict(fedavg(gtsrb_weights))
-
-    # ================= Evaluate =================
-    cifar_loss, cifar_acc = evaluate_global(global_cifar, cifar_test)
-    gtsrb_loss, gtsrb_acc = evaluate_global(global_gtsrb, gtsrb_test)
-
-    # ================= Metrics =================
-    R_eff_cifar = sum(c.efficiency["cifar"] * COST["cifar"] for c in cifar_selected)
-    R_eff_gtsrb = sum(c.efficiency["gtsrb"] * COST["gtsrb"] for c in gtsrb_selected)
-
-    fairness = jain_fairness([R_eff_cifar, R_eff_gtsrb])
-
-    avg_eff_cifar = avg_efficiency(cifar_selected, "cifar")
-    avg_eff_gtsrb = avg_efficiency(gtsrb_selected, "gtsrb")
-    worst_acc = min(cifar_acc, gtsrb_acc)
-
-    # ================= CSV Logging (per round) =================
-
-    with open(CIFAR_CSV, mode="a", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            rnd + 1,
-            cifar_loss,
-            cifar_acc,
-            avg_eff_cifar,
-            R_eff_cifar,
-            fairness,
-            switch_rate,
-            avg_entropy,
-            min_entropy,
-            jain_clients
-        ])
-
-    with open(GTSRB_CSV, mode="a", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            rnd + 1,
-            gtsrb_loss,
-            gtsrb_acc,
-            avg_eff_gtsrb,
-            R_eff_gtsrb,
-            fairness,
-            switch_rate,
-            avg_entropy,
-            min_entropy,
-            jain_clients
-        ])
-
-    print("\n--- Metrics ---")
-    print(f"CIFAR   -> Loss: {cifar_loss:.4f}, Acc: {cifar_acc:.4f}")
-    print(f"GTSRB   -> Loss: {gtsrb_loss:.4f}, Acc: {gtsrb_acc:.4f}")
-    print(f"Worst-model Accuracy: {worst_acc:.4f}")
-
-    print(f"Jain Fairness (effective): {fairness:.4f}")
-    print(f"Avg efficiency CIFAR: {avg_eff_cifar:.6f}")
-    print(f"Avg efficiency GTSRB: {avg_eff_gtsrb:.6f}")
-
-    print(f"Switch rate (client rotation): {switch_rate:.4f}")
-    print(f"Avg client entropy: {avg_entropy:.4f}")
-    print(f"Min client entropy: {min_entropy:.4f}")
-    print(f"Client Jain Fairness (usage): {jain_clients:.4f}")

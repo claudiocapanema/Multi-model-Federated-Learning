@@ -138,7 +138,7 @@ def evaluate(model, loader, criterion, device):
 
 if __name__ == "__main__":
 
-    HF_REPO = "claudiogsc/foursquare-us-sequences-highlevel"
+    HF_REPO = "claudiogsc/foursquare-us-sequences-highlevel-200000-samples"
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -150,7 +150,7 @@ if __name__ == "__main__":
     )
 
     print("tamanho ", len(train_loader.dataset))
-    exit()
+
 
     model = NextCategoryLSTMWithTime(num_categories).to(device)
 

@@ -37,17 +37,14 @@ def read_data(read_solutions, read_dataset_order):
         "FedKD": {"Strategy": "FedKD", "Version": "Original", "Table": "FedKD"},
         "FedKD+FP": {"Strategy": "FedKD", "Version": "FP", "Table": "FedKD+FP"},
         "MultiFedAvg+MFP": {"Strategy": "MultiFedAvg", "Version": "MFP", "Table": "MultiFedAvg+MFP"},
-        "MultiFedAvg+MFP_v2": {"Strategy": "MultiFedAvg", "Version": "MFP_v2", "Table": "$MultiFedAvg+MFP_{v2}$"},
-        "MultiFedAvg+MFP_v2_dh": {"Strategy": "MultiFedAvg", "Version": "MFP_v2_dh", "Table": "$MultiFedAvg+MFP_{v2dh}$"},
-        "MultiFedAvg+MFP_v2_iti": {"Strategy": "MultiFedAvg", "Version": "MFP_v2_iti", "Table": "$MultiFedAvg+MFP_{v2iti}$"},
+        "MultiFedAvg+MFP_v2": {"Strategy": "MultiFedAvg", "Version": "MFP_v2", "Table": "MultiFedAvg+MFP_v2"},
+        "MultiFedAvg+MFP_v2_dh": {"Strategy": "MultiFedAvg", "Version": "MFP_v2_dh", "Table": "MultiFedAvg+MFP_v2_dh"},
+        "MultiFedAvg+MFP_v2_iti": {"Strategy": "MultiFedAvg", "Version": "MFP_v2_iti", "Table": "MultiFedAvg+MFP_v2_iti"},
         "MultiFedAvg+FPD": {"Strategy": "MultiFedAvg", "Version": "FPD", "Table": "MultiFedAvg+FPD"},
         "MultiFedAvg+FP": {"Strategy": "MultiFedAvg", "Version": "FP", "Table": "MultiFedAvg+FP"},
         "MultiFedAvg": {"Strategy": "MultiFedAvg", "Version": "Original", "Table": "MultiFedAvg"},
         "MultiFedAvgRR": {"Strategy": "MultiFedAvgRR", "Version": "Original", "Table": "MultiFedAvgRR"},
-        "FedFairMMFL": {"Strategy": "FedFairMMFL", "Version": "Original", "Table": "FedFairMMFL"},
-        "MultiFedAvg-MDH": {"Strategy": "MultiFedAvg-MDH", "Version": "Original", "Table": "MultiFedAvg-MDH"},
-        "DMA-FL": {"Strategy": "DMA-FL", "Version": "Original", "Table": "DMA-FL"},
-        "AdaptiveFedAvg": {"Strategy": "AdaptiveFedAvg", "Version": "Original", "Table": "AdaptiveFedAvg"}
+        "MultiFedAvg-MEH": {"Strategy": "MultiFedAvg-MEH", "Version": "Original", "Table": "MultiFedAvg-MEH"}
     }
     hue_order = []
     for solution in read_solutions:
@@ -377,23 +374,27 @@ def idmax(df, n_solutions):
 
 
 if __name__ == "__main__":
+
     # experiment_id = "label_shift#1"
     # experiment_id = "label_shift#2"
-    # experiment_id = "label_shift#3_sudden"
+    # experiment_id = "label_shift#3"
     # experiment_id = "label_shift#3_gradual"
-    # experiment_id = "label_shift#3_recurrent"
-    # experiment_id = "label_shift#4_sudden"
+    # experiment_id = "label_shift#1_sudden"
+    experiment_id = "label_shift#1_recurrent"
+    # experiment_id = "label_shift#2_sudden"
+    # experiment_id = "label_shift#2_recurrent"
+    # experiment_id = "label_shift#4"
     # experiment_id = "label_shift#4_gradual"
-    # experiment_id = "label_shift#4_recurrent"
-    # experiment_id = "label_shift#5_recurrent"
     # experiment_id = "label_shift#5"
     # experiment_id = "label_shift#6"
-    experiment_id = "concept_drift#1_sudden"
-    # experiment_id = "concept_drift#1_recurrent"
-    # experiment_id = "concept_drift#1_gradual"
+    # experiment_id = "concept_drift#2"
+    # experiment_id = "concept_drift#1_sudden"
     # experiment_id = "concept_drift#2_sudden"
+    # experiment_id = "concept_drift#1_gradual"
     # experiment_id = "concept_drift#2_gradual"
+    # experiment_id = "concept_drift#1_recurrent"
     # experiment_id = "concept_drift#2_recurrent"
+    # experiment_id = "concept_drift#2_sudden"
     total_clients = 40
     # alphas = [10.0, 10.0]
     alphas = [0.1, 0.1, 0.1]
@@ -406,12 +407,13 @@ if __name__ == "__main__":
     # alphas = [10.0, 0.1]
     # dataset = ["CIFAR10", "WISDM-W"]
     # dataset = ["WISDM-W"]
-    # dataset = ["ImageNet10", "WISDM-W", "Gowalla"]
-    dataset = ["ImageNet10", "WISDM-W", "wikitext"]
+    dataset = ["WISDM-W", "ImageNet10", "Foursquare"]
+    # dataset = ["WISDM-W", "ImageNet10", "wikitext"]
     # dataset = ["WISDM-W", "ImageNet10"]
     # dataset = ["EMNIST", "CIFAR10"]
     # models_names = ["cnn_c"]
-    model_name = ["CNN", "gru", "lstm"]
+    # model_name = [ "CNN", "gru", "lstm"]
+    model_name = ["gru", "CNN", "lstm"]
     # model_name = ["gru"]
     # model_name = ["CNN", "gru"]
     fraction_fit = 0.3
@@ -422,8 +424,7 @@ if __name__ == "__main__":
     # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
     # solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg"]
     # solutions = ["MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg", "MultiFedAvgRR"]
-    solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+MFP", "MultiFedAvg+FPD",
-                 "MultiFedAvg+FP", "DMA-FL", "AdaptiveFedAvg", "MultiFedAvg"]
+    solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg+FP", "MultiFedAvg"]
 
     read_solutions = {solution: [] for solution in solutions}
     read_dataset_order = []

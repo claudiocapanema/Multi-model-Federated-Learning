@@ -309,7 +309,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             print("aggregate error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def detect_drift_ks(self, losses, window=5, alpha=0.05):
+    def detect_drift_ks(self, ps_list, window=5, alpha=0.05):
 
         try:
             """
@@ -324,17 +324,17 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             Returns:
                 bool: True se houve drift, False caso contrário.
             """
-            if len(losses) < window + 1:
+            if len(ps_list) < window + 1:
                 return False  # histórico insuficiente
 
-            history = np.array(losses[-(window + 1):-1])
-            last = np.array([losses[-1]] * len(history))  # simula distribuição do último valor
+            history = np.array(ps_list[-(window + 1):-1])
+            last = np.array([ps_list[-1]] * len(history))  # simula distribuição do último valor
 
             stat, p_value = ks_2samp(history, last)
 
             # KS detecta diferença significativa (p < alpha)
             # mas só consideramos se for aumento
-            return (p_value < alpha) and (losses[-1] > history.mean())
+            return (p_value < alpha) and (ps_list[-1] > history.mean())
 
         except Exception as e:
             print("detect_drift_ks client error")
@@ -377,6 +377,22 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             if self.version in ["dh"]:
                 return super().select_clients(t)
 
+            drift_ps = [0] * self.ME
+            for me in range(self.ME):
+
+                if len(self.ps_list[me]) == 0:
+                    self.ps_list[me].append(self.ps[me])
+                else:
+                    ps_list = copy.deepcopy(self.ps_list[me])
+                    ps_list.append(self.ps[me])
+                    if self.detect_drift_ks(ps_list, window=5, alpha=0.01):
+                        drift_ps[me] = self.ps[me]
+                    else:
+                        self.ps_list[me].append(self.ps[me])
+                        # drift_ps[me] = 0
+                        drift_ps[me] = self.ps[me]
+
+
             # 🔄 Finaliza adaptação apenas no início do round
             for me in range(self.ME):
                 if self.in_adaptation[me]:
@@ -388,6 +404,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                         self.data_drift_model = me
 
 
+            print(f"KS teste rodada {t} lista: {drift_ps}")
             # Detectar modelo com data shift caso nenhum esteja em adaptação
             if self.data_drift_model == -1:
 

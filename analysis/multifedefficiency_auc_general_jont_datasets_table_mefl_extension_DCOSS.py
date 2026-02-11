@@ -375,27 +375,31 @@ def idmax(df, n_solutions):
 
 
 if __name__ == "__main__":
+
     # experiment_id = "label_shift#1"
     # experiment_id = "label_shift#2"
-    # experiment_id = "label_shift#3_sudden"
+    # experiment_id = "label_shift#3"
     # experiment_id = "label_shift#3_gradual"
-    # experiment_id = "label_shift#3_recurrent"
-    # experiment_id = "label_shift#4_sudden"
+    # experiment_id = "label_shift#1_sudden"
+    experiment_id = "label_shift#1_recurrent"
+    # experiment_id = "label_shift#2_sudden"
+    # experiment_id = "label_shift#2_recurrent"
+    # experiment_id = "label_shift#4"
     # experiment_id = "label_shift#4_gradual"
-    # experiment_id = "label_shift#4_recurrent"
-    # experiment_id = "label_shift#5_recurrent"
     # experiment_id = "label_shift#5"
     # experiment_id = "label_shift#6"
+    # experiment_id = "concept_drift#2"
     # experiment_id = "concept_drift#1_sudden"
-    experiment_id = "concept_drift#1_recurrent"
-    # experiment_id = "concept_drift#1_gradual"
     # experiment_id = "concept_drift#2_sudden"
+    # experiment_id = "concept_drift#1_gradual"
     # experiment_id = "concept_drift#2_gradual"
+    # experiment_id = "concept_drift#1_recurrent"
     # experiment_id = "concept_drift#2_recurrent"
+    # experiment_id = "concept_drift#2_sudden"
     total_clients = 40
     # alphas = [10.0, 10.0]
     alphas = [0.1, 0.1, 0.1]
-    # alphas = [10.0, 10.0, 10.0]
+    alphas = [10.0, 10.0, 10.0]
     # alphas = [1.0, 0.1, 0.1]
     # alphas = [0.1, 0.1]
     # alphas = [10.0]
@@ -404,12 +408,13 @@ if __name__ == "__main__":
     # alphas = [10.0, 0.1]
     # dataset = ["CIFAR10", "WISDM-W"]
     # dataset = ["WISDM-W"]
-    # dataset = ["ImageNet10", "WISDM-W", "Gowalla"]
-    dataset = ["ImageNet10", "WISDM-W", "wikitext"]
+    dataset = ["WISDM-W", "ImageNet10", "Foursquare"]
+    # dataset = ["WISDM-W", "ImageNet10", "wikitext"]
     # dataset = ["WISDM-W", "ImageNet10"]
     # dataset = ["EMNIST", "CIFAR10"]
     # models_names = ["cnn_c"]
-    model_name = ["CNN", "gru", "lstm"]
+    # model_name = [ "CNN", "gru", "lstm"]
+    model_name = ["gru", "CNN", "lstm"]
     # model_name = ["gru"]
     # model_name = ["CNN", "gru"]
     fraction_fit = 0.3
@@ -419,8 +424,6 @@ if __name__ == "__main__":
     train_test = "test"
     solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+MFP", "MultiFedAvg+FPD",
                  "MultiFedAvg+FP", "DMA-FL", "AdaptiveFedAvg", "MultiFedAvg"]
-
-    solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP", "MultiFedAvg+FPD", "MultiFedAvg"]
 
     read_solutions = {solution: [] for solution in solutions}
     read_dataset_order = []
@@ -458,4 +461,4 @@ if __name__ == "__main__":
 
     table(df, write_path, "Balanced accuracy (%)", t=None)
     table(df, write_path, "Accuracy (%)", t=None)
-    table(df, write_path, "Accuracy (%)", t=[30,31,32,33,34,50,51,52,53,54,70,71,72,73,74])
+    # table(df, write_path, "Accuracy (%)", t=[30,31,32,33,34,50,51,52,53,54,70,71,72,73,74])
