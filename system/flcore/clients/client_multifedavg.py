@@ -74,6 +74,14 @@ def label_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_r
                 type_ = "label_shift"
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "type": type_} for me in range(ME)}
+            elif experiment_id == "label_shift#3_sudden":
+                ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5)],
+                                           [int(n_rounds * 0.3), int(n_rounds * 0.6)],
+                                           [int(n_rounds * 0.4), int(n_rounds * 0.7)]]
+                new_alphas = [[10.0, 1.0], [10.0, 1.0], [10.0, 1.0]]
+                type_ = "label_shift"
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                               "type": type_} for me in range(ME)}
             else:
                 config = {}
 
@@ -155,6 +163,18 @@ def global_concept_drift_config(ME, n_rounds, alphas, experiment_id, client_id, 
             config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                            "new_concept_drift_window": new_concept_drift_window[me], "type": type_} for me in
                       range(ME)}
+
+        elif experiment_id == "concept_drift#3_sudden":
+            ME_concept_drift_rounds = [[int(n_rounds * 0.3)],
+                                       [int(n_rounds * 0.5)],
+                                       [int(n_rounds * 0.7)]]
+            new_alphas = [[1.0], [1.0], [1.0]]
+            new_concept_drift_window = [[1], [1], [1]]
+            type_ = "concept_drift"
+
+            config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
+                           "new_concept_drift_window": new_concept_drift_window[me], "type": type_} for me in range(ME)}
+
 
         else:
                 config = {}
