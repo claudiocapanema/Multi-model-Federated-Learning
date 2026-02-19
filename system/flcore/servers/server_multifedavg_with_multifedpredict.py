@@ -204,6 +204,12 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 num_samples_list[me].append(num_examples)
                 clients_parameters_mefl[me].append(results[i][0])
 
+
+            print(f"Metricas antes rodada {server_round}")
+            print(fc_list)
+            print(il_list)
+            print(ps_list)
+            print(num_samples_list)
             for me in trained_models:
                 self.fc[me] = self._weighted_average(fc_list[me], num_samples_list[me])
                 self.il[me] = self._weighted_average(il_list[me], num_samples_list[me])

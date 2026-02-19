@@ -73,8 +73,8 @@ class ClientMultiFedAvgWithFedPredict(ClientMultiFedAvgWithMultiFedPredict):
             metrics["Alpha"] = self.alpha_test[me]
             # metrics["gw"] = float(gw)
             # metrics["lw"] = float(lw)
-            metrics["gw"] = float(0)
-            metrics["lw"] = float(0)
+            metrics["gw"] = gw
+            metrics["lw"] = lw
             tuple_me = (loss, len(self.valloader[me].dataset), metrics)
             return loss, len(self.valloader[me].dataset), tuple_me
         except Exception as e:

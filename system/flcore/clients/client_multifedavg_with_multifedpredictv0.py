@@ -33,10 +33,13 @@ def cosine_similarity(p_1, p_2):
 
     # compute cosine similarity
     try:
-        p_1_size = np.array(p_1).shape
-        p_2_size = np.array(p_2).shape
+        p_1_size = np.array(p_1).flatten().shape
+        p_2_size = np.array(p_2).flatten().shape
         if p_1_size != p_2_size:
-            raise Exception(f"Input sizes have different shapes: {p_1_size} and {p_2_size}. Please check your input data.")
+            raise Exception(f"Input sizes have different shapes: {p_1_size} and {p_2_size}. {p_1} e {p_2}. Please check your input data.")
+
+        p_1 = np.array(p_1).flatten()
+        p_2 = np.array(p_2).flatten()
 
         return np.dot(p_1, p_2) / (norm(p_1) * norm(p_2))
     except Exception as e:
