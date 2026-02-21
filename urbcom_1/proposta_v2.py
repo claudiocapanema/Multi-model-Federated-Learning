@@ -25,16 +25,20 @@ from models_utils import load_data
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 BASE_SEED = 42
-NUM_FOLDS = 5
+NUM_FOLDS = 1
 NUM_CLIENTS = 40
-ROUNDS = 50
+ROUNDS = 100
+FRAC = 0.3
+K_CLIENTS = int(FRAC * NUM_CLIENTS)   # exemplo: 30% no máximo
 
 LOCAL_EPOCHS = 1
 BATCH_SIZE = 64
 LR = 0.01
 
-DIRICHLET_ALPHA = 0.5
+DIRICHLET_ALPHA = 0.1
 regime = "realistic"
+# regime = "benign"
+regime = "severe"
 
 # =====================================================
 # PARÂMETROS DE UTILIDADE
@@ -55,9 +59,13 @@ TARGET_ACC = {
 }
 
 MODEL_COST = {
-    "cifar": 1.0,
-    "gtsrb": 2.0
+    "cifar": 0.3,
+    "gtsrb": 0.5
 }
+
+N_MODELS = len(MODEL_COST)
+
+MIN_CLIENTS_PER_MODEL = int(K_CLIENTS/N_MODELS)  # exemplo
 
 Path("results/").mkdir(parents=True, exist_ok=True)
 
@@ -123,7 +131,7 @@ def get_regime(name: str):
             "battery_init": (0.6, 1.0),
             "compute": (0.3, 1.0),
             "link": (0.0, 1.0),
-            "BATTERY_DECAY": 0.05,
+            "BATTERY_DECAY": 0.09,
             "TIME_MAX": 2.5,
             "LINK_MIN": 0.3,
         },
@@ -132,7 +140,7 @@ def get_regime(name: str):
             "battery_init": (0.4, 0.8),
             "compute": (0.2, 0.6),
             "link": (0.0, 0.6),
-            "BATTERY_DECAY": 0.08,
+            "BATTERY_DECAY": 0.1,
             "TIME_MAX": 2.0,
             "LINK_MIN": 0.4,
         }
@@ -167,8 +175,12 @@ def estimate_training_time(cid, model_name):
 
 
 def consume_battery(cid, train_time):
-    client_resources[cid]["battery"] -= train_time * BATTERY_DECAY
+    energy_spent = train_time * BATTERY_DECAY
+
+    client_resources[cid]["battery"] -= energy_spent
     client_resources[cid]["battery"] = max(client_resources[cid]["battery"], 0.0)
+
+    return energy_spent
 
 
 def update_link(cid):
@@ -191,23 +203,37 @@ def R(cid, model_name):
 # PARTE 5 — UTILIDADE E CONTROLE ADAPTATIVO
 # =====================================================
 
-def compute_utility(cid, model_name):
+def compute_utility(cid, model_name, cpt_max):
+
+    cb = client_resources[cid]["battery"]
+    clq = client_resources[cid]["link"]
 
     train_time = estimate_training_time(cid, model_name)
 
-    cost = (
-        ALPHA * (1.0 - client_resources[cid]["battery"]) +
-        BETA  * min(train_time / TIME_MAX, 1.0) +
-        GAMMA * (1.0 - client_resources[cid]["link"])
+    # Normalização processamento
+    if cpt_max > 0:
+        proc_ratio = train_time / cpt_max
+    else:
+        proc_ratio = 0.0
+
+    # Parte de custo (igual paper)
+    cost_term = (
+        ALPHA * (1.0 - cb) +
+        BETA  * proc_ratio +
+        GAMMA * (1.0 - clq)
     )
 
-    acc_gap = max(
-        TARGET_ACC[model_name] - client_acc[cid][model_name],
-        0.0
-    )
+    base = max(1.0 - cost_term, 0.0)
 
-    return max((1.0 - cost) * acc_gap, 0.0)
+    tacc = TARGET_ACC[model_name]
+    cacc = client_acc[cid][model_name]
 
+    exponent = max(tacc - cacc, 0.0)
+
+    # Utility exponencial como no paper
+    utility = base ** exponent
+
+    return utility
 
 def compute_model_lambda(model_name, round_idx):
 
@@ -321,8 +347,13 @@ def reset_experiment_state():
         "avg_cost": [],
         "avg_train_time": [],
         "max_train_time": [],
-        "fallback_rate": []
+        "fallback_rate": [],
+        "energy_consumed_round": [],
+        "cumulative_energy": [],
+        "drained_clients_round": [],
+        "avg_battery_remaining": []
     }
+
 
 # =====================================================
 # PARTE 6 — RAWCS MULTI-MODELO
@@ -330,33 +361,48 @@ def reset_experiment_state():
 
 def rawcs_multi_model(t):
 
-    lambdas = compute_all_lambdas(t)
+    # -------------------------------------------------
+    # Cptmax por modelo (igual paper)
+    # -------------------------------------------------
+    cpt_max_per_model = {}
+
+    for model_name in global_models:
+
+        times = []
+
+        for cid in range(NUM_CLIENTS):
+            if R(cid, model_name):
+                times.append(estimate_training_time(cid, model_name))
+
+        if len(times) > 0:
+            cpt_max_per_model[model_name] = max(times)
+        else:
+            cpt_max_per_model[model_name] = 1.0  # evitar divisão por zero
 
     assignments = {}
 
     viable_pairs = 0
     viable_clients = 0
-    fallback_count = 0
 
     viable_pairs_per_model = {m: 0 for m in global_models}
     costs_per_model = {m: [] for m in global_models}
     train_times_per_model = {m: [] for m in global_models}
 
-    # Atualiza link (volátil)
+    Rc = []  # clientes com recursos
+    Sc = []  # clientes selecionados
+
+    # -------------------------------------------------
+    # Loop principal (igual Algoritmo 2 do paper)
+    # -------------------------------------------------
     for cid in range(NUM_CLIENTS):
         update_link(cid)
 
-    # Decisão cliente → modelo
-    for cid in range(NUM_CLIENTS):
-
         utilities = {}
-        client_viable = False
 
         for model_name in global_models:
 
             if R(cid, model_name):
 
-                client_viable = True
                 viable_pairs += 1
                 viable_pairs_per_model[model_name] += 1
 
@@ -364,22 +410,26 @@ def rawcs_multi_model(t):
 
                 cost = (
                     ALPHA * (1.0 - client_resources[cid]["battery"]) +
-                    BETA  * min(train_time / TIME_MAX, 1.0) +
+                    BETA  * (train_time / cpt_max_per_model[model_name]) +
                     GAMMA * (1.0 - client_resources[cid]["link"])
                 )
 
-                base_utility = compute_utility(cid, model_name)
-                utility = base_utility * lambdas[model_name]
+                base_utility = compute_utility(
+                    cid,
+                    model_name,
+                    cpt_max_per_model[model_name]
+                )
 
-                utilities[model_name] = utility
+                utilities[model_name] = base_utility
                 costs_per_model[model_name].append(cost)
                 train_times_per_model[model_name].append(train_time)
 
-        if client_viable:
-            viable_clients += 1
-
         if utilities:
 
+            viable_clients += 1
+            Rc.append(cid)
+
+            # Escolher modelo proporcional à utility
             models = list(utilities.keys())
             probs = np.array(list(utilities.values()))
 
@@ -390,21 +440,51 @@ def rawcs_multi_model(t):
 
             chosen_model = np.random.choice(models, p=probs)
 
-        else:
-            fallback_count += 1
-            chosen_model = max(
+            # Seleção probabilística fiel ao paper
+            if random.random() <= utilities[chosen_model]:
+                Sc.append(cid)
+                assignments[cid] = chosen_model
+
+    # -------------------------------------------------
+    # Fallback global (igual paper)
+    # -------------------------------------------------
+    if len(Sc) == 0 and len(Rc) > 0:
+
+        Rc_sorted = sorted(
+            Rc,
+            key=lambda cid: np.mean([
+                client_acc[cid]["cifar"],
+                client_acc[cid]["gtsrb"]
+            ])
+        )
+
+        fallback_clients = Rc_sorted[:K_CLIENTS]
+
+        for cid in fallback_clients:
+            chosen_model = min(
                 global_models.keys(),
-                key=lambda m: client_loss[cid][m]
+                key=lambda m: client_acc[cid][m]
             )
+            assignments[cid] = chosen_model
 
-        assignments[cid] = chosen_model
+        Sc = fallback_clients
 
-    # -------- Logs --------
+    # -------------------------------------------------
+    # Limite global k
 
+    # -------------------------------------------------
+    # Limite global k
+    # -------------------------------------------------
+    if len(Sc) > K_CLIENTS:
+        Sc = random.sample(Sc, K_CLIENTS)
+        assignments = {cid: assignments[cid] for cid in Sc}
+
+    # -------------------------------------------------
+    # Logs
+    # -------------------------------------------------
     rawcs_logs["viable_pairs"].append(viable_pairs)
     rawcs_logs["viable_clients"].append(viable_clients)
     rawcs_logs["viable_pairs_per_model"].append(viable_pairs_per_model)
-    rawcs_logs["fallback_rate"].append(fallback_count / NUM_CLIENTS)
 
     rawcs_logs["avg_cost"].append({
         m: float(np.mean(costs_per_model[m])) if costs_per_model[m] else None
@@ -429,7 +509,11 @@ def rawcs_multi_model(t):
         float(np.mean([client_resources[cid]["link"] for cid in range(NUM_CLIENTS)]))
     )
 
+    fallback_happened = 1 if len(Sc) == 0 and len(Rc) > 0 else 0
+    rawcs_logs["fallback_rate"].append(fallback_happened)
+
     return assignments
+
 
 # =====================================================
 # PARTE 7 — TREINO LOCAL E AVALIAÇÃO
@@ -541,8 +625,18 @@ def append_result_to_csv(row_dict, filename):
         index=False
     )
 
+def clear_previous_results():
+    for model_name in ["cifar", "gtsrb"]:
+        filename = f"results/proposta_{model_name}_regime_{regime}_alpha_{DIRICHLET_ALPHA}.csv"
+        if os.path.exists(filename):
+            os.remove(filename)
+
+
 
 def run_experiment():
+
+    clear_previous_results()
+
     # -------------------------------------------------
     # Loop por Folds
     # -------------------------------------------------
@@ -560,6 +654,8 @@ def run_experiment():
         torch.manual_seed(fold_seed)
 
         reset_experiment_state()
+        cumulative_energy = 0.0
+
         apply_regime(regime)
 
         # -------------------------------------------------
@@ -610,23 +706,63 @@ def run_experiment():
             np.random.seed(round_seed)
             torch.manual_seed(round_seed)
 
+            energy_this_round = 0.0
+
             print(f"\n🔄 FOLD {fold} | RODADA {rnd}")
+
 
             real_training_counter = {m: 0 for m in global_models}
 
-            # 1) RAWCS
+            # =====================================================
+            # 1) RAWCS — Seleção Inicial (todos candidatos)
+            # =====================================================
+
             assignments = rawcs_multi_model(rnd)
+
+            selected_clients = list(assignments.keys())
+
+            # =====================================================
+            # FILTRO: mínimo de clientes por modelo
+            # =====================================================
+
+            from collections import Counter
+
+            model_counts = Counter(assignments.values())
+
+            invalid_models = []
+
+            for model_name in global_models:
+
+                count = model_counts.get(model_name, 0)
+
+                if count < MIN_CLIENTS_PER_MODEL:
+                    invalid_models.append(model_name)
+
+            if invalid_models:
+                print(f"⚠️ Modelos abaixo do mínimo ({MIN_CLIENTS_PER_MODEL}): {invalid_models}")
+
+                # Remove completamente esses modelos da rodada
+                assignments = {
+                    cid: m for cid, m in assignments.items()
+                    if m not in invalid_models
+                }
+
+            selected_clients = list(assignments.keys())
+
+            # Contador real de treinamento
+            real_training_counter = {m: 0 for m in global_models}
 
             model_updates = {
                 "cifar": [],
                 "gtsrb": []
             }
 
-            # 2) Treino local
-            for cid, model_name in assignments.items():
+            # =====================================================
+            # 3) Treino local apenas dos selecionados
+            # =====================================================
 
-                if not R(cid, model_name):
-                    continue
+            for cid in selected_clients:
+                model_name = assignments[cid]
 
                 real_training_counter[model_name] += 1
 
@@ -648,7 +784,8 @@ def run_experiment():
                 model_updates[model_name].append((state_dict, n_samples))
 
                 train_time = estimate_training_time(cid, model_name)
-                consume_battery(cid, train_time)
+                energy_spent = consume_battery(cid, train_time)
+                energy_this_round += energy_spent
 
                 prev_acc = client_acc[cid][model_name]
 
@@ -667,6 +804,27 @@ def run_experiment():
                 if updates:
                     new_state = fedavg(updates)
                     global_models[model_name].load_state_dict(new_state)
+
+            # -------------------------------------------------
+            # MÉTRICAS ENERGÉTICAS
+            # -------------------------------------------------
+
+            cumulative_energy += energy_this_round
+
+            drained_clients = sum(
+                1 for cid in range(NUM_CLIENTS)
+                if client_resources[cid]["battery"] <= 0.0
+            )
+
+            avg_battery_remaining = np.mean([
+                client_resources[cid]["battery"]
+                for cid in range(NUM_CLIENTS)
+            ])
+
+            rawcs_logs["energy_consumed_round"].append(energy_this_round)
+            rawcs_logs["cumulative_energy"].append(cumulative_energy)
+            rawcs_logs["drained_clients_round"].append(drained_clients)
+            rawcs_logs["avg_battery_remaining"].append(avg_battery_remaining)
 
             # 4) Avaliação global
             for model_name, model in global_models.items():
@@ -691,23 +849,46 @@ def run_experiment():
                 )
 
                 row_data = {
+                    "algorithm": "rawcs",
                     "fold": fold,
                     "round": rnd,
                     "dataset": model_name,
                     "global_acc": global_acc,
-                    "viable_pairs": rawcs_logs["viable_pairs"][-1],
-                    "viable_clients": rawcs_logs["viable_clients"][-1],
+
+                    "clients_selected": real_training_counter[model_name],
+                    "clients_selected_total": sum(real_training_counter.values()),
+
+                    "viable_clients_total": rawcs_logs["viable_clients"][-1],
+                    "viable_pairs_total": rawcs_logs["viable_pairs"][-1],
+                    "viable_cifar": rawcs_logs["viable_pairs_per_model"][-1]["cifar"],
+                    "viable_gtsrb": rawcs_logs["viable_pairs_per_model"][-1]["gtsrb"],
+
+                    "avg_battery": rawcs_logs["avg_battery"][-1],
+                    "avg_link": rawcs_logs["avg_link"][-1],
+
+                    "avg_cost_cifar": rawcs_logs["avg_cost"][-1]["cifar"],
+                    "avg_cost_gtsrb": rawcs_logs["avg_cost"][-1]["gtsrb"],
+
+                    "avg_train_time_cifar": rawcs_logs["avg_train_time"][-1]["cifar"],
+                    "avg_train_time_gtsrb": rawcs_logs["avg_train_time"][-1]["gtsrb"],
+
                     "fallback_rate": rawcs_logs["fallback_rate"][-1],
-                    "clients_selected": real_training_counter[model_name]
+
+                    "energy_consumed_round": rawcs_logs["energy_consumed_round"][-1],
+                    "cumulative_energy": rawcs_logs["cumulative_energy"][-1],
+                    "drained_clients_round": rawcs_logs["drained_clients_round"][-1],
+                    "avg_battery_remaining": rawcs_logs["avg_battery_remaining"][-1],
+
                 }
 
-                filename = f"results/proposta_{model_name}_regime_{regime}.csv"
+                filename = f"results/proposta_{model_name}_regime_{regime}_alpha_{DIRICHLET_ALPHA}.csv"
                 append_result_to_csv(row_data, filename)
 
-            # Atualiza clientes por modelo
-            clients_per_model = {m: 0 for m in global_models}
-            for m in assignments.values():
-                clients_per_model[m] += 1
+            # =====================================================
+            # Atualiza clientes por modelo (TREINAMENTO REAL)
+            # =====================================================
+
+            clients_per_model = real_training_counter.copy()
 
             rawcs_logs["clients_per_model"].append(clients_per_model)
 

@@ -209,6 +209,8 @@ def line_subplots_by_scenario(df,
         if n_scenarios == 1:
             axs = [axs]
 
+        handles, labels = None, None  # <-- para legenda global
+
         for i, scenario in enumerate(scenarios):
 
             df_plot = df_dataset[df_dataset["Scenario"] == scenario]
@@ -231,12 +233,42 @@ def line_subplots_by_scenario(df,
 
             axs[i].set_title(f"Scenario: {scenario}", fontsize=9)
 
-            if i != 0:
-                axs[i].get_legend().remove()
+            # Captura legenda da primeira vez
+            if handles is None:
+                handles, labels = axs[i].get_legend_handles_labels()
 
-        fig.suptitle(f"{dataset} - {y}", fontsize=12)
+            # Remove legenda interna
+            legend = axs[i].get_legend()
+            if legend is not None:
+                legend.remove()
 
-        plt.tight_layout()
+        # =====================================================
+        # LEGENDA GLOBAL
+        # =====================================================
+
+        # =====================================================
+        # LEGENDA GLOBAL NO TOPO
+        # =====================================================
+
+        fig.legend(
+            handles,
+            labels,
+            loc="upper center",
+            ncol=min(len(labels), 4),
+            fontsize=8,
+            bbox_to_anchor=(0.5, 0.95),
+            frameon=False
+        )
+
+        # Ajuste fino do suptitle
+        fig.suptitle(
+            f"{dataset} - {y}",
+            fontsize=12,
+            y=0.97  # <-- sobe o título geral
+        )
+
+        # IMPORTANTÍSSIMO:
+        plt.tight_layout(rect=[0, 0, 1, 0.93])
 
         fig.savefig(
             f"{base_dir}/{dataset}_{y}_subplots.png",

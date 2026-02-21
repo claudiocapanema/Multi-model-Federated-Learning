@@ -28,15 +28,17 @@ BASE_SEED = 42
 NUM_FOLDS = 1
 NUM_CLIENTS = 40
 ROUNDS = 100
-K_CLIENTS = int(0.3 * NUM_CLIENTS)   # exemplo: 30% no máximo
+FRAC = 0.3
+K_CLIENTS = int(FRAC * NUM_CLIENTS)   # exemplo: 30% no máximo
 
 LOCAL_EPOCHS = 1
 BATCH_SIZE = 64
 LR = 0.01
 
-DIRICHLET_ALPHA = 10.0
+DIRICHLET_ALPHA = 0.1
 regime = "realistic"
 # regime = "benign"
+regime = "severe"
 
 
 # =====================================================
@@ -126,7 +128,7 @@ def get_regime(name: str):
             "battery_init": (0.6, 1.0),
             "compute": (0.3, 1.0),
             "link": (0.0, 1.0),
-            "BATTERY_DECAY": 0.05,
+            "BATTERY_DECAY": 0.09,
             "TIME_MAX": 2.5,
             "LINK_MIN": 0.3,
         },
@@ -135,7 +137,7 @@ def get_regime(name: str):
             "battery_init": (0.4, 0.8),
             "compute": (0.2, 0.6),
             "link": (0.0, 0.6),
-            "BATTERY_DECAY": 0.08,
+            "BATTERY_DECAY": 0.1,
             "TIME_MAX": 2.0,
             "LINK_MIN": 0.4,
         }
@@ -189,7 +191,7 @@ def R(cid, model_name):
     battery_after = client_resources[cid]["battery"] - train_time * BATTERY_DECAY
 
     return (
-        battery_after >= BATTERY_MIN and
+        battery_after > 0 and
         train_time <= TIME_MAX and
         client_resources[cid]["link"] >= LINK_MIN
     )
@@ -386,7 +388,7 @@ def append_result_to_csv(row_dict, filename):
 
 def clear_previous_results():
     for model_name in ["cifar", "gtsrb"]:
-        filename = f"results/baseline_{model_name}_regime_{regime}_alpha_{DIRICHLET_ALPHA}.csv"
+        filename = f"results/baseline_{model_name}_regime_{regime}_frac_{FRAC}_alpha_{DIRICHLET_ALPHA}.csv"
         if os.path.exists(filename):
             os.remove(filename)
 
@@ -492,28 +494,20 @@ def run_experiment():
                 if R(cid, "gtsrb")
             ]
 
-            viable_clients_total = len(
-                set(viable_cifar_clients) | set(viable_gtsrb_clients)
+            # =====================================================
+            # 1) Seleção Aleatória de Clientes (Baseline)
+            #    (TODOS os clientes são elegíveis)
+            # =====================================================
+
+            all_clients = list(range(NUM_CLIENTS))
+            selected_clients = random.sample(
+                all_clients,
+                min(K_CLIENTS, NUM_CLIENTS)
             )
-
-            viable_cifar = len(viable_cifar_clients)
-            viable_gtsrb = len(viable_gtsrb_clients)
-
-            # -------------------------------------------------
-            # 2) Seleção aleatória apenas entre viáveis
-            # -------------------------------------------------
 
             half = K_CLIENTS // 2
-
-            clients_cifar = random.sample(
-                viable_cifar_clients,
-                min(half, len(viable_cifar_clients))
-            )
-
-            clients_gtsrb = random.sample(
-                viable_gtsrb_clients,
-                min(K_CLIENTS - len(clients_cifar), len(viable_gtsrb_clients))
-            )
+            clients_cifar = selected_clients[:half]
+            clients_gtsrb = selected_clients[half:]
 
             selected_clients = list(set(clients_cifar + clients_gtsrb))
             if len(selected_clients) == 0:
@@ -583,7 +577,7 @@ def run_experiment():
                         "avg_battery_remaining": avg_battery_remaining,
                     }
 
-                    filename = f"results/baseline_{model_name}_regime_{regime}_alpha_{DIRICHLET_ALPHA}.csv"
+                    filename = f"results/baseline_{model_name}_regime_{regime}_frac_{FRAC}_alpha_{DIRICHLET_ALPHA}.csv"
                     append_result_to_csv(row_data, filename)
 
                 rawcs_logs["clients_per_model"].append({
@@ -682,7 +676,8 @@ def run_experiment():
                 real_training_counter["gtsrb"] += 1
 
                 train_time = estimate_training_time(cid, "gtsrb")
-                consume_battery(cid, train_time)
+                energy_spent = consume_battery(cid, train_time)
+                energy_this_round += energy_spent
 
                 acc = evaluate_model(
                     local_model,
@@ -805,7 +800,7 @@ def run_experiment():
 
                 }
 
-                filename = f"results/baseline_{model_name}_regime_{regime}_alpha_{DIRICHLET_ALPHA}.csv"
+                filename = f"results/baseline_{model_name}_regime_{regime}_frac_{FRAC}_alpha_{DIRICHLET_ALPHA}.csv"
                 append_result_to_csv(row_data, filename)
 
             # =====================================================
