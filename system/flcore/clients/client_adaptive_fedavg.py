@@ -44,9 +44,9 @@ def cosine_similarity(p_1, p_2):
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 class AdaptiveFedAvgClient(MultiFedAvgClient):
-    def __init__(self, args, id, model):
+    def __init__(self, args, id, model, fold_id):
         try:
-            super().__init__(args, id,  model)
+            super().__init__(args, id,  model, fold_id)
             self.M = [0] * self.ME
             self.V = [0] * self.ME
             self.R = [0] * self.ME

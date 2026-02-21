@@ -181,16 +181,19 @@ def compute_all_gains(df, metric, baseline="MultiFedAvg"):
         for dataset in df["Dataset"].unique():
 
             base = df.query(
-                f"Dataset == '{dataset}' and Table == '{baseline}' and Scenario == '{scenario}'"
+                f"Dataset == '{dataset}' and Solution == '{baseline}' and Scenario == '{scenario}'"
             )[metric].mean()
 
-            for sol in df["Table"].unique():
+            for sol in df["Solution"].unique():
 
                 val = df.query(
-                    f"Dataset == '{dataset}' and Table == '{sol}' and Scenario == '{scenario}'"
+                    f"Dataset == '{dataset}' and Solution == '{sol}' and Scenario == '{scenario}'"
                 )[metric].mean()
 
-                gain = ((val - base) / base) * 100 if base != 0 else 0
+                if pd.isna(base) or base == 0:
+                    gain = 0.0
+                else:
+                    gain = ((val - base) / base) * 100
 
                 records.append({
                     "Dataset": dataset,
@@ -202,7 +205,6 @@ def compute_all_gains(df, metric, baseline="MultiFedAvg"):
                 })
 
     return pd.DataFrame(records)
-
 
 import numpy as np
 import pandas as pd
@@ -504,35 +506,43 @@ def generate_magnitude_plot(df_gain, metric, save_root):
 # =====================================================
 # 📋 TABELA COMPACTA
 # =====================================================
-
 def generate_summary_table(df_gain, metric, output_path, baseline="MultiFedAvg"):
 
     import numpy as np
     import pandas as pd
     from pathlib import Path
+    import re
 
     save_dir = Path(output_path) / "summary"
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    # 🔹 Remover baseline
-    df_gain = df_gain[df_gain["Solution"] != baseline]
+    # =====================================================
+    # 🔹 PADRONIZAÇÃO DOS NOMES
+    # =====================================================
 
-    # 🔹 Ordenar transições corretamente
+    name_map = {
+        "MultiFedAvg": "Baseline",
+        "MultiFedAvg+MFP_v2": "MFPv2",
+        "MultiFedAvg+MFP_v2_dh": "MFPv2-dh",
+        "MultiFedAvg+MFP_v2_iti": "MFPv2-iti",
+        "MultiFedAvg+MFP": "MFP",
+        "MultiFedAvg+FPD": "FPD",
+        "MultiFedAvg+FP": "FP",
+    }
+
+    df_gain["Solution"] = df_gain["Solution"].map(name_map)
+
+    # =====================================================
+    # 🔹 ORDENAR TRANSIÇÕES
+    # =====================================================
+
     transition_info = []
 
     for sc in df_gain["Scenario"].unique():
-
-        # extrair alpha inicial e final do próprio df_gain
-        subset = df_gain[df_gain["Scenario"] == sc].iloc[0]
-        delta = subset["Delta"]
-
-        # extrair rótulo α₁→α₂
-        import re
         match = re.search(r"#(.*)_", sc)
         alpha_part = match.group(1)
         a1, a2 = alpha_part.split("-")
-        label = f"{float(a1):g}→{float(a2):g}"
-
+        label = f"${float(a1):g}\\rightarrow{float(a2):g}$"
         transition_info.append((sc, float(a1), float(a2), label))
 
     transition_info = sorted(transition_info, key=lambda x: (x[1], x[2]))
@@ -540,10 +550,22 @@ def generate_summary_table(df_gain, metric, output_path, baseline="MultiFedAvg")
     ordered_scenarios = [t[0] for t in transition_info]
     transition_labels = [t[3] for t in transition_info]
 
-    # 🔹 Construir tabela
+    # =====================================================
+    # 🔹 LISTA COMPLETA DE SOLUÇÕES (inclui Baseline)
+    # =====================================================
+
+    # todas as soluções mapeadas
+    all_solutions = list(name_map.values())
+
+    # remover baseline temporariamente
+    non_baseline = [s for s in all_solutions if s != "Baseline"]
+
+    # baseline por último
+    expected_solutions = non_baseline + ["Baseline"]
+
     rows = []
 
-    for sol in df_gain["Solution"].unique():
+    for sol in expected_solutions:
 
         row = {"Solution": sol}
         gains_all = []
@@ -555,6 +577,9 @@ def generate_summary_table(df_gain, metric, output_path, baseline="MultiFedAvg")
                 (df_gain["Scenario"] == sc)
             ]["Gain"].mean()
 
+            if pd.isna(mean_gain):
+                mean_gain = 0.0
+
             row[label] = mean_gain
             gains_all.append(mean_gain)
 
@@ -564,41 +589,59 @@ def generate_summary_table(df_gain, metric, output_path, baseline="MultiFedAvg")
     df_summary = pd.DataFrame(rows)
 
     # =====================================================
-    # 🔹 DESTACAR MELHOR GANHO POR TRANSIÇÃO
+    # 🔹 DESTACAR MELHOR POR COLUNA (exceto baseline)
     # =====================================================
-
-    df_latex = df_summary.copy()
 
     for label in transition_labels:
 
-        max_value = df_summary[label].max()
+        max_value = df_summary[df_summary["Solution"] != "Baseline"][label].max()
 
-        for i in range(len(df_summary)):
+        df_summary[label] = df_summary.apply(
+            lambda row:
+                f"\\textbf{{{row[label]:.2f}}}"
+                if row["Solution"] != "Baseline" and row[label] == max_value
+                else f"{row[label]:.2f}",
+            axis=1
+        )
 
-            value = df_summary.loc[i, label]
-
-            if value == max_value:
-                df_latex.loc[i, label] = f"\\textbf{{{value:.2f}}}"
-            else:
-                df_latex.loc[i, label] = f"{value:.2f}"
-
-    df_latex["Mean Gain"] = df_summary["Mean Gain"].map(lambda x: f"{x:.2f}")
+    df_summary["Mean Gain"] = df_summary["Mean Gain"].apply(lambda x: f"{x:.2f}")
 
     # =====================================================
-    # 🔹 SALVAR
+    # 🔹 GERAR LATEX
     # =====================================================
 
-    csv_path = save_dir / f"{metric.replace(' ', '_')}_detailed_summary.csv"
+    n_cols = len(df_summary.columns)
+    col_format = "l" + "c" * (n_cols - 1)
+
+    header = " & ".join(df_summary.columns) + " \\\\"
+    body = "\n".join(
+        " & ".join(row.astype(str)) + " \\\\"
+        for _, row in df_summary.iterrows()
+    )
+
+    latex_code = (
+        "\\begin{table*}[t]\n"
+        "\\centering\n"
+        f"\\begin{{tabular*}}{{\\textwidth}}{{@{{\\extracolsep{{\\fill}}}}{col_format}}}\n"
+        "\\toprule\n"
+        f"{header}\n"
+        "\\midrule\n"
+        f"{body}\n"
+        "\\bottomrule\n"
+        "\\end{tabular*}\n"
+        f"\\caption{{Average gain (\\%) over Baseline for {metric.replace(' (%)','')} under label shift transitions.}}\n"
+        f"\\label{{tab:gain_{metric.lower().replace(' ', '_').replace('(%)','')}}}\n"
+        "\\end{table*}"
+    )
+
     latex_path = save_dir / f"{metric.replace(' ', '_')}_detailed_summary.tex"
 
-    df_summary.round(2).to_csv(csv_path, index=False)
-    df_latex.to_latex(latex_path, index=False, escape=False)
+    with open(latex_path, "w") as f:
+        f.write(latex_code)
 
-    print("Resumo detalhado CSV salvo em:", csv_path)
-    print("Resumo detalhado LaTeX salvo em:", latex_path)
+    print("Tabela LaTeX salva em:", latex_path)
 
     return df_summary
-
 # =====================================================
 # 🚀 EXECUÇÃO COMPLETA
 # =====================================================

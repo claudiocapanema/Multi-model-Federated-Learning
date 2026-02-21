@@ -237,7 +237,7 @@ class MultiFedAvgClient:
 
     def global_concept_drift_config(self, ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds):
         try:
-            if experiment_id == "concept_drift#1_sudden":
+            if experiment_id == "concept_drift#0.1_sudden":
                 ME_concept_drift_rounds = [[int(n_rounds * 0.3)],
                                            [int(n_rounds * 0.5)],
                                            [int(n_rounds * 0.7)]]
@@ -248,7 +248,7 @@ class MultiFedAvgClient:
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "new_concept_drift_window": new_concept_drift_window[me], "type": type_} for me in
                           range(ME)}
-            elif experiment_id == "concept_drift#1_gradual":
+            elif experiment_id == "concept_drift#0.1_gradual":
                 ME_concept_drift_rounds = [[int(n_rounds * 0.3) + client_id // gradual_rounds],
                                            [int(n_rounds * 0.5) + client_id // gradual_rounds],
                                            [int(n_rounds * 0.7) + client_id // gradual_rounds]]
@@ -259,7 +259,7 @@ class MultiFedAvgClient:
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "new_concept_drift_window": new_concept_drift_window[me], "type": type_} for me in
                           range(ME)}
-            elif experiment_id == "concept_drift#1_recurrent":
+            elif experiment_id == "concept_drift#0.1_recurrent":
                 ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5)],
                                            [int(n_rounds * 0.3), int(n_rounds * 0.6)],
                                            [int(n_rounds * 0.4), int(n_rounds * 0.7)]]
@@ -270,7 +270,7 @@ class MultiFedAvgClient:
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "new_concept_drift_window": new_concept_drift_window[me], "type": type_} for me in
                           range(ME)}
-            elif experiment_id == "concept_drift#2_sudden":
+            elif experiment_id == "concept_drift#10.0_sudden":
                 ME_concept_drift_rounds = [[int(n_rounds * 0.3)],
                                            [int(n_rounds * 0.5)],
                                            [int(n_rounds * 0.7)]]
@@ -281,7 +281,7 @@ class MultiFedAvgClient:
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "new_concept_drift_window": new_concept_drift_window[me], "type": type_} for me in
                           range(ME)}
-            elif experiment_id == "concept_drift#2_gradual":
+            elif experiment_id == "concept_drift#10.0_gradual":
                 ME_concept_drift_rounds = [[int(n_rounds * 0.3) + client_id // gradual_rounds],
                                            [int(n_rounds * 0.5) + client_id // gradual_rounds],
                                            [int(n_rounds * 0.7) + client_id // gradual_rounds]]
@@ -292,7 +292,7 @@ class MultiFedAvgClient:
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                "new_concept_drift_window": new_concept_drift_window[me], "type": type_} for me in
                           range(ME)}
-            elif experiment_id == "concept_drift#2_recurrent":
+            elif experiment_id == "concept_drift#10.0_recurrent":
                 ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5)],
                                            [int(n_rounds * 0.3), int(n_rounds * 0.6)],
                                            [int(n_rounds * 0.4), int(n_rounds * 0.7)]]
@@ -304,7 +304,7 @@ class MultiFedAvgClient:
                                "new_concept_drift_window": new_concept_drift_window[me], "type": type_} for me in
                           range(ME)}
 
-            elif experiment_id == "concept_drift#3_sudden":
+            elif experiment_id == "concept_drift#1.0_sudden":
                 ME_concept_drift_rounds = [[int(n_rounds * 0.3)],
                                            [int(n_rounds * 0.5)],
                                            [int(n_rounds * 0.7)]]
