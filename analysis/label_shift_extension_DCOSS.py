@@ -282,8 +282,8 @@ if __name__ == "__main__":
         "MultiFedAvg+MFP",
         "MultiFedAvg+FPD",
         "MultiFedAvg+FP",
-        # "DMA-FL",
-        # "AdaptiveFedAvg",
+        "DMA-FL",
+        "AdaptiveFedAvg",
         "MultiFedAvg"
     ]
 

@@ -48,7 +48,7 @@ def mean_ci(values, ci=0.95):
     else:
         margin = 0.0
 
-    return round(mean, 2), round(margin, 2)
+    return mean, margin
 
 def read_data(read_solutions, read_dataset_order):
 
@@ -330,7 +330,9 @@ def generate_rich_heatmaps(df, metric, output_path, baseline="MultiFedAvg"):
             "MultiFedAvg+MFP": "MFP",
             "MultiFedAvg+FPD": "FPD",
             "MultiFedAvg+FP": "FP",
-            "MultiFedAvg": "Baseline"
+            "DMA-FL": "DMA-FL",
+            "AdaptiveFedAvg": "AdaptiveFedAvg",
+            "MultiFedAvg": "MultiFedAvg"
         }
 
         solutions = df["Table"].unique()
@@ -338,7 +340,7 @@ def generate_rich_heatmaps(df, metric, output_path, baseline="MultiFedAvg"):
         def shorten_label(name):
             name = name.replace("MultiFedAvg + ", "")
             name = name.replace("MultiFedAvg+", "")
-            name = name.replace("MultiFedAvg", "Baseline")
+            name = name.replace("MultiFedAvg", "MultiFedAvg")
             return name
 
         short_solutions = [shorten_label(s) for s in solutions]
@@ -521,13 +523,15 @@ def generate_summary_table(df_gain, metric, output_path, baseline="MultiFedAvg")
     # =====================================================
 
     name_map = {
-        "MultiFedAvg": "Baseline",
         "MultiFedAvg+MFP_v2": "MFPv2",
         "MultiFedAvg+MFP_v2_dh": "MFPv2-dh",
         "MultiFedAvg+MFP_v2_iti": "MFPv2-iti",
         "MultiFedAvg+MFP": "MFP",
         "MultiFedAvg+FPD": "FPD",
         "MultiFedAvg+FP": "FP",
+        "DMA-FL": "DMA-FL",
+        # "AdaptiveFedAvg": "AdaptiveFedAvg",
+        "MultiFedAvg": "MultiFedAvg"
     }
 
     df_gain["Solution"] = df_gain["Solution"].map(name_map)
@@ -542,7 +546,7 @@ def generate_summary_table(df_gain, metric, output_path, baseline="MultiFedAvg")
         match = re.search(r"#(.*)_", sc)
         alpha_part = match.group(1)
         a1, a2 = alpha_part.split("-")
-        label = f"${float(a1):g}\\rightarrow{float(a2):g}$"
+        label = f"{float(a1):g}→{float(a2):g}"
         transition_info.append((sc, float(a1), float(a2), label))
 
     transition_info = sorted(transition_info, key=lambda x: (x[1], x[2]))
@@ -551,17 +555,12 @@ def generate_summary_table(df_gain, metric, output_path, baseline="MultiFedAvg")
     transition_labels = [t[3] for t in transition_info]
 
     # =====================================================
-    # 🔹 LISTA COMPLETA DE SOLUÇÕES (inclui Baseline)
+    # 🔹 SOLUÇÕES (baseline por último)
     # =====================================================
 
-    # todas as soluções mapeadas
     all_solutions = list(name_map.values())
-
-    # remover baseline temporariamente
-    non_baseline = [s for s in all_solutions if s != "Baseline"]
-
-    # baseline por último
-    expected_solutions = non_baseline + ["Baseline"]
+    non_baseline = [s for s in all_solutions if s != "MultiFedAvg"]
+    expected_solutions = non_baseline + ["MultiFedAvg"]
 
     rows = []
 
@@ -572,18 +571,40 @@ def generate_summary_table(df_gain, metric, output_path, baseline="MultiFedAvg")
 
         for sc, label in zip(ordered_scenarios, transition_labels):
 
-            mean_gain = df_gain[
-                (df_gain["Solution"] == sol) &
-                (df_gain["Scenario"] == sc)
-            ]["Gain"].mean()
+            dataset_means = []
 
-            if pd.isna(mean_gain):
+            for dataset in df_gain["Dataset"].unique():
+
+                subset = df_gain[
+                    (df_gain["Solution"] == sol) &
+                    (df_gain["Scenario"] == sc) &
+                    (df_gain["Dataset"] == dataset)
+                ]["Gain"]
+
+                if len(subset) > 0:
+                    dataset_means.append(subset.mean())
+
+            if len(dataset_means) == 0:
                 mean_gain = 0.0
+            else:
+                mean_gain = np.mean(dataset_means)
 
-            row[label] = mean_gain
+            # 🔹 substituir 0 por "-"
+            if round(mean_gain, 2) == 0.00:
+                row[label] = "-"
+            else:
+                row[label] = f"{mean_gain:.2f}"
+
             gains_all.append(mean_gain)
 
-        row["Mean Gain"] = np.mean(gains_all)
+        mean_global = np.mean(gains_all)
+
+        # 🔹 substituir 0 por "-"
+        if round(mean_global, 2) == 0.00:
+            row["Mean Gain"] = "-"
+        else:
+            row["Mean Gain"] = f"{mean_global:.2f}"
+
         rows.append(row)
 
     df_summary = pd.DataFrame(rows)
@@ -594,17 +615,24 @@ def generate_summary_table(df_gain, metric, output_path, baseline="MultiFedAvg")
 
     for label in transition_labels:
 
-        max_value = df_summary[df_summary["Solution"] != "Baseline"][label].max()
+        means_only = []
 
-        df_summary[label] = df_summary.apply(
-            lambda row:
-                f"\\textbf{{{row[label]:.2f}}}"
-                if row["Solution"] != "Baseline" and row[label] == max_value
-                else f"{row[label]:.2f}",
-            axis=1
-        )
+        for _, row in df_summary.iterrows():
+            if row["Solution"] == "MultiFedAvg":
+                means_only.append(-np.inf)
+            elif row[label] == "-":
+                means_only.append(-np.inf)
+            else:
+                means_only.append(float(row[label]))
 
-    df_summary["Mean Gain"] = df_summary["Mean Gain"].apply(lambda x: f"{x:.2f}")
+        max_value = max(means_only)
+
+        for idx in df_summary.index:
+            if df_summary.loc[idx, "Solution"] != "MultiFedAvg":
+                cell = df_summary.loc[idx, label]
+
+                if cell != "-" and float(cell) == max_value:
+                    df_summary.loc[idx, label] = "\\textbf{" + cell + "}"
 
     # =====================================================
     # 🔹 GERAR LATEX
@@ -621,20 +649,21 @@ def generate_summary_table(df_gain, metric, output_path, baseline="MultiFedAvg")
 
     latex_code = (
         "\\begin{table*}[t]\n"
+        f"\\caption{{Average gain (\\%) over MultiFedAvg aggregated across datasets under label shift transitions.}}\n"
+        f"\\label{{tab:gain_{metric.lower().replace(' ', '_').replace('(%)', '')}}}\n"
         "\\centering\n"
-        f"\\begin{{tabular*}}{{\\textwidth}}{{@{{\\extracolsep{{\\fill}}}}{col_format}}}\n"
+        f"\\begin{{tabular}}{{{col_format}}}\n"
         "\\toprule\n"
         f"{header}\n"
         "\\midrule\n"
         f"{body}\n"
         "\\bottomrule\n"
-        "\\end{tabular*}\n"
-        f"\\caption{{Average gain (\\%) over Baseline for {metric.replace(' (%)','')} under label shift transitions.}}\n"
-        f"\\label{{tab:gain_{metric.lower().replace(' ', '_').replace('(%)','')}}}\n"
+        "\\end{tabular}%\n"
+        
         "\\end{table*}"
     )
 
-    latex_path = save_dir / f"{metric.replace(' ', '_')}_detailed_summary.tex"
+    latex_path = save_dir / f"{metric.replace(' ', '_')}_aggregated_summary.tex"
 
     with open(latex_path, "w") as f:
         f.write(latex_code)
@@ -642,6 +671,7 @@ def generate_summary_table(df_gain, metric, output_path, baseline="MultiFedAvg")
     print("Tabela LaTeX salva em:", latex_path)
 
     return df_summary
+
 # =====================================================
 # 🚀 EXECUÇÃO COMPLETA
 # =====================================================
@@ -652,12 +682,6 @@ def run_transition_analysis(df, metric, output_path):
     save_root.mkdir(parents=True, exist_ok=True)
 
     df_gain = compute_all_gains(df, metric)
-
-    generate_rich_heatmaps(
-        df,
-        "Balanced accuracy (%)",
-        analysis_path
-    )
 
     generate_rich_heatmaps(
         df,
@@ -700,7 +724,7 @@ if __name__ == "__main__":
         "MultiFedAvg+MFP",
         "MultiFedAvg+FPD",
         "MultiFedAvg+FP",
-        # "DMA-FL",
+        "DMA-FL",
         # "AdaptiveFedAvg",
         "MultiFedAvg"
     ]

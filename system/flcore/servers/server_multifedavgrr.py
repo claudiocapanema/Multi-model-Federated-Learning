@@ -19,18 +19,23 @@ import time
 import numpy as np
 from flcore.servers.server_multifedavg import MultiFedAvg
 from threading import Thread
+import random
+import torch
 
 
 class MultiFedAvgRR(MultiFedAvg):
-    def __init__(self, args, times):
-        super().__init__(args, times)
+    def __init__(self, args, times, fold_id):
+        super().__init__(args, times, fold_id)
 
     def select_clients(self, t):
 
         try:
-            seed = t // self.ME
             step = t % self.ME
-            np.random.seed(seed)
+            g = torch.Generator()
+            g.manual_seed(t)
+            random.seed(t)
+            np.random.seed(t)
+            torch.manual_seed(t)
             selected_clients = list(np.random.choice(self.clients, self.num_training_clients, replace=False))
             selected_clients = [i.client_id for i in selected_clients]
             self.current_num_join_clients = self.num_training_clients
