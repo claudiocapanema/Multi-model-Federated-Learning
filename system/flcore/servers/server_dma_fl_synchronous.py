@@ -23,8 +23,8 @@ from flcore.clients.client_dma_fl_synchronous import DMAFLSynchronousClient
 
 
 class DMAFLSynchronous(MultiFedAvg):
-    def __init__(self, args, times):
-        super().__init__(args, times)
+    def __init__(self, args, times, fold_id):
+        super().__init__(args, times, fold_id)
 
     def set_clients(self):
 
@@ -32,7 +32,8 @@ class DMAFLSynchronous(MultiFedAvg):
             for i in range(self.total_clients):
                 client = DMAFLSynchronousClient(self.args,
                                 id=i,
-                                   model=copy.deepcopy(self.global_model))
+                                   model=copy.deepcopy(self.global_model),
+                                fold_id=self.fold_id)
                 self.clients.append(client)
 
         except Exception as e:
@@ -44,7 +45,7 @@ class DMAFLSynchronous(MultiFedAvg):
         try:
             seed = t // self.ME
             step = t % self.ME
-            np.random.seed(seed)
+            np.random.seed(seed+self.fold_id)
 
             selected_clients_ids = []
             sc = []

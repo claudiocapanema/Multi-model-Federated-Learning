@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 
 def read_data(alphas, datasets, total_clients):
 
-    filename = f"clients_{total_clients}_datasets_{datasets}_alphas_{alphas}_metrics_clients_concept_drift.csv"
+    filename = f"clients_{total_clients}_datasets_{datasets}_alphas_{alphas}_metrics_clients.csv"
 
     if os.path.exists(filename):
         print("O arquivo existe!")
@@ -28,7 +28,6 @@ def read_data(alphas, datasets, total_clients):
              "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30, "Foursquare": 10}[dataset] for dataset in
             datasets]
         ME = len(datasets)
-        concept_drift_window = [0, 1]
         client_metrics = {
                 cid: {me: {alpha: {"fc": None, "il": None, "similarity": None} for alpha in [0.1, 1.0, 10.0]} for me in
                       range(ME)} for cid in range(1, total_clients + 1)}
@@ -52,57 +51,58 @@ def read_data(alphas, datasets, total_clients):
                     print("""leu dados cid: {} dataset: {} size:  {}""".format(client_id, datasets[me],
                                                                                len(clients_train_loader[client_id][alpha][me].dataset)))
 
-                for cp_window in concept_drift_window:
-                    p_ME, fc_ME, il_ME = get_datasets_metrics(clients_train_loader[client_id][alpha], ME, n_classes, concept_drift_window=[cp_window] * ME)
-                    # similarity_ME = []
-                    #
-                    # for me in range(ME):
-                    #     if i>0:
-                    #         similarity_me = cosine_similarity(p_ME[me], p_ME_old[me])
-                    #     else:
-                    #         similarity_me = 1
-                    #     similarity_ME.append(similarity_me)
-                    for me in range(ME):
-                        client_metrics[client_id][me][alpha]["fc"] = fc_ME[me]
-                        client_metrics[client_id][me][alpha]["il"] = il_ME[me]
-                        # client_metrics[client_id][me][alpha]["similarity"] = similarity_ME[me]
+
+                p_ME, fc_ME, il_ME = get_datasets_metrics(clients_train_loader[client_id][alpha], ME, n_classes)
+                # similarity_ME = []
+                #
+                # for me in range(ME):
+                #     if i>0:
+                #         similarity_me = cosine_similarity(p_ME[me], p_ME_old[me])
+                #     else:
+                #         similarity_me = 1
+                #     similarity_ME.append(similarity_me)
+
+                for me in range(ME):
+                    client_metrics[client_id][me][alpha]["fc"] = fc_ME[me]
+                    client_metrics[client_id][me][alpha]["il"] = il_ME[me]
+                    # client_metrics[client_id][me][alpha]["similarity"] = similarity_ME[me]
 
 
-        alpha_tuples = [0.1, 1.0, 10.0]
-        alpha_tuples_string = [f"{alpha_tuple}" for alpha_tuple in alpha_tuples]
+        alpha_tuples = [(0.1, 1.0), (0.1, 10.0), (1.0, 10.0)]
+        alpha_tuples_string = [f"{alpha_tuple[0]}<->{alpha_tuple[1]}" for alpha_tuple in alpha_tuples]
         general_metrics_dict = {alpha: {"fc": None, "il": None, "dh": None} for alpha in [0.1, 1.0, 10.0]}
         for me in range(ME):
             for cid in range(1, total_clients + 1):
-                for alpha in alpha_tuples:
-                        fc = client_metrics[cid][me][alpha]["fc"]
-                        il = client_metrics[cid][me][alpha]["il"]
-                        if fc is not None and il is not None:
-                            dh = ((1 - fc) + il) / 2
-                        else:
-                            dh = None
-                        general_metrics_dict[alpha] = {"fc": round(fc, 2), "il": round(il, 2), "dh": round(dh, 2)}
+                for alpha in [0.1, 1.0, 10.0]:
+                    fc = client_metrics[cid][me][alpha]["fc"]
+                    il = client_metrics[cid][me][alpha]["il"]
+                    if fc is not None and il is not None:
+                        dh = ((1 - fc) + il) / 2
+                    else:
+                        dh = None
+                    general_metrics_dict[alpha] = {"fc": round(fc, 2), "il": round(il, 2), "dh": round(dh, 2)}
 
                 similarity_ALPHA = {alpha_tuple: None for alpha_tuple in alpha_tuples_string}
                 for alpha_tuple in alpha_tuples:
-                    alpha_a = float(alpha_tuple)
-                    alpha_b = float(alpha_tuple)
+                    alpha_a = alpha_tuple[0]
+                    alpha_b = alpha_tuple[1]
 
-                    p_ME_a, fc_ME, il_ME = get_datasets_metrics(clients_train_loader[cid][alpha_a], ME, n_classes, concept_drift_window=[0] * ME)
-                    p_ME_b, fc_ME, il_ME = get_datasets_metrics(clients_train_loader[cid][alpha_b], ME, n_classes, concept_drift_window=[1] * ME)
+                    p_ME_a, fc_ME, il_ME = get_datasets_metrics(clients_train_loader[cid][alpha_a], ME, n_classes)
+                    p_ME_b, fc_ME, il_ME = get_datasets_metrics(clients_train_loader[cid][alpha_b], ME, n_classes)
                     similarity_me = 1 - cosine_similarity(p_ME_a[me], p_ME_b[me])
-                    similarity_ALPHA[f"{alpha_tuple}"] = round(similarity_me, 2)
+                    similarity_ALPHA[f"{alpha_tuple[0]}<->{alpha_tuple[1]}"] = round(similarity_me, 2)
 
 
                 for alpha in [0.1, 1.0, 10.0]:
                     row = [cid, me, datasets[me].replace("WISDM-W", "WISDM").replace("ImageNet10", "ImageNet-10"),
                            alpha, general_metrics_dict[alpha]["fc"], general_metrics_dict[alpha]["il"],
-                           general_metrics_dict[alpha]["dh"], similarity_ALPHA["0.1"],
-                           similarity_ALPHA["1.0"], similarity_ALPHA["10.0"]]
+                           general_metrics_dict[alpha]["dh"], similarity_ALPHA["0.1<->1.0"],
+                           similarity_ALPHA["0.1<->10.0"], similarity_ALPHA["1.0<->10.0"]]
                     rows.append(row)
 
         df = pd.DataFrame(data=rows,
-                          columns=["cid", "me", "Dataset", "\u03B1", "fc", "il", "dh", "0.1",
-                                   "1.0", "10.0"])
+                          columns=["cid", "me", "Dataset", "\u03B1", "fc", "il", "dh", "0.1<->1.0",
+                                   "0.1<->10.0", "1.0<->10.0"])
 
         df.to_csv(filename, index=False)
 
@@ -187,90 +187,143 @@ def write_outputs(self, filename, data, mode='a'):
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 
-def bar_general_metrics(df, base_dir, x, y_list, hue=None, style=None, ci=None, hue_order=None):
-
-    datasets = df["Dataset"].unique().tolist()
-
-    fig, axs = plt.subplots(3, sharex='all', figsize=(7, 7))
-    hue_order = ["MultiFedAvg", "MultiFedAvgRR"]
-
-    for i in range(len(y_list)):
-
-        bar_plot(df=df, base_dir=base_dir, ax=axs[i],
-                  file_name="""solutions_{}""".format(y_list), x_column=x, y_column=y_list[i],
-                 hue="Dataset", title="", tipo="", y_lim=True, y_max=1.15, palette=sns.color_palette())
-        axs[i].set_ylim(0, 1.24)
-        # axs[j].set_title(r"""Dataset: {}""".format(datasets[j]), size=10)
-
-        if not (i == 2):
-            axs[i].get_legend().remove()
-
-
-    # axs[1].legend(handles, labels, fontsize=9)
-
-    # fig.suptitle("", fontsize=16)
+def latex_general_metrics_table(df, base_dir):
 
     Path(base_dir).mkdir(parents=True, exist_ok=True)
-    plt.tight_layout()
-    # plt.subplots_adjust(wspace=0.2, hspace=0.3)
-    fig.savefig(
-        """{}{}_general_metrics_concept_drift.png""".format(base_dir, y_list), bbox_inches='tight',
-        dpi=400)
-    fig.savefig(
-        """{}{}_general_metrics_concept_drift.svg""".format(base_dir, y_list), bbox_inches='tight',
-        dpi=400)
-    fig.savefig(
-        """{}{}_general_metrics_concept_drift.pdf""".format(base_dir, y_list), bbox_inches='tight',
-        dpi=400)
-    print("""{}{}_general_metrics_concept_drift.png""".format(base_dir, y_list))
 
-def bar_ps(df, base_dir, x, y_list, hue=None, style=None, ci=None, hue_order=None):
+    datasets = sorted(df["Dataset"].unique())
+    alphas = [0.1, 1.0, 10.0]
+    metrics = ["fc", "il", "dh"]
 
-    datasets = df["Dataset"].unique().tolist()
-    alpha_tuples = [0.1, 1.0, 10.0]
+    grouped = (
+        df.groupby(["Dataset", "α"])[metrics]
+        .agg(["mean", "std", "count"])
+    )
 
-    alpha_tuples_string = [f"{alpha_tuple}" for alpha_tuple in alpha_tuples]
+    tex_path = f"{base_dir}/general_metrics_table.tex"
 
-    columns = ["cid", "me", "Dataset", "ps", "Type"]
-    new_df = []
+    with open(tex_path, "w") as f:
 
-    for i in range(len(df)):
+        f.write("\\begin{figure}[t]\n")
+        f.write("\\centering\n")
+        f.write("\\caption{General Metrics (mean $\\pm$ 95\\% CI)}\n")
+        f.write("\\label{tab:general_metrics}\n")
 
-        row = df.iloc[i]
-        print(row)
-        print(row["Dataset"])
-        print(row["dh"])
-        for alpha_tuple in alpha_tuples_string:
-            new_row = [row["cid"], row["me"], row["Dataset"], row[alpha_tuple], alpha_tuple]
-            new_df.append(new_row)
+        col_format = "ll" + "c" * len(datasets)
+        f.write(f"\\begin{{tabular}}{{{col_format}}}\n")
+        f.write("\\toprule\n")
 
+        header = ["$\\alpha$", "Metric"] + datasets
+        f.write(" & ".join(header) + " \\\\\n")
+        f.write("\\midrule\n")
 
-    df = pd.DataFrame(new_df, columns=columns)
+        for alpha in alphas:
+            for metric in metrics:
 
-    print(df)
+                row = [str(alpha), metric]
 
-    fig = plt.figure(figsize=(10, 7))
+                for dataset in datasets:
 
-    bar_plot(df=df, base_dir=base_dir,
-              file_name="""{}_ps_concept_drift""".format(y_list), x_column="Type", y_column="ps",
-             hue="Dataset", title="Concept drift", tipo="", y_lim=False, y_max=1.1, sci=True, palette=sns.color_palette(), padding=26)
+                    try:
+                        mean = grouped.loc[(dataset, alpha)][(metric, "mean")]
+                        std = grouped.loc[(dataset, alpha)][(metric, "std")]
+                        n = grouped.loc[(dataset, alpha)][(metric, "count")]
 
+                        ci = 1.96 * (std / np.sqrt(n))
+
+                        value = f"{mean:.2f} $\\pm$ {ci:.2f}"
+                        row.append(value)
+
+                    except:
+                        row.append("-")
+
+                f.write(" & ".join(row) + " \\\\\n")
+
+            f.write("\\midrule\n")
+
+        f.write("\\bottomrule\n")
+        f.write("\\end{tabular}\n")
+        f.write("\\end{figure}\n")
+
+    print(f"Tabela salva em {tex_path}")
+
+def latex_ps_table(df, base_dir):
+
+    Path(base_dir).mkdir(parents=True, exist_ok=True)
+
+    datasets = sorted(df["Dataset"].unique())
+    alpha_pairs = ["0.1<->1.0", "0.1<->10.0", "1.0<->10.0"]
+
+    rows = []
+
+    for _, row in df.iterrows():
+        for pair in alpha_pairs:
+            rows.append([
+                row["Dataset"],
+                pair,
+                row[pair]
+            ])
+
+    ps_df = pd.DataFrame(rows, columns=["Dataset", "Pair", "ps"])
+
+    grouped = (
+        ps_df.groupby(["Dataset", "Pair"])["ps"]
+        .agg(["mean", "std", "count"])
+    )
+
+    tex_path = f"{base_dir}/label_shift_table.tex"
+
+    with open(tex_path, "w") as f:
+
+        f.write("\\begin{figure}[t]\n")
+        f.write("\\centering\n")
+        f.write("\\caption{Label Shift (mean $\\pm$ 95\\% CI)}\n")
+        f.write("\\label{tab:ps_label_shift}\n")
+
+        col_format = "l" + "c" * len(datasets)
+        f.write(f"\\begin{{tabular}}{{{col_format}}}\n")
+        f.write("\\toprule\n")
+
+        header = ["Pair"] + datasets
+        f.write(" & ".join(header) + " \\\\\n")
+        f.write("\\midrule\n")
+
+        for pair in alpha_pairs:
+
+            row = [pair]
+
+            for dataset in datasets:
+
+                try:
+                    mean = grouped.loc[(dataset, pair)]["mean"]
+                    std = grouped.loc[(dataset, pair)]["std"]
+                    n = grouped.loc[(dataset, pair)]["count"]
+
+                    ci = 1.96 * (std / np.sqrt(n))
+
+                    value = f"{mean:.2f} $\\pm$ {ci:.2f}"
+                    row.append(value)
+
+                except:
+                    row.append("-")
+
+            f.write(" & ".join(row) + " \\\\\n")
+
+        f.write("\\bottomrule\n")
+        f.write("\\end{tabular}\n")
+        f.write("\\end{figure}\n")
+
+    print(f"Tabela salva em {tex_path}")
 
 if __name__ == "__main__":
+
     total_clients = 40
     alphas = [0.1, 1.0, 10.0]
-    dataset = ["ImageNet10", "WISDM-W", "wikitext"]
     dataset = ["ImageNet10", "WISDM-W", "Foursquare"]
-    # dataset = ["WISDM-W"]
+
     write_path = f"plots/MEFL/clients_{total_clients}_datasets_{dataset}_alphas_{alphas}/"
 
     df = read_data(alphas, dataset, total_clients)
 
-    y_list = ["fc", "il", "dh"]
-
-    # bar_general_metrics(df, write_path, x="\u03B1", y_list=y_list)
-    # bar_general_metrics(df, write_path, x="\u03B1", y_list=y_list)
-
-    y_list = ["0.1", "1.0", "10.0"]
-    bar_ps(df, write_path, x="\u03B1", y_list=y_list)
-    bar_ps(df, write_path, x="\u03B1", y_list=y_list)
+    latex_general_metrics_table(df, write_path)
+    latex_ps_table(df, write_path)

@@ -52,8 +52,8 @@ SEED = 42
 
 
 class AdaptiveFedAvg(MultiFedAvg):
-    def __init__(self, args, times):
-        super().__init__(args, times)
+    def __init__(self, args, times, fold_id):
+        super().__init__(args, times, fold_id)
         self.lr_dict = {'EMNIST': 0.01,
                         'MNIST': 0.01,
                         'CIFAR10': 0.01,
@@ -73,7 +73,8 @@ class AdaptiveFedAvg(MultiFedAvg):
             for i in range(self.total_clients):
                 client = AdaptiveFedAvgClient(self.args,
                                               id=i,
-                                              model=copy.deepcopy(self.global_model))
+                                              model=copy.deepcopy(self.global_model),
+                                              fold_id=self.fold_id)
                 self.clients.append(client)
 
         except Exception as e:
