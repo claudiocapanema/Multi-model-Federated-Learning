@@ -88,6 +88,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             self.combined_model = [None] * self.ME
             self.train_losses = {me: [] for me in range(self.ME)}
             self.train_accuracies = {me: [] for me in range(self.ME)}
+            self.data_shift_round = [-1] * self.ME
         except Exception as e:
             print("__init__ error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
@@ -216,11 +217,21 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             data_heterogeneity_degree = metrics["heterogeneity_degree"]
             ps = metrics["ps"]
             s = cosine_similarity(self.p_ME[me], p_ME[me]) # the lower its value the lower the personalization
-            a = 0.8  # fc > a gw=1
+            a = [0.95, 0.94, 0.81]  # fc > a gw=1
             # b = [0.54, 0.56]
-            b = [0.65, 0.65, 0.65]  # il < b gw=1
-            c = [0.36, 0.36, 0.36]  # dh < c gw=1
-            d = 0.0  # ps > d gw=1
+            b = [0.59, 0.59, 0.65]  # il < b gw=1
+            c = [0.31, 0.31, 0.43]  # dh < c gw=1
+            d = 0.1  # ps > d gw=1
+
+            if self.data_shift_round[me] == -1 and ps > d:
+                self.data_shift_round[me] = t
+
+            if self.lt[me] < self.data_shift_round[me] and data_heterogeneity_degree > c[me]:
+                data_shift_adaptation = True
+            else:
+                data_shift_adaptation = False
+                ps = 0
+
             # if t <= 10:
             #     similarity = 1
             if similarity > 1:
@@ -231,11 +242,14 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             # if t >= 50 and me == 1:
             #     set_weights(self.model[me], global_model)
 
+            if fc > a[me] and il < b[me] and data_heterogeneity_degree < c[me] and ps > 1 and nt > 0 and ps > d:
+                print(f"usou incorretamente. cliente {self.client_id} rodada {t} modelo {me} valores: {fc}, {il}, {data_heterogeneity_degree} {ps} {nt}")
+
 
             print(f"valor t {t} nt {nt} tamanho {len(global_model)}")
             combined_model, gw, lw = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
                                                      t=t, T=self.T, nt=nt, s=round(float(similarity), 2),
-                                                     fc={'global': fc, 'reference': a},
+                                                     fc={'global': fc, 'reference': a[me]},
                                                      il={'global': il, 'reference': b[me]},
                                                      dh={'global': data_heterogeneity_degree, 'reference': c[me]},
                                                      ps={'global': ps, 'reference': d},
@@ -247,7 +261,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             #     s = 1  # keeps the standard degree of personalization and does not apply weighted predictions (used for data shift and delayed labeling)
             #     set_weights(self.global_model[me], global_model)
             #     combined_model = self.global_model[me]
-            if (gw == 1 and t > 10 and data_heterogeneity_degree < c[me]):
+            if (gw == 1 and t > 10 and data_heterogeneity_degree < c[me] and ps > d):
                 s = 1 # keeps the standard degree of personalization and does not apply weighted predictions (used for data shift and delayed labeling)
                 set_weights(self.global_model[me], global_model)
                 combined_model = self.global_model[me]

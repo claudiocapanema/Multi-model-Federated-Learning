@@ -70,7 +70,7 @@ class MultiFedAvgClient:
             self.local_epochs = self.args.local_epochs
             self.lr = self.args.learning_rate
             self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-            self.lt = [0] * self.ME
+            self.lt = [-1] * self.ME
             print("ler model size")
             self.models_size = self._get_models_size()
             self.n_classes = [
