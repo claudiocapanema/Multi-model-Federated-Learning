@@ -307,9 +307,6 @@ if __name__ == "__main__":
 
     solutions = [
         "MultiFedAvg+MFP_v2",
-        "MultiFedAvg+MFP_v2_dh",
-        "MultiFedAvg+MFP_v2_iti",
-        "MultiFedAvg+MFP",
         "MultiFedAvg+FPD",
         "MultiFedAvg+FP",
         "MultiFedAvg"
@@ -345,14 +342,14 @@ if __name__ == "__main__":
         ci=None
     )
 
-    line_subplots_by_scenario(
-        df,
-        write_path,
-        x="Round (t)",
-        y="Balanced accuracy (%)",
-        hue="Table",
-        hue_order=solutions,
-        ci=None
-    )
+    # line_subplots_by_scenario(
+    #     df,
+    #     write_path,
+    #     x="Round (t)",
+    #     y="Balanced accuracy (%)",
+    #     hue="Table",
+    #     hue_order=solutions,
+    #     ci=None
+    # )
 
     print("Plots multi-experimentos finalizados.")

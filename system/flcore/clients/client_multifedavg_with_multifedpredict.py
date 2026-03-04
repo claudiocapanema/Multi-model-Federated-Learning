@@ -205,50 +205,58 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             random.seed(t+self.fold_id)
             np.random.seed(t+self.fold_id)
             torch.manual_seed(t+self.fold_id)
-            tuple_me = {}
             nt = t - self.lt[me]
-            # if nt > 0:
-            #     set_weights(self.global_model[me], global_model)
-            # global_model = pickle.loads(global_model)
             p_ME, fc_ME, il_ME = self.update_local_test_data(t, me)
             fc = metrics["fc"]
             il = metrics["il"]
-            similarity = metrics["similarity"]
+            similarity_server = metrics["similarity"]
             data_heterogeneity_degree = metrics["heterogeneity_degree"]
             ps = metrics["ps"]
-            s = cosine_similarity(self.p_ME[me], p_ME[me]) # the lower its value the lower the personalization
+            similarity_local = cosine_similarity(self.p_ME[me], p_ME[me]) # the lower its value the lower the personalization
             a = [0.95, 0.94, 0.81]  # fc > a gw=1
-            # b = [0.54, 0.56]
+            a = [0, 0, 0]  # fc > a gw=1
             b = [0.59, 0.59, 0.65]  # il < b gw=1
-            c = [0.31, 0.31, 0.43]  # dh < c gw=1
+            # b = [1, 1, 1]  # il < b gw=1
+            c = [0.31, 0.31, 0.43]  # dh < c gw=1 # 0.43
+            # c = [1, 1, 1]  # dh < c gw=1 # 0.43
             d = 0.1  # ps > d gw=1
 
             if self.data_shift_round[me] == -1 and ps > d:
                 self.data_shift_round[me] = t
 
-            if self.lt[me] < self.data_shift_round[me] and data_heterogeneity_degree > c[me]:
+            if self.lt[me] < self.data_shift_round[me] and data_heterogeneity_degree > c[me] and t - self.data_shift_round[me] < 4:
+                # chance of using only the global model gw=1
                 data_shift_adaptation = True
+                similarity = similarity_server
             else:
                 data_shift_adaptation = False
+                similarity = similarity_local
                 ps = 0
 
             # if t <= 10:
             #     similarity = 1
-            if similarity > 1:
-                similarity = 1
-            elif similarity < 0:
-                similarity = 0
+            if similarity_server > 1:
+                similarity_server = 1
+            elif similarity_server < 0:
+                similarity_server = 0
 
-            # if t >= 50 and me == 1:
-            #     set_weights(self.model[me], global_model)
-
-            if fc > a[me] and il < b[me] and data_heterogeneity_degree < c[me] and ps > 1 and nt > 0 and ps > d:
+            if fc > a[me] and il < b[me] and data_heterogeneity_degree < c[me] and ps > d and nt > 0:
                 print(f"usou incorretamente. cliente {self.client_id} rodada {t} modelo {me} valores: {fc}, {il}, {data_heterogeneity_degree} {ps} {nt}")
 
 
+            # if similarity_server < similarity_local - 0.05 and ps > d and data_heterogeneity_degree < c[me]:
+            #     # Delayed labeling scenrio. Local similarity is not reliable
+            #     similarity = similarity_server
+            # else:
+            #     similarity = similarity_local
             print(f"valor t {t} nt {nt} tamanho {len(global_model)}")
+            if self.lt[me] < self.data_shift_round[me] and data_heterogeneity_degree < c[me]:
+                similarity = 0
+            else:
+                similarity = 1
             combined_model, gw, lw = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
-                                                     t=t, T=self.T, nt=nt, s=round(float(similarity), 2),
+                                                     t=t, T=self.T, nt=nt,
+                                                     s=round(float(similarity), 2),
                                                      fc={'global': fc, 'reference': a[me]},
                                                      il={'global': il, 'reference': b[me]},
                                                      dh={'global': data_heterogeneity_degree, 'reference': c[me]},
@@ -261,16 +269,21 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             #     s = 1  # keeps the standard degree of personalization and does not apply weighted predictions (used for data shift and delayed labeling)
             #     set_weights(self.global_model[me], global_model)
             #     combined_model = self.global_model[me]
+
             if (gw == 1 and t > 10 and data_heterogeneity_degree < c[me] and ps > d):
-                s = 1 # keeps the standard degree of personalization and does not apply weighted predictions (used for data shift and delayed labeling)
+                similarity = 1 # keeps the standard degree of personalization and does not apply weighted predictions (used for data shift and delayed labeling)
                 set_weights(self.global_model[me], global_model)
                 combined_model = self.global_model[me]
+
 
             print(f"rodada {t} recebido fc{fc} il{il} homogeneity degree {data_heterogeneity_degree} ps {ps} nt {nt}")
 
             loss, metrics = test_fedpredict(combined_model, self.valloader[me], self.device, self.client_id, t,
-                                            self.args.dataset[me], self.n_classes[me], s, p_ME[me],
+                                            self.args.dataset[me], self.n_classes[me], similarity, p_ME[me],
                                             self.concept_drift_window_test[me])
+
+            # loss, metrics = test(combined_model, self.valloader[me], self.device, self.client_id, t,
+            #                      self.args.dataset[me], self.n_classes[me], self.concept_drift_window_test[me])
 
             metrics["Model size"] = self.models_size[me]
             metrics["Dataset size"] = len(self.valloader[me].dataset)
@@ -283,3 +296,33 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
         except Exception as e:
             print("evaluate error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+    # def evaluate(self, me, t, global_model, metrics):
+    #     """Evaluate the model on the data this client has."""
+    #     try:
+    #         g = torch.Generator()
+    #         g.manual_seed(t+self.fold_id)
+    #         random.seed(t+self.fold_id)
+    #         np.random.seed(t+self.fold_id)
+    #         torch.manual_seed(t+self.fold_id)
+    #         tuple_me = {}
+    #         nt = t - self.lt[me]
+    #         self.update_local_test_data(t, me)
+    #         combined_model, gw, lw = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
+    #                                                  t=t, T=self.T, nt=nt, device=self.device,
+    #                                                  global_model_original_shape=self.model_shape_mefl[me], return_gw_lw=True)
+    #         loss, metrics = test(combined_model, self.valloader[me], self.device, self.client_id, t,
+    #                              self.args.dataset[me], self.n_classes[me], self.concept_drift_window_test[me])
+    #         metrics["Model size"] = self.models_size[me]
+    #         metrics["Dataset size"] = len(self.valloader[me].dataset)
+    #         metrics["me"] = me
+    #         metrics["Alpha"] = self.alpha_test[me]
+    #         # metrics["gw"] = float(gw)
+    #         # metrics["lw"] = float(lw)
+    #         metrics["gw"] = gw
+    #         metrics["lw"] = lw
+    #         tuple_me = (loss, len(self.valloader[me].dataset), metrics)
+    #         return loss, len(self.valloader[me].dataset), tuple_me
+    #     except Exception as e:
+    #         print("evaluate error")
+    #         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))

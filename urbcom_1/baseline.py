@@ -35,10 +35,11 @@ LOCAL_EPOCHS = 1
 BATCH_SIZE = 64
 LR = 0.01
 
-DIRICHLET_ALPHA = 0.1
+# DIRICHLET_ALPHA = 0.1
+DIRICHLET_ALPHA = 1.0
 regime = "realistic"
 # regime = "benign"
-regime = "severe"
+# regime = "severe"
 
 
 # =====================================================
@@ -119,7 +120,7 @@ def get_regime(name: str):
             "battery_init": (0.8, 1.0),
             "compute": (0.6, 1.0),
             "link": (0.6, 1.0),
-            "BATTERY_DECAY": 0.02,
+            "BATTERY_DECAY": 0.07,
             "TIME_MAX": 3.0,
             "LINK_MIN": 0.3,
         },
@@ -499,11 +500,18 @@ def run_experiment():
             #    (TODOS os clientes são elegíveis)
             # =====================================================
 
-            all_clients = list(range(NUM_CLIENTS))
-            selected_clients = random.sample(
-                all_clients,
-                min(K_CLIENTS, NUM_CLIENTS)
-            )
+            eligible_clients = [
+                cid for cid in range(NUM_CLIENTS)
+                if client_resources[cid]["battery"] > 0
+            ]
+
+            if len(eligible_clients) == 0:
+                selected_clients = []
+            else:
+                selected_clients = random.sample(
+                    eligible_clients,
+                    min(K_CLIENTS, len(eligible_clients))
+                )
 
             half = K_CLIENTS // 2
             clients_cifar = selected_clients[:half]
@@ -624,7 +632,7 @@ def run_experiment():
 
             for cid in clients_cifar:
 
-                if not R(cid, "cifar"):
+                if client_resources[cid]["battery"] <= 0:
                     continue
 
                 local_model = copy.deepcopy(global_models["cifar"])

@@ -435,7 +435,7 @@ def generate_rich_heatmaps(df, metric, output_path, baseline="MultiFedAvg"):
             xticklabels=x_labels,
             yticklabels=short_solutions,
             cbar_kws={"label": "Gain (%)"},
-            annot_kws={"size": 13}
+            annot_kws={"size": 16}
         )
 
         # Ajustes finos de fonte
@@ -713,23 +713,24 @@ if __name__ == "__main__":
     datasets = ["WISDM-W", "ImageNet10", "Foursquare"]
     model_name = ["gru", "CNN", "lstm"]
     fraction_fit = 0.3
+    # number_of_rounds = 30
     number_of_rounds = 100
     local_epochs = 1
     train_test = "test"
 
     solutions = [
         "MultiFedAvg+MFP_v2",
-        "MultiFedAvg+MFP_v2_dh",
-        "MultiFedAvg+MFP_v2_iti",
-        "MultiFedAvg+MFP",
-        "MultiFedAvg+FPD",
+        # "MultiFedAvg+MFP_v2_dh",
+        # "MultiFedAvg+MFP_v2_iti",
+        # "MultiFedAvg+MFP",
+        # "MultiFedAvg+FPD",
         "MultiFedAvg+FP",
-        "DMA-FL",
+        # "DMA-FL",
         # "AdaptiveFedAvg",
         "MultiFedAvg"
     ]
 
-    write_path = "plots/MEFL/multi_experiments/"
+    write_path = f"plots/MEFL/multi_experiments/rounds_{number_of_rounds}/"
 
     df = read_data_multi_experiments(
         experiment_ids,
@@ -744,6 +745,6 @@ if __name__ == "__main__":
     )
 
     # Exemplo:
-    analysis_path = "plots/MEFL/multi_experiments/analysis/"
+    analysis_path = f"plots/MEFL/multi_experiments/analysis/rounds_{number_of_rounds}/"
     # run_transition_analysis(df, "Balanced accuracy (%)", analysis_path)
     run_transition_analysis(df, "Accuracy (%)", analysis_path)

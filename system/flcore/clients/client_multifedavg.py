@@ -82,7 +82,7 @@ class MultiFedAvgClient:
             self.experiment_id = self.args.experiment_id
             self.gradual_rounds = 5
             self.data_shift_config = self.get_data_shift_config(self.ME, self.number_of_rounds, self.alpha_train, self.experiment_id, self.client_id, gradual_rounds=self.total_clients // self.gradual_rounds, seed=self.fold_id)
-            print(f"concept drift config {self.data_shift_config} concept drift id {self.experiment_id}")
+            print(f"data shift config {self.data_shift_config} data shift id {self.experiment_id}")
 
             for me in range(self.ME):
                 # self.trainloader[me], self.valloader[me] = load_data(
@@ -155,7 +155,7 @@ class MultiFedAvgClient:
                     type_ = "label_shift"
                     config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                    "type": type_} for me in range(ME)}
-                elif experiment_id == "label_shift#10-1.0_sudden":
+                elif experiment_id == "label_shift#10.0-1.0_sudden":
                     assert all(i == 10.0 for i in self.alpha_train)
                     ME_concept_drift_rounds = [[int(n_rounds * 0.3)],
                                                [int(n_rounds * 0.5)],
@@ -229,11 +229,16 @@ class MultiFedAvgClient:
                 config = {}
             # else:
             #     config = {}
+
+            if len(config) == 0 and len(experiment_id) > 0:
+                raise Exception(f"Experiment id {experiment_id} not supported")
+
             return config
 
         except Exception as e:
             print("label_shift_config error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+            exit()
 
     def global_concept_drift_config(self, ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds):
         try:
@@ -319,6 +324,9 @@ class MultiFedAvgClient:
 
             else:
                 config = {}
+
+            if len(config) == 0 and len(experiment_id) > 0:
+                raise Exception(f"Experiment id {experiment_id} not supported")
 
             return config
 
