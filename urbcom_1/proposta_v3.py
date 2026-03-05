@@ -59,6 +59,16 @@ MODEL_COST = {
     "gtsrb": 0.5
 }
 
+# =====================================================
+# FAIR RESOURCE BUDGET
+# =====================================================
+
+BASE_CLIENTS = K_CLIENTS // 2
+
+LIGHT_MODEL = min(MODEL_COST, key=MODEL_COST.get)
+
+FAIR_RESOURCE_BUDGET = BASE_CLIENTS * MODEL_COST[LIGHT_MODEL]
+
 Path("results/").mkdir(parents=True, exist_ok=True)
 
 # =====================================================
@@ -100,7 +110,7 @@ client_acc = {}
 client_loss = {}
 client_delta_acc = {}
 global_acc_history = {}
-baseline_logs = {}
+proposta_logs = {}
 
 # =====================================================
 # REGIMES EXPERIMENTAIS
@@ -218,7 +228,7 @@ def reset_experiment_state():
     global client_acc
     global client_loss
     global client_delta_acc
-    global baseline_logs
+    global proposta_logs
     global global_acc_history
 
     # -------- Modelos --------
@@ -259,7 +269,7 @@ def reset_experiment_state():
     }
 
     # -------- Logs RAWCS --------
-    baseline_logs = {
+    proposta_logs = {
         "clients_per_model": [],
         "energy_consumed_round": [],
         "cumulative_energy": [],
@@ -384,7 +394,7 @@ def append_result_to_csv(row_dict, filename):
 
 def clear_previous_results():
     for model_name in ["cifar", "gtsrb"]:
-        filename = f"results/baseline_{model_name}_regime_{regime}_frac_{FRAC}_alpha_{DIRICHLET_ALPHA}.csv"
+        filename = f"results/proposta_{model_name}_regime_{regime}_frac_{FRAC}_alpha_{DIRICHLET_ALPHA}.csv"
         if os.path.exists(filename):
             os.remove(filename)
 
@@ -473,11 +483,11 @@ def run_experiment():
             real_training_counter = {m: 0 for m in global_models}
 
             # =====================================================
-            # 1) Seleção Aleatória de Clientes (baseline)
+            # 1) Seleção Aleatória de Clientes (proposta)
             # =====================================================
 
             # =====================================================
-            # baseline MULTIFEDAVG
+            # proposta MULTIFEDAVG
             # Seleção aleatória sem fairness
             # =====================================================
 
@@ -487,18 +497,45 @@ def run_experiment():
             }
 
             # =====================================================
-            # 1) Seleção Aleatória (baseline MultiFedAvg)
+            # 1) Seleção FAIR baseada em orçamento de recursos
             # =====================================================
 
-            selected_clients = random.sample(
-                list(range(NUM_CLIENTS)),
-                min(K_CLIENTS, NUM_CLIENTS)
-            )
+            clients_cifar = []
+            clients_gtsrb = []
 
-            half = len(selected_clients) // 2
+            budget_cifar = 0.0
+            budget_gtsrb = 0.0
 
-            clients_cifar = selected_clients[:half]
-            clients_gtsrb = selected_clients[half:]
+            all_clients = list(range(NUM_CLIENTS))
+            random.shuffle(all_clients)
+
+            # ---------------------------
+            # CIFAR
+            # ---------------------------
+
+            remaining_clients = []
+
+            for cid in all_clients:
+
+                cost = MODEL_COST["cifar"]
+
+                if budget_cifar + cost <= FAIR_RESOURCE_BUDGET:
+                    clients_cifar.append(cid)
+                    budget_cifar += cost
+                else:
+                    remaining_clients.append(cid)
+
+            # ---------------------------
+            # GTSRB
+            # ---------------------------
+
+            for cid in remaining_clients:
+
+                cost = MODEL_COST["gtsrb"]
+
+                if budget_gtsrb + cost <= FAIR_RESOURCE_BUDGET:
+                    clients_gtsrb.append(cid)
+                    budget_gtsrb += cost
 
             model_updates = {
                 "cifar": [],
@@ -511,7 +548,7 @@ def run_experiment():
             }
 
             # =====================================================
-            # 2) Treino CIFAR (baseline puro)
+            # 2) Treino CIFAR (proposta puro)
             # =====================================================
 
             for cid in clients_cifar:
@@ -549,7 +586,7 @@ def run_experiment():
                 client_loss[cid]["cifar"] = loss
 
             # =====================================================
-            # 3) Treino GTSRB (baseline puro)
+            # 3) Treino GTSRB (proposta puro)
             # =====================================================
 
             for cid in clients_gtsrb:
@@ -625,14 +662,14 @@ def run_experiment():
             else:
                 fairness_resource = 0.0
 
-            baseline_logs["resource_usage_cifar"].append(resource_cifar)
-            baseline_logs["resource_usage_gtsrb"].append(resource_gtsrb)
-            baseline_logs["fairness_resource"].append(fairness_resource)
+            proposta_logs["resource_usage_cifar"].append(resource_cifar)
+            proposta_logs["resource_usage_gtsrb"].append(resource_gtsrb)
+            proposta_logs["fairness_resource"].append(fairness_resource)
 
-            baseline_logs["energy_consumed_round"].append(energy_this_round)
-            baseline_logs["cumulative_energy"].append(cumulative_energy)
-            baseline_logs["drained_clients_round"].append(drained_clients)
-            baseline_logs["avg_battery_remaining"].append(avg_battery_remaining)
+            proposta_logs["energy_consumed_round"].append(energy_this_round)
+            proposta_logs["cumulative_energy"].append(cumulative_energy)
+            proposta_logs["drained_clients_round"].append(drained_clients)
+            proposta_logs["avg_battery_remaining"].append(avg_battery_remaining)
 
             # 4) Avaliação global
             for model_name, model in global_models.items():
@@ -657,7 +694,7 @@ def run_experiment():
                 )
 
                 row_data = {
-                    "algorithm": "baseline_multifedavg",
+                    "algorithm": "fair_resource",
                     "fold": fold,
                     "round": rnd,
                     "dataset": model_name,
@@ -666,17 +703,17 @@ def run_experiment():
                     "clients_selected": real_training_counter[model_name],
                     "clients_selected_total": sum(real_training_counter.values()),
 
-                    "resource_usage_cifar": baseline_logs["resource_usage_cifar"][-1],
-                    "resource_usage_gtsrb": baseline_logs["resource_usage_gtsrb"][-1],
-                    "fairness_resource": baseline_logs["fairness_resource"][-1],
+                    "resource_usage_cifar": proposta_logs["resource_usage_cifar"][-1],
+                    "resource_usage_gtsrb": proposta_logs["resource_usage_gtsrb"][-1],
+                    "fairness_resource": proposta_logs["fairness_resource"][-1],
 
-                    "energy_consumed_round": baseline_logs["energy_consumed_round"][-1],
-                    "cumulative_energy": baseline_logs["cumulative_energy"][-1],
-                    "drained_clients_round": baseline_logs["drained_clients_round"][-1],
-                    "avg_battery_remaining": baseline_logs["avg_battery_remaining"][-1],
+                    "energy_consumed_round": proposta_logs["energy_consumed_round"][-1],
+                    "cumulative_energy": proposta_logs["cumulative_energy"][-1],
+                    "drained_clients_round": proposta_logs["drained_clients_round"][-1],
+                    "avg_battery_remaining": proposta_logs["avg_battery_remaining"][-1],
                 }
 
-                filename = f"results/baseline_{model_name}_regime_{regime}_frac_{FRAC}_alpha_{DIRICHLET_ALPHA}.csv"
+                filename = f"results/proposta_{model_name}_regime_{regime}_frac_{FRAC}_alpha_{DIRICHLET_ALPHA}.csv"
                 append_result_to_csv(row_data, filename)
 
             # =====================================================
@@ -685,7 +722,7 @@ def run_experiment():
 
             clients_per_model = real_training_counter.copy()
 
-            baseline_logs["clients_per_model"].append(clients_per_model)
+            proposta_logs["clients_per_model"].append(clients_per_model)
 
             print(
                 f"📌 Clientes treinados | "

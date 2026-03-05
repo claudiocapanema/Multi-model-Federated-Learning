@@ -251,16 +251,18 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             #     similarity = similarity_local
             print(f"valor t {t} nt {nt} tamanho {len(global_model)}")
             if self.lt[me] < self.data_shift_round[me] and data_heterogeneity_degree < c[me]:
-                similarity = 0
-            else:
                 similarity = 1
+                t_hat = 1
+            else:
+                t_hat = t
+                similarity = similarity
             combined_model, gw, lw = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
-                                                     t=t, T=self.T, nt=nt,
+                                                     t=t_hat, T=self.T, nt=nt,
                                                      s=round(float(similarity), 2),
-                                                     fc={'global': fc, 'reference': a[me]},
-                                                     il={'global': il, 'reference': b[me]},
-                                                     dh={'global': data_heterogeneity_degree, 'reference': c[me]},
-                                                     ps={'global': ps, 'reference': d},
+                                                     # fc={'global': fc, 'reference': a[me]},
+                                                     # il={'global': il, 'reference': b[me]},
+                                                     # dh={'global': data_heterogeneity_degree, 'reference': c[me]},
+                                                     # ps={'global': ps, 'reference': d},
                                                      device=self.device,
                                                      global_model_original_shape=self.model_shape_mefl[me],
                                                     return_gw_lw=True)
