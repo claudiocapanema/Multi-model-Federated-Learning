@@ -217,28 +217,28 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             a = [0, 0, 0]  # fc > a gw=1
             b = [0.59, 0.59, 0.65]  # il < b gw=1
             # b = [1, 1, 1]  # il < b gw=1
-            c = [0.31, 0.31, 0.43]  # dh < c gw=1 # 0.43
+            c = [0.31, 0.31, 0.37]  # dh < c gw=1 # 0.43
             # c = [1, 1, 1]  # dh < c gw=1 # 0.43
             d = 0.1  # ps > d gw=1
 
             if self.data_shift_round[me] == -1 and ps > d:
                 self.data_shift_round[me] = t
 
-            if self.lt[me] < self.data_shift_round[me] and data_heterogeneity_degree > c[me] and t - self.data_shift_round[me] < 4:
-                # chance of using only the global model gw=1
-                data_shift_adaptation = True
-                similarity = similarity_server
-            else:
-                data_shift_adaptation = False
-                similarity = similarity_local
-                ps = 0
+            # if self.lt[me] < self.data_shift_round[me] and data_heterogeneity_degree > c[me] and t - self.data_shift_round[me] < 4:
+            #     # chance of using only the global model gw=1
+            #     data_shift_adaptation = True
+            #     similarity = similarity_server
+            # else:
+            #     data_shift_adaptation = False
+            #     similarity = similarity_local
+            #     ps = 0
 
-            # if t <= 10:
-            #     similarity = 1
-            if similarity_server > 1:
-                similarity_server = 1
-            elif similarity_server < 0:
-                similarity_server = 0
+            # # if t <= 10:
+            # #     similarity = 1
+            # if similarity_server > 1:
+            #     similarity_server = 1
+            # elif similarity_server < 0:
+            #     similarity_server = 0
 
             if fc > a[me] and il < b[me] and data_heterogeneity_degree < c[me] and ps > d and nt > 0:
                 print(f"usou incorretamente. cliente {self.client_id} rodada {t} modelo {me} valores: {fc}, {il}, {data_heterogeneity_degree} {ps} {nt}")
@@ -249,13 +249,15 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             #     similarity = similarity_server
             # else:
             #     similarity = similarity_local
-            print(f"valor t {t} nt {nt} tamanho {len(global_model)}")
+            print(f"model {me} valor t {t} nt {nt} tamanho {len(global_model)} heterogeneity degree cliente {data_heterogeneity_degree}")
             if self.lt[me] < self.data_shift_round[me] and data_heterogeneity_degree < c[me]:
                 similarity = 1
                 t_hat = 1
+                print("entrou parou")
+                # exit()
             else:
                 t_hat = t
-                similarity = similarity
+                similarity = 1
             combined_model, gw, lw = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
                                                      t=t_hat, T=self.T, nt=nt,
                                                      s=round(float(similarity), 2),

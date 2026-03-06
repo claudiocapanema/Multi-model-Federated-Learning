@@ -261,15 +261,19 @@ def reset_experiment_state():
     # -------- Logs RAWCS --------
     baseline_logs = {
         "clients_per_model": [],
-        "energy_consumed_round": [],
-        "cumulative_energy": [],
-        "drained_clients_round": [],
-        "avg_battery_remaining": [],
+    "energy_consumed_round": [],
+    "cumulative_energy": [],
+    "drained_clients_round": [],
+    "avg_battery_remaining": [],
 
-        # fairness
-        "resource_usage_cifar": [],
-        "resource_usage_gtsrb": [],
-        "fairness_resource": []
+    # resource usage
+    "resource_usage_cifar": [],
+    "resource_usage_gtsrb": [],
+
+    # fairness metrics
+    "fairness_resource": [],
+    "jain_fairness": [],
+    "rag": []
     }
 
 # =====================================================
@@ -620,19 +624,68 @@ def run_experiment():
 
             total_resource = resource_cifar + resource_gtsrb
 
+            # -------------------------------------------------
+            # 1) Fairness Resource (erro relativo)
+            # menor = melhor
+            # -------------------------------------------------
+
             if total_resource > 0:
                 fairness_resource = abs(resource_cifar - resource_gtsrb) / total_resource
             else:
                 fairness_resource = 0.0
 
-            baseline_logs["resource_usage_cifar"].append(resource_cifar)
-            baseline_logs["resource_usage_gtsrb"].append(resource_gtsrb)
-            baseline_logs["fairness_resource"].append(fairness_resource)
+            # -------------------------------------------------
+            # 2) Jain Fairness Index
+            # maior = melhor
+            # -------------------------------------------------
+
+            den = 2 * (resource_cifar ** 2 + resource_gtsrb ** 2)
+
+            if den > 0:
+                jain_fairness = (total_resource ** 2) / den
+            else:
+                jain_fairness = 1.0
+
+            # -------------------------------------------------
+            # 3) Resource Allocation Gap (RAG)
+            # menor = melhor
+            # -------------------------------------------------
+
+            target = total_resource / 2
+
+            rag = abs(resource_cifar - target) + abs(resource_gtsrb - target)
+
+            # -------------------------------------------------
+            # MÉTRICAS ENERGÉTICAS
+            # -------------------------------------------------
+
+            cumulative_energy += energy_this_round
+
+            drained_clients = sum(
+                1 for cid in range(NUM_CLIENTS)
+                if client_resources[cid]["battery"] <= 0.0
+            )
+
+            avg_battery_remaining = np.mean([
+                client_resources[cid]["battery"]
+                for cid in range(NUM_CLIENTS)
+            ])
 
             baseline_logs["energy_consumed_round"].append(energy_this_round)
             baseline_logs["cumulative_energy"].append(cumulative_energy)
             baseline_logs["drained_clients_round"].append(drained_clients)
             baseline_logs["avg_battery_remaining"].append(avg_battery_remaining)
+
+            # -------------------------------------------------
+            # salvar métricas
+            # -------------------------------------------------
+
+            baseline_logs["resource_usage_cifar"].append(resource_cifar)
+            baseline_logs["resource_usage_gtsrb"].append(resource_gtsrb)
+
+            baseline_logs["fairness_resource"].append(fairness_resource)
+            baseline_logs["jain_fairness"].append(jain_fairness)
+            baseline_logs["rag"].append(rag)
 
             # 4) Avaliação global
             for model_name, model in global_models.items():
@@ -668,7 +721,10 @@ def run_experiment():
 
                     "resource_usage_cifar": baseline_logs["resource_usage_cifar"][-1],
                     "resource_usage_gtsrb": baseline_logs["resource_usage_gtsrb"][-1],
+
                     "fairness_resource": baseline_logs["fairness_resource"][-1],
+                    "jain_fairness": baseline_logs["jain_fairness"][-1],
+                    "rag": baseline_logs["rag"][-1],
 
                     "energy_consumed_round": baseline_logs["energy_consumed_round"][-1],
                     "cumulative_energy": baseline_logs["cumulative_energy"][-1],

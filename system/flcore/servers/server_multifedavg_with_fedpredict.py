@@ -34,6 +34,9 @@ from flwr.common import (
 from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, weighted_loss_avg
 from flwr.common import FitRes, NDArray, NDArrays, parameters_to_ndarrays
 from functools import partial, reduce
+import random
+import torch
+import numpy as np
 
 def get_weights(net):
     try:
@@ -65,7 +68,20 @@ class MultiFedAvgWithFedPredict(MultiFedAvgWithMultiFedPredict):
     def select_clients(self, t):
 
         try:
-            return super().select_clients(t)
+            g = torch.Generator()
+            g.manual_seed(t)
+            random.seed(t)
+            np.random.seed(t)
+            torch.manual_seed(t)
+            selected_clients = list(np.random.choice(self.clients, self.num_training_clients, replace=False))
+            selected_clients = [i.client_id for i in selected_clients]
+
+            n = len(selected_clients) // self.ME
+            sc = np.array_split(selected_clients, self.ME)
+
+            self.n_trained_clients = sum([len(i) for i in sc])
+
+            return sc
 
         except Exception as e:
             print("select_clients error")
