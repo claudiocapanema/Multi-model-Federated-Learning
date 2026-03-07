@@ -254,17 +254,21 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 similarity = 1
                 t_hat = 1
                 print("entrou parou")
+                local_model_outdated = True
                 # exit()
             else:
                 t_hat = t
                 similarity = 1
+                local_model_outdated = False
             combined_model, gw, lw = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
                                                      t=t_hat, T=self.T, nt=nt,
                                                      s=round(float(similarity), 2),
+                                                     lt=self.lt[me],
+                                                     data_shift_round=self.data_shift_round[me],
                                                      # fc={'global': fc, 'reference': a[me]},
                                                      # il={'global': il, 'reference': b[me]},
-                                                     # dh={'global': data_heterogeneity_degree, 'reference': c[me]},
-                                                     # ps={'global': ps, 'reference': d},
+                                                     dh={'global': data_heterogeneity_degree, 'reference': c[me]},
+                                                     ps={'global': ps, 'reference': d},
                                                      device=self.device,
                                                      global_model_original_shape=self.model_shape_mefl[me],
                                                     return_gw_lw=True)

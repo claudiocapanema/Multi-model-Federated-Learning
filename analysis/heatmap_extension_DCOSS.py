@@ -723,7 +723,7 @@ if __name__ == "__main__":
         # "MultiFedAvg+MFP_v2_dh",
         # "MultiFedAvg+MFP_v2_iti",
         # "MultiFedAvg+MFP",
-        # "MultiFedAvg+FPD",
+        "MultiFedAvg+FPD",
         "MultiFedAvg+FP",
         # "DMA-FL",
         # "AdaptiveFedAvg",

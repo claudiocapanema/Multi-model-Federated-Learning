@@ -35,7 +35,8 @@ from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, weighte
 
 from functools import partial, reduce
 from typing import Any, Callable, Union
-
+import random
+import torch
 import numpy as np
 
 from flwr.common import FitRes, NDArray, NDArrays, parameters_to_ndarrays
@@ -65,6 +66,28 @@ class MultiFedAvgWithFedPredictDynamic(MultiFedAvgWithMultiFedPredict):
 
         except Exception as e:
             print("set_clients error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+    def select_clients(self, t):
+
+        try:
+            g = torch.Generator()
+            g.manual_seed(t)
+            random.seed(t)
+            np.random.seed(t)
+            torch.manual_seed(t)
+            selected_clients = list(np.random.choice(self.clients, self.num_training_clients, replace=False))
+            selected_clients = [i.client_id for i in selected_clients]
+
+            n = len(selected_clients) // self.ME
+            sc = np.array_split(selected_clients, self.ME)
+
+            self.n_trained_clients = sum([len(i) for i in sc])
+
+            return sc
+
+        except Exception as e:
+            print("select_clients error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     # def aggregate_fit(
