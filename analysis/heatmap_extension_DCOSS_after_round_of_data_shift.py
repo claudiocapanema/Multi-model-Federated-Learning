@@ -50,6 +50,59 @@ def mean_ci(values, ci=0.95):
 
     return mean, margin
 
+# =====================================================
+# 🔹 FILTRAR APÓS DATA SHIFT
+# =====================================================
+
+# =====================================================
+# 🔹 FILTRAR APÓS DATA SHIFT (detectado pela mudança de alpha)
+# =====================================================
+
+def filter_after_shift(df):
+
+    # possíveis nomes das colunas
+    round_cols = ["Round (t)"]
+    alpha_cols = ["Alpha"]
+
+    round_col = None
+    alpha_col = None
+
+    for c in round_cols:
+        if c in df.columns:
+            round_col = c
+            break
+
+    for c in alpha_cols:
+        if c in df.columns:
+            alpha_col = c
+            break
+
+    # se não existir round ou alpha, retorna original
+    if round_col is None or alpha_col is None:
+        print("WARNING: round/alpha column not found")
+        return df
+
+    df = df.sort_values(round_col)
+
+    alpha_values = df[alpha_col].values
+    rounds = df[round_col].values
+
+    shift_round = None
+
+    for i in range(1, len(alpha_values)):
+        if alpha_values[i] != alpha_values[i-1]:
+            shift_round = rounds[i]
+            break
+
+    # se não houver mudança de alpha
+    if shift_round is None:
+        return df
+
+    # retorna apenas após shift
+    df = df[df[round_col] >= shift_round]
+    df = df[df[round_col] <= shift_round + 10]
+    return df
+
 def read_data(read_solutions, read_dataset_order):
 
     df_concat = None
@@ -168,6 +221,10 @@ def parse_transition(scenario):
 # 🔹 COMPUTAR GANHOS
 # =====================================================
 
+# =====================================================
+# 🔹 COMPUTAR GANHOS (APENAS APÓS DATA SHIFT)
+# =====================================================
+
 def compute_all_gains(df, metric, baseline="MultiFedAvg"):
 
     records = []
@@ -180,15 +237,29 @@ def compute_all_gains(df, metric, baseline="MultiFedAvg"):
 
         for dataset in df["Dataset"].unique():
 
-            base = df.query(
+            # -----------------------------
+            # BASELINE (após shift)
+            # -----------------------------
+            base_subset = df.query(
                 f"Dataset == '{dataset}' and Solution == '{baseline}' and Scenario == '{scenario}'"
-            )[metric].mean()
+            )
 
+            base_subset = filter_after_shift(base_subset)
+
+            base = base_subset[metric].mean()
+
+            # -----------------------------
+            # OUTRAS SOLUÇÕES
+            # -----------------------------
             for sol in df["Solution"].unique():
 
-                val = df.query(
+                val_subset = df.query(
                     f"Dataset == '{dataset}' and Solution == '{sol}' and Scenario == '{scenario}'"
-                )[metric].mean()
+                )
+
+                val_subset = filter_after_shift(val_subset)
+
+                val = val_subset[metric].mean()
 
                 if pd.isna(base) or base == 0:
                     gain = 0.0
@@ -299,7 +370,7 @@ def generate_rich_heatmaps(df, metric, output_path, baseline="MultiFedAvg"):
         a1, a2 = alpha_part.split("-")
         return float(a1), float(a2)
 
-    save_dir = Path(output_path) / "heatmaps"
+    save_dir = Path(output_path) / "heatmaps/after"
     save_dir.mkdir(parents=True, exist_ok=True)
 
     for dataset in df["Dataset"].unique():
@@ -356,14 +427,17 @@ def generate_rich_heatmaps(df, metric, output_path, baseline="MultiFedAvg"):
             row_ci = []
 
             for scenario in ordered_scenarios:
-
                 subset = df.query(
                     f"Dataset == '{dataset}' and Table == '{sol}' and Scenario == '{scenario}'"
-                )[metric]
+                )
+
+                subset = filter_after_shift(subset)[metric]
 
                 base_subset = df.query(
                     f"Dataset == '{dataset}' and Table == '{baseline}' and Scenario == '{scenario}'"
-                )[metric]
+                )
+
+                base_subset = filter_after_shift(base_subset)[metric]
 
                 mean_val, ci_val = mean_ci(subset)
                 base_mean, _ = mean_ci(base_subset)

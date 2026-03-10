@@ -72,6 +72,117 @@ def extract_labels(loader, label_key="label"):
         labels.append(y)
     return torch.cat(labels).cpu().numpy()
 
+import torch
+import numpy as np
+from collections import Counter
+from scipy.stats import chisquare, ks_2samp
+
+
+def extract_from_loader(loader, key="image"):
+
+    X = []
+    y = []
+
+    for batch in loader:
+
+        x = batch[key].detach().cpu().numpy()
+        label = batch["label"].detach().cpu().numpy()
+
+        X.append(x.reshape(x.shape[0], -1))
+        y.append(label)
+
+    X = np.concatenate(X, axis=0)
+    y = np.concatenate(y, axis=0)
+
+    return X, y
+
+
+def detect_label_shift(y1, y2):
+
+    c1 = Counter(y1)
+    c2 = Counter(y2)
+
+    classes = sorted(set(y1) | set(y2))
+
+    f1 = np.array([c1.get(c, 0) for c in classes])
+    f2 = np.array([c2.get(c, 0) for c in classes])
+
+    stat, p = chisquare(f1, f2)
+
+    return stat, p
+
+
+def detect_concept_drift(X1, y1, X2, y2):
+
+    classes = np.unique(np.concatenate([y1, y2]))
+
+    drift_detected = False
+    results = {}
+
+    for c in classes:
+
+        Xa = X1[y1 == c]
+        Xb = X2[y2 == c]
+
+        if len(Xa) == 0 or len(Xb) == 0:
+            continue
+
+        stat, p = ks_2samp(Xa.flatten(), Xb.flatten())
+
+        results[c] = (stat, p)
+
+        if p < 0.05:
+            drift_detected = True
+
+    return drift_detected, results
+
+
+def compare_loaders(loader_a, loader_b, key="image"):
+
+    X1, y1 = extract_from_loader(loader_a, key)
+    X2, y2 = extract_from_loader(loader_b, key)
+
+    print("\nSamples:", len(y1), len(y2))
+
+    # -------------------------------------------------
+    # LABEL SHIFT
+    # -------------------------------------------------
+
+    stat, p = detect_label_shift(y1, y2)
+
+    print("\nLabel shift test")
+    print("chi2:", stat)
+    print("p-value:", p)
+
+    label_shift = p < 0.05
+
+    # -------------------------------------------------
+    # CONCEPT DRIFT
+    # -------------------------------------------------
+
+    concept_drift, results = detect_concept_drift(X1, y1, X2, y2)
+
+    print("\nConcept drift per class")
+
+    for c, (stat, p) in results.items():
+
+        print(f"class {c}: KS={stat:.4f} p={p:.4f}")
+
+    # -------------------------------------------------
+    # RESULTADO FINAL
+    # -------------------------------------------------
+
+    if label_shift:
+        result = "LABEL_SHIFT"
+    elif concept_drift:
+        result = "CONCEPT_DRIFT"
+    else:
+        result = "NO_SHIFT"
+
+    print("\nRESULT:", result)
+
+    return result
+
 
 class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
     def __init__(self, args, id, model, fold_id):
@@ -89,6 +200,10 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             self.train_losses = {me: [] for me in range(self.ME)}
             self.train_accuracies = {me: [] for me in range(self.ME)}
             self.data_shift_round = [-1] * self.ME
+            self.dataset_input_map = {"CIFAR10": "img", "MNIST": "image", "EMNIST": "image", "GTSRB": "image",
+                                     "Gowalla": "sequence",
+                                     "WISDM-W": "sequence", "ImageNet": "image", "ImageNet10": "image",
+                                     "wikitext": "sequence", "Foursquare": "sequence"}
         except Exception as e:
             print("__init__ error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
@@ -124,51 +239,6 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             print("detect_drift_ks client error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def ks_drift_test(self, me):
-
-        try:
-            # --------------------------
-            # 3. Avaliar em A (esperado) e em B (novo)
-            # --------------------------
-            if len(self.train_accuracies[me]) < 2:
-                return False, False
-            acc_A = self.train_accuracies[me][-2]
-            acc_B = self.train_accuracies[me][-1]
-            drift = (acc_A - acc_B) > 0.1
-            reduced = (acc_A - acc_B) > 0
-
-            return drift, reduced
-
-
-        except Exception as e:
-            print("ks_drift_test client error")
-            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
-
-    def chi2_label_shift(self, loader_A, loader_B, alpha=0.05):
-
-        try:
-            """
-            Detecta label shift entre duas bases usando Qui-quadrado.
-            loader_A: DataLoader PyTorch (base antiga)
-            loader_B: DataLoader PyTorch (base nova)
-            """
-            # Extrair labels dos loaders
-            y_A = extract_labels(loader_A)
-            y_B = extract_labels(loader_B)
-
-            # Contagem de classes
-            freq_A = pd.Series(y_A).value_counts()
-            freq_B = pd.Series(y_B).value_counts()
-
-            contingency = pd.concat([freq_A, freq_B], axis=1).fillna(0)
-            chi2, p, _, _ = chi2_contingency(contingency.T)
-
-            # Retornar resultado
-            return (p < alpha)
-        except Exception as e:
-            print("chi2_label_shift client error")
-            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
-
     def fit(self, me, t, global_model):
         """Train the model with data of this client."""
         try:
@@ -179,18 +249,16 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             trainloader_B = self.trainloader[me]
             self.train_losses[me].append(metrics['train_loss'])
             self.train_accuracies[me].append(metrics['train_accuracy'])
-            label_shift = self.chi2_label_shift(trainloader_A, trainloader_B)
-            concept_drift, reduced = self.ks_drift_test(me)
-            drift_flag = label_shift or concept_drift
-
+            # data_shift_type = compare_loaders(trainloader_A, trainloader_B, key=self.dataset_input_map[self.dataset[me]])
+            data_shift_type = "LABEL_SHIFT" if "LABEL_SHIFT" in self.experiment_id else "CONCEPT_DRIFT"
             similarity = min(cosine_similarity(self.p_ME[me], p_old[me]), 1)
             if 1 - similarity < 0:
                 print(f"similaridade is {similarity} rodada {t}")
 
             if t in [20, 30, 40, 50, 60, 70, 80, 90]:
-                print(f"cliente #id {self.client_id} rodada {t} modelo {me} accuracies {self.train_accuracies[me]} drift label shift {label_shift} concept drift {concept_drift} reduced {reduced}")
+                print(f"cliente #id {self.client_id} rodada {t} modelo {me} accuracies {self.train_accuracies[me]} data shift type {data_shift_type}")
 
-            metrics["non_iid"] = {"fc": self.fc_ME[me], "il": self.il_ME[me], "similarity": similarity, "ps": 1 - similarity, "drift": drift_flag, "reduced": reduced}
+            metrics["non_iid"] = {"fc": self.fc_ME[me], "il": self.il_ME[me], "similarity": similarity, "ps": 1 - similarity, "data_shift_type": data_shift_type}
 
             return parameters, size, metrics
         except Exception as e:
@@ -212,12 +280,14 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             similarity_server = metrics["similarity"]
             data_heterogeneity_degree = metrics["heterogeneity_degree"]
             ps = metrics["ps"]
+            data_shift_type = metrics["data_shift_type"]
             similarity_local = cosine_similarity(self.p_ME[me], p_ME[me]) # the lower its value the lower the personalization
             a = [0.95, 0.94, 0.81]  # fc > a gw=1
             a = [0, 0, 0]  # fc > a gw=1
             b = [0.59, 0.59, 0.65]  # il < b gw=1
             # b = [1, 1, 1]  # il < b gw=1
-            c = [0.31, 0.31, 0.37]  # dh < c gw=1 # 0.43
+            c = [0.31, 0.28, 0.33]  # dh < c gw=1 # 0.43
+            c = [0.31, 0.28, 0.33]  # dh < c gw=1 # 0.43
             # c = [1, 1, 1]  # dh < c gw=1 # 0.43
             d = 0.1  # ps > d gw=1
 
@@ -261,7 +331,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 similarity = 1
                 local_model_outdated = False
             combined_model, gw, lw = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
-                                                     t=t_hat, T=self.T, nt=nt,
+                                                     t=t, T=self.T, nt=nt,
                                                      s=round(float(similarity), 2),
                                                      lt=self.lt[me],
                                                      data_shift_round=self.data_shift_round[me],
@@ -269,6 +339,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                                                      # il={'global': il, 'reference': b[me]},
                                                      dh={'global': data_heterogeneity_degree, 'reference': c[me]},
                                                      ps={'global': ps, 'reference': d},
+                                                     data_shift_type=data_shift_type,
                                                      device=self.device,
                                                      global_model_original_shape=self.model_shape_mefl[me],
                                                     return_gw_lw=True)

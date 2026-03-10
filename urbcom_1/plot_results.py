@@ -1,185 +1,186 @@
-# =====================================================
-# PLOTS COMPLETOS — BASELINE vs RAWCS (ROBUSTO)
-# =====================================================
-
 import os
-import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
 RESULTS_DIR = "results"
 
 REGIME = "realistic"
-REGIME = "severe"
-ALPHA = 0.1
 FRAC = 0.3
+ALPHA = 1.0
 
 DATASETS = ["cifar", "gtsrb"]
 
-FIGURES_DIR = f"figures/regime_{REGIME}_alpha_{ALPHA}"
-os.makedirs(FIGURES_DIR, exist_ok=True)
+# =====================================================
+# DIREÇÃO DAS MÉTRICAS
+# =====================================================
+
+METRIC_DIRECTION = {
+    "global_acc": "↑ higher is better",
+    "fairness_resource": "↓ lower is better",
+    "client_model_fairness": "↓ lower is better",
+    "client_capacity_fairness": "↑ higher is better",
+    "client_fairness_cifar": "↑ higher is better",
+    "client_fairness_gtsrb": "↑ higher is better",
+    "clients_selected_total": "↑ higher is better"
+}
 
 
 # =====================================================
-# Carregar CSV com tolerância
+# CARREGAR RESULTADOS
 # =====================================================
 
-def load_results(algorithm, dataset):
+def load_results():
 
-    if algorithm == "proposta":
-        path = os.path.join(
-            RESULTS_DIR,
-            f"{algorithm}_{dataset}_regime_{REGIME}_alpha_{ALPHA}.csv"
+    dfs = []
+
+    for dataset in DATASETS:
+
+        proposta_file = f"{RESULTS_DIR}/proposta_{dataset}_regime_{REGIME}_frac_{FRAC}_alpha_{ALPHA}.csv"
+        baseline_file = f"{RESULTS_DIR}/baseline_{dataset}_regime_{REGIME}_frac_{FRAC}_alpha_{ALPHA}.csv"
+
+        if os.path.exists(proposta_file):
+
+            df = pd.read_csv(proposta_file)
+            df["algorithm"] = "proposta"
+            dfs.append(df)
+
+        if os.path.exists(baseline_file):
+
+            df = pd.read_csv(baseline_file)
+            df["algorithm"] = "baseline"
+            dfs.append(df)
+
+    return pd.concat(dfs, ignore_index=True)
+
+
+# =====================================================
+# FUNÇÃO GENÉRICA DE PLOT
+# =====================================================
+
+def plot_metric(df, metric):
+
+    plt.figure(figsize=(6,4))
+
+    for alg in df["algorithm"].unique():
+
+        curve = (
+            df[df["algorithm"] == alg]
+            .groupby("round")[metric]
+            .mean()
         )
-    else:
-        path = os.path.join(
-            RESULTS_DIR,
-            f"{algorithm}_{dataset}_regime_{REGIME}_frac_{FRAC}_alpha_{ALPHA}.csv"
-        )
 
-    if not os.path.exists(path):
-        print(f"⚠️ Arquivo não encontrado: {path}")
-        return None
+        plt.plot(curve.index, curve.values, label=alg)
 
-    df = pd.read_csv(path)
+    direction = METRIC_DIRECTION.get(metric, "")
 
-    if df.empty:
-        print(f"⚠️ Arquivo vazio: {path}")
-        return None
-
-    return df
-
-
-# =====================================================
-# Agregação por rodada (tolerante)
-# =====================================================
-
-def aggregate_by_round(df):
-
-    if df is None:
-        return None
-
-    # Apenas colunas que existirem
-    agg_columns = {
-        "global_acc": "mean",
-        "clients_selected": "mean",
-        "clients_selected_total": "mean",
-        "viable_clients_total": "mean",
-        "viable_pairs_total": "mean",
-        "energy_consumed_round": "mean",
-        "cumulative_energy": "mean",
-        "drained_clients_round": "mean",
-        "avg_battery_remaining": "mean"
-    }
-
-    existing_columns = {
-        col: agg_columns[col]
-        for col in agg_columns
-        if col in df.columns
-    }
-
-    grouped = (
-        df.groupby("round")
-        .agg(existing_columns)
-        .reset_index()
-    )
-
-    return grouped
-
-
-# =====================================================
-# Plot tolerante a rodadas faltantes
-# =====================================================
-
-def plot_metric(baseline, rawcs, column, ylabel, title, filename):
-
-    if baseline is None and rawcs is None:
-        print(f"⚠️ Nada para plotar: {title}")
-        return
-
-    plt.figure(figsize=(8, 5))
-
-    # Determinar todas as rodadas possíveis
-    rounds = set()
-
-    if baseline is not None and column in baseline.columns:
-        rounds.update(baseline["round"])
-
-    if rawcs is not None and column in rawcs.columns:
-        rounds.update(rawcs["round"])
-
-    if not rounds:
-        print(f"⚠️ Coluna ausente em ambos: {column}")
-        return
-
-    rounds = sorted(rounds)
-
-    # Plot baseline
-    if baseline is not None and column in baseline.columns:
-        baseline_interp = (
-            baseline.set_index("round")
-            .reindex(rounds)
-        )
-        plt.plot(rounds, baseline_interp[column], label="Baseline")
-
-    # Plot rawcs
-    if rawcs is not None and column in rawcs.columns:
-        rawcs_interp = (
-            rawcs.set_index("round")
-            .reindex(rounds)
-        )
-        plt.plot(rounds, rawcs_interp[column], label="RAWCS")
-
+    plt.title(f"{metric} ({direction})")
     plt.xlabel("Round")
-    plt.ylabel(ylabel)
-    plt.title(title)
-    plt.legend()
-    plt.grid(True)
+    plt.ylabel(metric)
 
-    save_path = os.path.join(FIGURES_DIR, filename)
-    plt.savefig(save_path, dpi=300)
+    plt.legend()
+    plt.grid()
+
+    plt.tight_layout()
+
+    plt.savefig(f"results/{metric}.png")
     plt.close()
 
-    print(f"✅ Salvo: {save_path}")
+
+# =====================================================
+# PLOTS ESPECÍFICOS
+# =====================================================
+
+def plot_accuracy(df):
+
+    for dataset in DATASETS:
+
+        subset = df[df["dataset"] == dataset]
+
+        plt.figure(figsize=(6,4))
+
+        for alg in subset["algorithm"].unique():
+
+            curve = (
+                subset[subset["algorithm"] == alg]
+                .groupby("round")["global_acc"]
+                .mean()
+            )
+
+            plt.plot(curve.index, curve.values, label=alg)
+
+        direction = METRIC_DIRECTION["global_acc"]
+
+        plt.title(f"Accuracy ({dataset}) ({direction})")
+        plt.xlabel("Round")
+        plt.ylabel("Accuracy")
+
+        plt.legend()
+        plt.grid()
+
+        plt.tight_layout()
+
+        plt.savefig(f"results/accuracy_{dataset}.png")
+        plt.close()
+
+
+def plot_all_metrics(df):
+
+    metrics = [
+        "fairness_resource",
+        "client_model_fairness",
+        "client_capacity_fairness",
+        "client_fairness_cifar",
+        "client_fairness_gtsrb",
+        "clients_selected_total"
+    ]
+
+    for metric in metrics:
+        plot_metric(df, metric)
 
 
 # =====================================================
-# EXECUÇÃO
+# TABELA RESUMO
+# =====================================================
+
+def summary_table(df):
+
+    metrics = [
+        "global_acc",
+        "fairness_resource",
+        "client_model_fairness",
+        "client_capacity_fairness",
+        "client_fairness_cifar",
+        "client_fairness_gtsrb"
+    ]
+
+    summary = (
+        df.groupby(["algorithm", "dataset"])[metrics]
+        .mean()
+        .round(4)
+    )
+
+    print("\n===== MÉDIAS FINAIS =====\n")
+    print(summary)
+
+    summary.to_csv("results/summary_comparison.csv")
+
+
+# =====================================================
+# MAIN
 # =====================================================
 
 def main():
 
-    for dataset in DATASETS:
+    df = load_results()
 
-        print(f"\n📊 Gerando gráficos para {dataset.upper()}")
+    summary_table(df)
 
-        baseline_df = load_results("baseline", dataset)
-        rawcs_df = load_results("proposta", dataset)
+    plot_accuracy(df)
 
-        baseline_agg = aggregate_by_round(baseline_df)
-        rawcs_agg = aggregate_by_round(rawcs_df)
+    plot_all_metrics(df)
 
-        metrics = [
-            ("global_acc", "Accuracy", "accuracy"),
-            ("clients_selected", "Clients Selected", "clients_selected"),
-            ("viable_clients_total", "Viable Clients", "viable_clients"),
-            ("viable_pairs_total", "Viable Pairs", "viable_pairs"),
-            ("drained_clients_round", "Drained Clients", "drained_clients"),
-            ("energy_consumed_round", "Energy per Round", "energy_per_round"),
-            ("cumulative_energy", "Cumulative Energy", "cumulative_energy"),
-            ("avg_battery_remaining", "Average Battery", "avg_battery")
-        ]
-
-        for column, ylabel, fname in metrics:
-
-            plot_metric(
-                baseline_agg,
-                rawcs_agg,
-                column,
-                ylabel,
-                f"{ylabel} per Round — {dataset.upper()}",
-                f"{dataset}_{fname}.png"
-            )
+    print("\n✔ Análise concluída.")
+    print("Gráficos salvos em /results")
 
 
 if __name__ == "__main__":

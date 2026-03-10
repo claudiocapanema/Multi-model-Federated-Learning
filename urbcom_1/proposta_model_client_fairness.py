@@ -28,15 +28,6 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # ORÇAMENTOS DE RECURSOS POR RODADA
 # =====================================================
 
-B_TIME = 40.0       # segundos totais permitidos na rodada
-B_BYTES = 5e7       # bytes totais transmitidos
-B_ENERGY = 5.0      # joules totais
-
-MODEL_BYTES = {
-    "cifar": 1.2e6,   # bytes transmitidos
-    "gtsrb": 1.4e6
-}
-
 BASE_SEED = 42
 NUM_FOLDS = 1
 NUM_CLIENTS = 40
@@ -63,11 +54,12 @@ MODEL_COST = {
 # FAIR RESOURCE BUDGET
 # =====================================================
 
-BASE_CLIENTS = K_CLIENTS // 2
-
 LIGHT_MODEL = min(MODEL_COST, key=MODEL_COST.get)
 
-FAIR_RESOURCE_BUDGET = BASE_CLIENTS * MODEL_COST[LIGHT_MODEL]
+# permitir aproximadamente K_CLIENTS treinamentos por rodada
+avg_speed = 0.65
+
+FAIR_RESOURCE_BUDGET = K_CLIENTS * MODEL_COST[LIGHT_MODEL] / avg_speed
 
 Path("results/").mkdir(parents=True, exist_ok=True)
 
@@ -127,66 +119,32 @@ def get_regime(name: str):
     regimes = {
 
         "benign": {
-            "battery_init": (0.8, 1.0),
-            "compute": (0.6, 1.0),
-            "link": (0.6, 1.0),
-            "BATTERY_DECAY": 0.07,
-            "TIME_MAX": 3.0,
-            "LINK_MIN": 0.3,
+            "TIME_MAX": 3.0
         },
 
         "realistic": {
-            "battery_init": (0.6, 1.0),
-            "compute": (0.3, 1.0),
-            "link": (0.0, 1.0),
-            "BATTERY_DECAY": 0.09,
-            "TIME_MAX": 2.5,
-            "LINK_MIN": 0.3,
+            "TIME_MAX": 2.5
         },
 
         "severe": {
-            "battery_init": (0.4, 0.8),
-            "compute": (0.2, 0.6),
-            "link": (0.0, 0.6),
-            "BATTERY_DECAY": 0.1,
-            "TIME_MAX": 2.0,
-            "LINK_MIN": 0.4,
+            "TIME_MAX": 2.0
         }
     }
 
     return regimes[name]
 
-def estimate_comm_bytes(cid, model_name):
-
-    link_quality = client_resources[cid]["link"]
-
-    # link ruim gera overhead
-    overhead = 1.0 + (1.0 - link_quality)
-
-    return MODEL_BYTES[model_name] * overhead
-
-def estimate_resource_cost(cid, model_name):
-
-    train_time = estimate_training_time(cid, model_name)
-    bytes_tx = estimate_comm_bytes(cid, model_name)
-    energy = train_time * BATTERY_DECAY
-
-    return train_time, bytes_tx, energy
-
 def apply_regime(name: str):
 
-    global BATTERY_DECAY, TIME_MAX, LINK_MIN, current_regime
+    global TIME_MAX, current_regime
 
     current_regime = get_regime(name)
 
-    BATTERY_DECAY = current_regime["BATTERY_DECAY"]
     TIME_MAX = current_regime["TIME_MAX"]
-    LINK_MIN = current_regime["LINK_MIN"]
 
     for cid in range(NUM_CLIENTS):
-        client_resources[cid]["battery"] = np.random.uniform(*current_regime["battery_init"])
-        client_resources[cid]["compute"] = np.random.uniform(*current_regime["compute"])
-        client_resources[cid]["link"] = np.random.uniform(*current_regime["link"])
+
+        # heterogeneidade computacional
+        client_resources[cid]["speed"] = np.random.uniform(0.3, 1.0)
 
     print(f"🧪 Regime aplicado: {name.upper()}")
 
@@ -195,33 +153,13 @@ def apply_regime(name: str):
 # =====================================================
 
 def estimate_training_time(cid, model_name):
-    return MODEL_COST[model_name] / client_resources[cid]["compute"]
 
+    speed = client_resources[cid]["speed"]
 
-def consume_battery(cid, train_time):
-    energy_spent = train_time * BATTERY_DECAY
+    # tempo heterogêneo baseado na capacidade do cliente
+    train_time = MODEL_COST[model_name] / speed
 
-    client_resources[cid]["battery"] -= energy_spent
-    client_resources[cid]["battery"] = max(client_resources[cid]["battery"], 0.0)
-
-    return energy_spent
-
-
-def update_link(cid):
-    low, high = current_regime["link"]
-    client_resources[cid]["link"] = np.random.uniform(low, high)
-
-
-def R(cid, model_name):
-
-    train_time = estimate_training_time(cid, model_name)
-    battery_after = client_resources[cid]["battery"] - train_time * BATTERY_DECAY
-
-    return (
-        battery_after > 0 and
-        train_time <= TIME_MAX and
-        client_resources[cid]["link"] >= LINK_MIN
-    )
+    return train_time
 
 # =====================================================
 # RESET DO ESTADO GLOBAL (POR FOLD)
@@ -251,9 +189,7 @@ def reset_experiment_state():
     # -------- Recursos --------
     client_resources = {
         cid: {
-            "battery": np.random.uniform(0.6, 1.0),
-            "compute": np.random.uniform(0.3, 1.0),
-            "link": 1.0
+            "speed": np.random.uniform(0.3, 1.0)
         }
         for cid in range(NUM_CLIENTS)
     }
@@ -288,23 +224,19 @@ def reset_experiment_state():
     # -------- Logs --------
     proposta_logs = {
         "clients_per_model": [],
-        "energy_consumed_round": [],
-        "cumulative_energy": [],
-        "drained_clients_round": [],
-        "avg_battery_remaining": [],
 
-        # model resource usage
         "resource_usage_cifar": [],
         "resource_usage_gtsrb": [],
 
-        # fairness entre modelos (global)
         "fairness_resource": [],
         "jain_fairness": [],
-        "rag": [],
+
+        "client_model_fairness": [],
+        "client_capacity_fairness": [],
 
         # NOVO
-        "client_model_fairness": [],
-        "client_capacity_fairness": []
+        "client_fairness_cifar": [],
+        "client_fairness_gtsrb": []
     }
 
 # =====================================================
@@ -491,6 +423,8 @@ def run_experiment():
         # Rodadas
         # -------------------------------------------------
 
+
+
         for rnd in range(1, ROUNDS + 1):
 
             round_seed = fold_seed + rnd
@@ -498,79 +432,144 @@ def run_experiment():
             np.random.seed(round_seed)
             torch.manual_seed(round_seed)
 
-            energy_this_round = 0.0
-
-            print(f"\n🔄 FOLD {fold} | RODADA {rnd}")
-
-            for cid in range(NUM_CLIENTS):
-                update_link(cid)
-
-            real_training_counter = {m: 0 for m in global_models}
-
             # =====================================================
-            # 1) Seleção Aleatória de Clientes (proposta)
+            # containers de updates dos modelos
             # =====================================================
-
-            # =====================================================
-            # proposta MULTIFEDAVG
-            # Seleção aleatória sem fairness
-            # =====================================================
-
-            model_usage = {
-                "cifar": {"time": 0.0, "bytes": 0.0, "energy": 0.0},
-                "gtsrb": {"time": 0.0, "bytes": 0.0, "energy": 0.0}
-            }
-
-            # =====================================================
-            # 1) Seleção FAIR baseada em orçamento de recursos
-            # =====================================================
-
-            clients_cifar = []
-            clients_gtsrb = []
-
-            budget_cifar = 0.0
-            budget_gtsrb = 0.0
-
-            all_clients = list(range(NUM_CLIENTS))
-            random.shuffle(all_clients)
-
-            # ---------------------------
-            # CIFAR
-            # ---------------------------
-
-            remaining_clients = []
-
-            for cid in all_clients:
-
-                cost = MODEL_COST["cifar"]
-
-                if budget_cifar + cost <= FAIR_RESOURCE_BUDGET:
-                    clients_cifar.append(cid)
-                    budget_cifar += cost
-                else:
-                    remaining_clients.append(cid)
-
-            # ---------------------------
-            # GTSRB
-            # ---------------------------
-
-            for cid in remaining_clients:
-
-                cost = MODEL_COST["gtsrb"]
-
-                if budget_gtsrb + cost <= FAIR_RESOURCE_BUDGET:
-                    clients_gtsrb.append(cid)
-                    budget_gtsrb += cost
 
             model_updates = {
                 "cifar": [],
                 "gtsrb": []
             }
 
-            real_training_counter = {
-                "cifar": 0,
-                "gtsrb": 0
+            energy_this_round = 0.0
+
+            print(f"\n🔄 FOLD {fold} | RODADA {rnd}")
+
+            real_training_counter = {m: 0 for m in global_models}
+
+            # =====================================================
+            # 1) Balanced Resource Selection + Client Fairness
+            # =====================================================
+
+            clients_cifar = []
+            clients_gtsrb = []
+
+            resource_usage = {
+                "cifar": 0.0,
+                "gtsrb": 0.0
             }
+
+            all_clients = list(range(NUM_CLIENTS))
+            random.shuffle(all_clients)
+
+            LAMBDA_MODEL = 0.2  # fairness dentro do modelo
+            LAMBDA_TOTAL = 0.1  # fairness global entre clientes
+
+            # =====================================================
+            # NORMALIZAÇÃO DE USO DE CLIENTES
+            # =====================================================
+
+            max_model_usage = {
+                "cifar": max(client_resource_usage[c]["cifar"] for c in range(NUM_CLIENTS)),
+                "gtsrb": max(client_resource_usage[c]["gtsrb"] for c in range(NUM_CLIENTS))
+            }
+
+            max_total_usage = max(
+                client_resource_usage[c]["cifar"] + client_resource_usage[c]["gtsrb"]
+                for c in range(NUM_CLIENTS)
+            )
+
+            # evitar divisão por zero
+            for m in max_model_usage:
+                if max_model_usage[m] == 0:
+                    max_model_usage[m] = 1.0
+
+            if max_total_usage == 0:
+                max_total_usage = 1.0
+
+            for cid in all_clients:
+
+                candidates = []
+
+                total_usage = (
+                        client_resource_usage[cid]["cifar"] +
+                        client_resource_usage[cid]["gtsrb"]
+                )
+
+                # -------------------------------------------------
+                # CIFAR
+                # -------------------------------------------------
+
+                train_time = estimate_training_time(cid, "cifar")
+
+                if (
+                        resource_usage["cifar"] + train_time <= FAIR_RESOURCE_BUDGET
+                ):
+
+                    new_usage = resource_usage["cifar"] + train_time
+                    other_usage = resource_usage["gtsrb"]
+
+                    total = new_usage + other_usage
+
+                    if total > 0:
+                        imbalance = abs(new_usage - other_usage) / total
+                    else:
+                        imbalance = 0.0
+
+                    model_usage = client_resource_usage[cid]["cifar"] / max_model_usage["cifar"]
+                    total_usage_norm = total_usage / max_total_usage
+
+                    score = (
+                            imbalance
+                            + LAMBDA_MODEL * model_usage
+                            + LAMBDA_TOTAL * total_usage_norm
+                    )
+
+                    candidates.append(("cifar", score))
+
+                # -------------------------------------------------
+                # GTSRB
+                # -------------------------------------------------
+
+                train_time = estimate_training_time(cid, "gtsrb")
+
+                if (
+                        resource_usage["gtsrb"] + train_time <= FAIR_RESOURCE_BUDGET
+                ):
+
+                    new_usage = resource_usage["gtsrb"] + train_time
+                    other_usage = resource_usage["cifar"]
+
+                    total = new_usage + other_usage
+
+                    if total > 0:
+                        imbalance = abs(new_usage - other_usage) / total
+                    else:
+                        imbalance = 0.0
+
+                    model_usage = client_resource_usage[cid]["gtsrb"] / max_model_usage["gtsrb"]
+                    total_usage_norm = total_usage / max_total_usage
+
+                    score = (
+                            imbalance
+                            + LAMBDA_MODEL * model_usage
+                            + LAMBDA_TOTAL * total_usage_norm
+                    )
+
+                    candidates.append(("gtsrb", score))
+
+                if not candidates:
+                    continue
+
+                chosen_model = min(candidates, key=lambda x: x[1])[0]
+
+                if chosen_model == "cifar":
+                    clients_cifar.append(cid)
+                else:
+                    clients_gtsrb.append(cid)
+
+                train_time = estimate_training_time(cid, chosen_model)
+                resource_usage[chosen_model] += train_time
 
             # =====================================================
             # 2) Treino CIFAR (proposta puro)
@@ -578,8 +577,6 @@ def run_experiment():
 
             for cid in clients_cifar:
                 train_time = estimate_training_time(cid, "cifar")
-                bytes_tx = estimate_comm_bytes(cid, "cifar")
-                energy = train_time * BATTERY_DECAY
 
                 local_model = copy.deepcopy(global_models["cifar"])
 
@@ -594,13 +591,7 @@ def run_experiment():
                 model_updates["cifar"].append((state_dict, n_samples))
                 real_training_counter["cifar"] += 1
 
-                model_usage["cifar"]["time"] += train_time
                 client_resource_usage[cid]["cifar"] += train_time
-                model_usage["cifar"]["bytes"] += bytes_tx
-                model_usage["cifar"]["energy"] += energy
-
-                energy_spent = consume_battery(cid, train_time)
-                energy_this_round += energy_spent
 
                 acc = evaluate_model(
                     local_model,
@@ -617,8 +608,6 @@ def run_experiment():
 
             for cid in clients_gtsrb:
                 train_time = estimate_training_time(cid, "gtsrb")
-                bytes_tx = estimate_comm_bytes(cid, "gtsrb")
-                energy = train_time * BATTERY_DECAY
 
                 local_model = copy.deepcopy(global_models["gtsrb"])
 
@@ -633,13 +622,7 @@ def run_experiment():
                 model_updates["gtsrb"].append((state_dict, n_samples))
                 real_training_counter["gtsrb"] += 1
 
-                model_usage["gtsrb"]["time"] += train_time
                 client_resource_usage[cid]["gtsrb"] += train_time
-                model_usage["gtsrb"]["bytes"] += bytes_tx
-                model_usage["gtsrb"]["energy"] += energy
-
-                energy_spent = consume_battery(cid, train_time)
-                energy_this_round += energy_spent
 
                 acc = evaluate_model(
                     local_model,
@@ -659,28 +642,19 @@ def run_experiment():
                     new_state = fedavg(updates)
                     global_models[model_name].load_state_dict(new_state)
 
-            # -------------------------------------------------
-            # MÉTRICAS ENERGÉTICAS
-            # -------------------------------------------------
+            # =====================================================
+            # FAIRNESS baseada em custo teórico
+            # =====================================================
 
-            cumulative_energy += energy_this_round
-
-            drained_clients = sum(
-                1 for cid in range(NUM_CLIENTS)
-                if client_resources[cid]["battery"] <= 0.0
+            resource_cifar = sum(
+                estimate_training_time(cid, "cifar")
+                for cid in clients_cifar
             )
 
-            avg_battery_remaining = np.mean([
-                client_resources[cid]["battery"]
-                for cid in range(NUM_CLIENTS)
-            ])
-
-            # =====================================================
-            # FAIRNESS DE USO DE RECURSOS
-            # =====================================================
-
-            resource_cifar = model_usage["cifar"]["time"]
-            resource_gtsrb = model_usage["gtsrb"]["time"]
+            resource_gtsrb = sum(
+                estimate_training_time(cid, "gtsrb")
+                for cid in clients_gtsrb
+            )
 
             total_resource = resource_cifar + resource_gtsrb
 
@@ -692,7 +666,7 @@ def run_experiment():
             if total_resource > 0:
                 fairness_resource = abs(resource_cifar - resource_gtsrb) / total_resource
             else:
-                fairness_resource = 0.0
+                fairness_resource = 1.0
 
             # -------------------------------------------------
             # 2) Jain Fairness Index
@@ -705,17 +679,8 @@ def run_experiment():
                 jain_fairness = (total_resource ** 2) / den
             else:
                 jain_fairness = 1.0
-
-            # -------------------------------------------------
-            # 3) Resource Allocation Gap (RAG)
-            # menor = melhor
-            # -------------------------------------------------
-
-            target = total_resource / 2
-
-            rag = abs(resource_cifar - target) + abs(resource_gtsrb - target)
             # =====================================================
-            # CLIENT MODEL FAIRNESS
+            # CLIENT MODEL FAIRNESS (custo teórico)
             # =====================================================
 
             client_model_errors = []
@@ -737,6 +702,33 @@ def run_experiment():
                 client_model_fairness = 0.0
 
             # =====================================================
+            # PER-MODEL CLIENT FAIRNESS
+            # =====================================================
+
+            usage_cifar = [
+                client_resource_usage[cid]["cifar"]
+                for cid in range(NUM_CLIENTS)
+            ]
+
+            usage_gtsrb = [
+                client_resource_usage[cid]["gtsrb"]
+                for cid in range(NUM_CLIENTS)
+            ]
+
+            def jain_index(values):
+
+                s = sum(values)
+                sq = sum(v * v for v in values)
+
+                if sq == 0:
+                    return 1.0
+
+                return (s * s) / (NUM_CLIENTS * sq)
+
+            client_fairness_cifar = jain_index(usage_cifar)
+            client_fairness_gtsrb = jain_index(usage_gtsrb)
+
+            # =====================================================
             # CLIENT CAPACITY FAIRNESS
             # =====================================================
 
@@ -744,20 +736,20 @@ def run_experiment():
 
             for cid in range(NUM_CLIENTS):
 
-                total_resource = (
-                    client_resource_usage[cid]["cifar"] +
-                    client_resource_usage[cid]["gtsrb"]
+                capacity = client_resources[cid]["speed"]
+
+                resource = (
+                        client_resource_usage[cid]["cifar"] +
+                        client_resource_usage[cid]["gtsrb"]
                 )
 
-                capacity = client_resources[cid]["compute"]
-
                 if capacity > 0:
-                    utilization.append(total_resource / capacity)
+                    utilization.append(resource / capacity)
 
             if len(utilization) > 0:
 
                 num = (sum(utilization) ** 2)
-                den = len(utilization) * sum(u ** 2 for u in utilization)
+                den = NUM_CLIENTS * sum(u ** 2 for u in utilization)
 
                 if den > 0:
                     client_capacity_fairness = num / den
@@ -767,38 +759,24 @@ def run_experiment():
                 client_capacity_fairness = 1.0
 
             # -------------------------------------------------
-            # MÉTRICAS ENERGÉTICAS
-            # -------------------------------------------------
-
-            cumulative_energy += energy_this_round
-
-            drained_clients = sum(
-                1 for cid in range(NUM_CLIENTS)
-                if client_resources[cid]["battery"] <= 0.0
-            )
-
-            avg_battery_remaining = np.mean([
-                client_resources[cid]["battery"]
-                for cid in range(NUM_CLIENTS)
-            ])
-
-            proposta_logs["energy_consumed_round"].append(energy_this_round)
-            proposta_logs["cumulative_energy"].append(cumulative_energy)
-            proposta_logs["drained_clients_round"].append(drained_clients)
-            proposta_logs["avg_battery_remaining"].append(avg_battery_remaining)
-
-            # -------------------------------------------------
             # salvar métricas
             # -------------------------------------------------
 
-            proposta_logs["resource_usage_cifar"].append(resource_cifar)
-            proposta_logs["resource_usage_gtsrb"].append(resource_gtsrb)
+            proposta_logs["resource_usage_cifar"].append(
+                real_training_counter["cifar"] * MODEL_COST["cifar"]
+            )
+
+            proposta_logs["resource_usage_gtsrb"].append(
+                real_training_counter["gtsrb"] * MODEL_COST["gtsrb"]
+            )
 
             proposta_logs["fairness_resource"].append(fairness_resource)
             proposta_logs["jain_fairness"].append(jain_fairness)
-            proposta_logs["rag"].append(rag)
             proposta_logs["client_model_fairness"].append(client_model_fairness)
             proposta_logs["client_capacity_fairness"].append(client_capacity_fairness)
+
+            proposta_logs["client_fairness_cifar"].append(client_fairness_cifar)
+            proposta_logs["client_fairness_gtsrb"].append(client_fairness_gtsrb)
 
             # 4) Avaliação global
             for model_name, model in global_models.items():
@@ -829,6 +807,9 @@ def run_experiment():
                     "dataset": model_name,
                     "global_acc": global_acc,
 
+                    "clients_cifar": real_training_counter["cifar"],
+                    "clients_gtsrb": real_training_counter["gtsrb"],
+
                     "clients_selected": real_training_counter[model_name],
                     "clients_selected_total": sum(real_training_counter.values()),
 
@@ -837,16 +818,14 @@ def run_experiment():
                     "resource_usage_gtsrb": proposta_logs["resource_usage_gtsrb"][-1],
 
                     # fairness metrics
+                    "client_fairness_cifar": proposta_logs["client_fairness_cifar"][-1],
+                    "client_fairness_gtsrb": proposta_logs["client_fairness_gtsrb"][-1],
+
+
                     "fairness_resource": proposta_logs["fairness_resource"][-1],
                     "jain_fairness": proposta_logs["jain_fairness"][-1],
-                    "rag": proposta_logs["rag"][-1],
                     "client_model_fairness": proposta_logs["client_model_fairness"][-1],
                     "client_capacity_fairness": proposta_logs["client_capacity_fairness"][-1],
-
-                    "energy_consumed_round": proposta_logs["energy_consumed_round"][-1],
-                    "cumulative_energy": proposta_logs["cumulative_energy"][-1],
-                    "drained_clients_round": proposta_logs["drained_clients_round"][-1],
-                    "avg_battery_remaining": proposta_logs["avg_battery_remaining"][-1],
                 }
 
                 filename = f"results/proposta_{model_name}_regime_{regime}_frac_{FRAC}_alpha_{DIRICHLET_ALPHA}.csv"

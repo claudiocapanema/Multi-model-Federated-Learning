@@ -33,6 +33,7 @@ class MultiFedAvgClient:
             random.seed(id + self.fold_id)
             np.random.seed(id + self.fold_id)
             torch.manual_seed(id + self.fold_id)
+            self.dataset = args.dataset
             self.batch_size = []
             for dataset in args.dataset:
                 self.batch_size.append({"CIFAR10": 32, "WISDM-W": 64, "ImageNet10": 10, "Gowalla": 64, "wikitext": 256, "Foursquare": 512}[dataset])
