@@ -287,7 +287,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             b = [0.59, 0.59, 0.65]  # il < b gw=1
             # b = [1, 1, 1]  # il < b gw=1
             c = [0.31, 0.28, 0.33]  # dh < c gw=1 # 0.43
-            c = [0.31, 0.28, 0.33]  # dh < c gw=1 # 0.43
+            c = [0.31, 0.32, 0.39]  # dh < c gw=1 # 0.43
             # c = [1, 1, 1]  # dh < c gw=1 # 0.43
             d = 0.1  # ps > d gw=1
 
