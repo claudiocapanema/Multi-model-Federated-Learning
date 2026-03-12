@@ -63,6 +63,7 @@ def read_data(read_solutions, read_dataset_order):
         "MultiFedAvg+FP": {"Strategy": "MultiFedAvg", "Version": "FP", "Table": "MultiFedAvg+FP"},
         "DMA-FL": {"Strategy": "DMA-FL", "Version": "Original", "Table": "DMA-FL"},
         "AdaptiveFedAvg": {"Strategy": "AdaptiveFedAvg", "Version": "Original", "Table": "AdaptiveFedAvg"},
+        "MultiFedAvgRR": {"Strategy": "MultiFedAvgRR", "Version": "Original", "Table": "MultiFedAvgRR"},
         "MultiFedAvg": {"Strategy": "MultiFedAvg", "Version": "Original", "Table": "MultiFedAvg"},
     }
 
@@ -332,6 +333,7 @@ def generate_rich_heatmaps(df, metric, output_path, baseline="MultiFedAvg"):
             "MultiFedAvg+FP": "FP",
             "DMA-FL": "DMA-FL",
             "AdaptiveFedAvg": "AdaptiveFedAvg",
+            "MultiFedAvgRR": "MultiFedAvgRR",
             "MultiFedAvg": "MultiFedAvg"
         }
 
@@ -441,7 +443,7 @@ def generate_rich_heatmaps(df, metric, output_path, baseline="MultiFedAvg"):
         # Ajustes finos de fonte
         size = 18
         ax.set_xticklabels(x_labels, rotation=0, fontsize=size)
-        ax.set_yticklabels(short_solutions, rotation=0, fontsize=size)
+        ax.set_yticklabels(short_solutions, rotation=0, fontsize=size, ha="right", rotation_mode="anchor")
 
         plt.xlabel("Label Shift Transition (α₁→α₂)", fontsize=size)
         plt.ylabel("")  # removido para ganhar espaço
@@ -532,6 +534,7 @@ def generate_summary_table(df_gain, metric, output_path, baseline="MultiFedAvg")
         "MultiFedAvg+FP": "FP",
         "DMA-FL": "DMA-FL",
         # "AdaptiveFedAvg": "AdaptiveFedAvg",
+        "MultiFedAvgRR": "MultiFedAvgRR",
         "MultiFedAvg": "MultiFedAvg"
     }
 
@@ -724,10 +727,10 @@ if __name__ == "__main__":
         # "MultiFedAvg+MFP_v2_dh",
         # "MultiFedAvg+MFP_v2_iti",
         # "MultiFedAvg+MFP",
-        "MultiFedAvg+FPD",
+        # "MultiFedAvg+FPD",
         "MultiFedAvg+FP",
-        # "DMA-FL",
-        # "AdaptiveFedAvg",
+        "DMA-FL",
+        "MultiFedAvgRR",
         "MultiFedAvg"
     ]
 

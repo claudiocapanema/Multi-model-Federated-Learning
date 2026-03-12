@@ -222,21 +222,18 @@ def reset_experiment_state():
     }
 
     # -------- Logs --------
+    # -------- Logs --------
     proposta_logs = {
         "clients_per_model": [],
 
         "resource_usage_cifar": [],
         "resource_usage_gtsrb": [],
 
+        # fairness entre modelos
         "fairness_resource": [],
-        "jain_fairness": [],
 
-        "client_model_fairness": [],
-        "client_capacity_fairness": [],
-
-        # NOVO
-        "client_fairness_cifar": [],
-        "client_fairness_gtsrb": []
+        # fairness considerando capacidade dos clientes
+        "client_capacity_fairness": []
     }
 
 # =====================================================
@@ -462,8 +459,8 @@ def run_experiment():
             all_clients = list(range(NUM_CLIENTS))
             random.shuffle(all_clients)
 
-            LAMBDA_MODEL = 0.2  # fairness dentro do modelo
-            LAMBDA_TOTAL = 0.1  # fairness global entre clientes
+            # peso do fairness considerando capacidade
+            LAMBDA_CAPACITY = 0.3
 
             # =====================================================
             # NORMALIZAÇÃO DE USO DE CLIENTES
@@ -519,10 +516,11 @@ def run_experiment():
                     model_usage = client_resource_usage[cid]["cifar"] / max_model_usage["cifar"]
                     total_usage_norm = total_usage / max_total_usage
 
+                    capacity_penalty = total_usage_norm
+
                     score = (
                             imbalance
-                            + LAMBDA_MODEL * model_usage
-                            + LAMBDA_TOTAL * total_usage_norm
+                            + LAMBDA_CAPACITY * capacity_penalty
                     )
 
                     candidates.append(("cifar", score))
@@ -550,10 +548,11 @@ def run_experiment():
                     model_usage = client_resource_usage[cid]["gtsrb"] / max_model_usage["gtsrb"]
                     total_usage_norm = total_usage / max_total_usage
 
+                    capacity_penalty = total_usage_norm
+
                     score = (
                             imbalance
-                            + LAMBDA_MODEL * model_usage
-                            + LAMBDA_TOTAL * total_usage_norm
+                            + LAMBDA_CAPACITY * capacity_penalty
                     )
 
                     candidates.append(("gtsrb", score))
@@ -668,66 +667,6 @@ def run_experiment():
             else:
                 fairness_resource = 1.0
 
-            # -------------------------------------------------
-            # 2) Jain Fairness Index
-            # maior = melhor
-            # -------------------------------------------------
-
-            den = 2 * (resource_cifar ** 2 + resource_gtsrb ** 2)
-
-            if den > 0:
-                jain_fairness = (total_resource ** 2) / den
-            else:
-                jain_fairness = 1.0
-            # =====================================================
-            # CLIENT MODEL FAIRNESS (custo teórico)
-            # =====================================================
-
-            client_model_errors = []
-
-            for cid in range(NUM_CLIENTS):
-
-                r_cifar = client_resource_usage[cid]["cifar"]
-                r_gtsrb = client_resource_usage[cid]["gtsrb"]
-
-                total = r_cifar + r_gtsrb
-
-                if total > 0:
-                    error = abs(r_cifar - r_gtsrb) / total
-                    client_model_errors.append(error)
-
-            if len(client_model_errors) > 0:
-                client_model_fairness = np.mean(client_model_errors)
-            else:
-                client_model_fairness = 0.0
-
-            # =====================================================
-            # PER-MODEL CLIENT FAIRNESS
-            # =====================================================
-
-            usage_cifar = [
-                client_resource_usage[cid]["cifar"]
-                for cid in range(NUM_CLIENTS)
-            ]
-
-            usage_gtsrb = [
-                client_resource_usage[cid]["gtsrb"]
-                for cid in range(NUM_CLIENTS)
-            ]
-
-            def jain_index(values):
-
-                s = sum(values)
-                sq = sum(v * v for v in values)
-
-                if sq == 0:
-                    return 1.0
-
-                return (s * s) / (NUM_CLIENTS * sq)
-
-            client_fairness_cifar = jain_index(usage_cifar)
-            client_fairness_gtsrb = jain_index(usage_gtsrb)
-
             # =====================================================
             # CLIENT CAPACITY FAIRNESS
             # =====================================================
@@ -770,13 +709,11 @@ def run_experiment():
                 real_training_counter["gtsrb"] * MODEL_COST["gtsrb"]
             )
 
+            # fairness entre modelos
             proposta_logs["fairness_resource"].append(fairness_resource)
-            proposta_logs["jain_fairness"].append(jain_fairness)
-            proposta_logs["client_model_fairness"].append(client_model_fairness)
-            proposta_logs["client_capacity_fairness"].append(client_capacity_fairness)
 
-            proposta_logs["client_fairness_cifar"].append(client_fairness_cifar)
-            proposta_logs["client_fairness_gtsrb"].append(client_fairness_gtsrb)
+            # fairness considerando capacidade dos clientes
+            proposta_logs["client_capacity_fairness"].append(client_capacity_fairness)
 
             # 4) Avaliação global
             for model_name, model in global_models.items():
@@ -818,13 +755,7 @@ def run_experiment():
                     "resource_usage_gtsrb": proposta_logs["resource_usage_gtsrb"][-1],
 
                     # fairness metrics
-                    "client_fairness_cifar": proposta_logs["client_fairness_cifar"][-1],
-                    "client_fairness_gtsrb": proposta_logs["client_fairness_gtsrb"][-1],
-
-
                     "fairness_resource": proposta_logs["fairness_resource"][-1],
-                    "jain_fairness": proposta_logs["jain_fairness"][-1],
-                    "client_model_fairness": proposta_logs["client_model_fairness"][-1],
                     "client_capacity_fairness": proposta_logs["client_capacity_fairness"][-1],
                 }
 

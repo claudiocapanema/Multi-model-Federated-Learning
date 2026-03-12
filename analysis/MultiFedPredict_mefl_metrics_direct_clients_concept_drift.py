@@ -259,8 +259,7 @@ def bar_ps(df, base_dir, x, y_list, hue=None, style=None, ci=None, hue_order=Non
 if __name__ == "__main__":
     total_clients = 40
     alphas = [0.1, 1.0, 10.0]
-    dataset = ["ImageNet10", "WISDM-W", "wikitext"]
-    dataset = ["ImageNet10", "WISDM-W", "Foursquare"]
+    dataset = ["WISDM-W", "ImageNet10", "Foursquare"]
     # dataset = ["WISDM-W"]
     write_path = f"plots/MEFL/clients_{total_clients}_datasets_{dataset}_alphas_{alphas}/"
 

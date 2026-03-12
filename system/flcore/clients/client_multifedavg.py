@@ -49,7 +49,7 @@ class MultiFedAvgClient:
                             "ImageNet_v2": 0.01,
                             "Gowalla": 0.001,
                             "wikitext": 0.001,
-                            "Foursquare": 1e-3}
+                            "Foursquare": 0.001}
             self.model = model
             self.alpha_train = [float(i) for i in args.alpha]
             self.alpha_test = [float(i) for i in args.alpha]

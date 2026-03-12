@@ -312,7 +312,7 @@ if __name__ == "__main__":
         "MultiFedAvg"
     ]
 
-    write_path = "plots/MEFL/multi_experiments/"
+    write_path = f"plots/MEFL/multi_experiments/analysis/rounds_{number_of_rounds}/"
 
     df = read_data_multi_experiments(
         experiment_ids,

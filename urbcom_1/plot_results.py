@@ -17,11 +17,10 @@ DATASETS = ["cifar", "gtsrb"]
 METRIC_DIRECTION = {
     "global_acc": "↑ higher is better",
     "fairness_resource": "↓ lower is better",
-    "client_model_fairness": "↓ lower is better",
     "client_capacity_fairness": "↑ higher is better",
-    "client_fairness_cifar": "↑ higher is better",
-    "client_fairness_gtsrb": "↑ higher is better",
-    "clients_selected_total": "↑ higher is better"
+    "clients_selected_total": "↑ higher is better",
+    "resource_usage_cifar": "resource usage",
+    "resource_usage_gtsrb": "resource usage"
 }
 
 
@@ -82,12 +81,12 @@ def plot_metric(df, metric):
 
     plt.tight_layout()
 
-    plt.savefig(f"results/{metric}.png")
+    plt.savefig(f"{RESULTS_DIR}/{metric}.png")
     plt.close()
 
 
 # =====================================================
-# PLOTS ESPECÍFICOS
+# PLOT DE ACURÁCIA
 # =====================================================
 
 def plot_accuracy(df):
@@ -119,23 +118,109 @@ def plot_accuracy(df):
 
         plt.tight_layout()
 
-        plt.savefig(f"results/accuracy_{dataset}.png")
+        plt.savefig(f"{RESULTS_DIR}/accuracy_{dataset}.png")
         plt.close()
 
+
+# =====================================================
+# PLOTS DE RECURSO POR MODELO
+# =====================================================
+
+def plot_resource_usage(df):
+
+    metrics = ["resource_usage_cifar", "resource_usage_gtsrb"]
+
+    for metric in metrics:
+
+        plt.figure(figsize=(6,4))
+
+        for alg in df["algorithm"].unique():
+
+            curve = (
+                df[df["algorithm"] == alg]
+                .groupby("round")[metric]
+                .mean()
+            )
+
+            plt.plot(curve.index, curve.values, label=alg)
+
+        plt.title(metric)
+        plt.xlabel("Round")
+        plt.ylabel(metric)
+
+        plt.legend()
+        plt.grid()
+
+        plt.tight_layout()
+
+        plt.savefig(f"{RESULTS_DIR}/{metric}.png")
+        plt.close()
+
+
+# =====================================================
+# PLOTS PRINCIPAIS
+# =====================================================
 
 def plot_all_metrics(df):
 
     metrics = [
         "fairness_resource",
-        "client_model_fairness",
         "client_capacity_fairness",
-        "client_fairness_cifar",
-        "client_fairness_gtsrb",
         "clients_selected_total"
     ]
 
     for metric in metrics:
         plot_metric(df, metric)
+
+# =====================================================
+# ACCURACY vs RESOURCE USAGE
+# =====================================================
+
+def plot_accuracy_vs_resource(df):
+
+    for dataset in DATASETS:
+
+        subset = df[df["dataset"] == dataset]
+
+        plt.figure(figsize=(6,4))
+
+        for alg in subset["algorithm"].unique():
+
+            alg_df = subset[subset["algorithm"] == alg].copy()
+
+            # recurso acumulado ao longo das rodadas
+            resource = (
+                alg_df["resource_usage_cifar"] +
+                alg_df["resource_usage_gtsrb"]
+            )
+
+            cumulative_resource = resource.cumsum()
+
+            acc_curve = (
+                alg_df
+                .groupby("round")["global_acc"]
+                .mean()
+            )
+
+            resource_curve = (
+                cumulative_resource
+                .groupby(alg_df["round"])
+                .mean()
+            )
+
+            plt.plot(resource_curve.values, acc_curve.values, label=alg)
+
+        plt.title(f"Accuracy vs Resource Usage ({dataset})")
+        plt.xlabel("Cumulative Resource Usage")
+        plt.ylabel("Accuracy")
+
+        plt.legend()
+        plt.grid()
+
+        plt.tight_layout()
+
+        plt.savefig(f"{RESULTS_DIR}/accuracy_vs_resource_{dataset}.png")
+        plt.close()
 
 
 # =====================================================
@@ -144,26 +229,57 @@ def plot_all_metrics(df):
 
 def summary_table(df):
 
-    metrics = [
-        "global_acc",
-        "fairness_resource",
-        "client_model_fairness",
-        "client_capacity_fairness",
-        "client_fairness_cifar",
-        "client_fairness_gtsrb"
-    ]
-
-    summary = (
-        df.groupby(["algorithm", "dataset"])[metrics]
+    acc = (
+        df.groupby(["algorithm", "dataset"])["global_acc"]
         .mean()
-        .round(4)
+        .rename("acc_mean")
     )
 
-    print("\n===== MÉDIAS FINAIS =====\n")
+    clients = (
+        df.groupby(["algorithm", "dataset"])["clients_selected_total"]
+        .mean()
+        .rename("clients_mean")
+    )
+
+    # fairness_resource
+    fairness_res_mean = (
+        df.groupby(["algorithm", "dataset"])["fairness_resource"]
+        .mean()
+        .rename("fairness_resource_mean")
+    )
+
+    fairness_res_sum = (
+        df.groupby(["algorithm", "dataset"])["fairness_resource"]
+        .sum()
+        .rename("fairness_resource_sum")
+    )
+
+    # client_capacity_fairness
+    cap_mean = (
+        df.groupby(["algorithm", "dataset"])["client_capacity_fairness"]
+        .mean()
+        .rename("capacity_fairness_mean")
+    )
+
+    cap_sum = (
+        df.groupby(["algorithm", "dataset"])["client_capacity_fairness"]
+        .sum()
+        .rename("capacity_fairness_sum")
+    )
+
+    summary = pd.concat([
+        acc,
+        clients,
+        fairness_res_mean,
+        fairness_res_sum,
+        cap_mean,
+        cap_sum
+    ], axis=1).round(4)
+
+    print("\n===== MÉTRICAS AGREGADAS =====\n")
     print(summary)
 
-    summary.to_csv("results/summary_comparison.csv")
-
+    summary.to_csv(f"{RESULTS_DIR}/summary_comparison.csv")
 
 # =====================================================
 # MAIN
@@ -178,6 +294,10 @@ def main():
     plot_accuracy(df)
 
     plot_all_metrics(df)
+
+    plot_resource_usage(df)
+
+    plot_accuracy_vs_resource(df)
 
     print("\n✔ Análise concluída.")
     print("Gráficos salvos em /results")

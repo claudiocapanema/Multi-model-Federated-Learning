@@ -54,11 +54,12 @@ MODEL_COST = {
 # FAIR RESOURCE BUDGET
 # =====================================================
 
-BASE_CLIENTS = K_CLIENTS // 2
-
 LIGHT_MODEL = min(MODEL_COST, key=MODEL_COST.get)
 
-FAIR_RESOURCE_BUDGET = BASE_CLIENTS * MODEL_COST[LIGHT_MODEL]
+# permitir aproximadamente K_CLIENTS treinamentos por rodada
+avg_speed = 0.65
+
+FAIR_RESOURCE_BUDGET = K_CLIENTS * MODEL_COST[LIGHT_MODEL] / avg_speed
 
 Path("results/").mkdir(parents=True, exist_ok=True)
 
@@ -221,21 +222,18 @@ def reset_experiment_state():
     }
 
     # -------- Logs --------
+    # -------- Logs --------
     baseline_logs = {
         "clients_per_model": [],
 
         "resource_usage_cifar": [],
         "resource_usage_gtsrb": [],
 
+        # fairness entre modelos
         "fairness_resource": [],
-        "jain_fairness": [],
 
-        "client_model_fairness": [],
-        "client_capacity_fairness": [],
-
-        # NOVO
-        "client_fairness_cifar": [],
-        "client_fairness_gtsrb": []
+        # fairness considerando capacidade dos clientes
+        "client_capacity_fairness": []
     }
 
 # =====================================================
@@ -447,38 +445,40 @@ def run_experiment():
             real_training_counter = {m: 0 for m in global_models}
 
             # =====================================================
-            # 1) MultiFedAvg Client Selection (1 modelo por cliente)
+            # 1) MultiFedAvg Client Selection (resource limited)
             # =====================================================
-
-            all_clients = list(range(NUM_CLIENTS))
-            random.shuffle(all_clients)
 
             clients_cifar = []
             clients_gtsrb = []
 
-            available_clients = set(all_clients)
+            resource_usage = {
+                "cifar": 0.0,
+                "gtsrb": 0.0
+            }
 
-            # selecionar clientes para CIFAR
-            for cid in all_clients:
+            available_clients = list(range(NUM_CLIENTS))
+            random.shuffle(available_clients)
 
-                if len(clients_cifar) >= K_CLIENTS:
-                    break
+            models = ["cifar", "gtsrb"]
 
-                if cid in available_clients:
-                    clients_cifar.append(cid)
-                    available_clients.remove(cid)
+            for cid in available_clients:
 
-            # embaralhar novamente os restantes
-            remaining_clients = list(available_clients)
-            random.shuffle(remaining_clients)
+                random.shuffle(models)
 
-            # selecionar clientes para GTSRB
-            for cid in remaining_clients:
+                for model_name in models:
 
-                if len(clients_gtsrb) >= K_CLIENTS:
-                    break
+                    train_time = estimate_training_time(cid, model_name)
 
-                available_clients.remove(cid)
+                    if resource_usage[model_name] + train_time <= FAIR_RESOURCE_BUDGET:
+
+                        if model_name == "cifar":
+                            clients_cifar.append(cid)
+                        else:
+                            clients_gtsrb.append(cid)
+
+                        resource_usage[model_name] += train_time
+
+                        break
 
             # =====================================================
             # 2) Treino CIFAR (baseline puro)
@@ -577,67 +577,6 @@ def run_experiment():
             else:
                 fairness_resource = 1.0
 
-            # -------------------------------------------------
-            # 2) Jain Fairness Index
-            # maior = melhor
-            # -------------------------------------------------
-
-            den = 2 * (resource_cifar ** 2 + resource_gtsrb ** 2)
-
-            if den > 0:
-                jain_fairness = (total_resource ** 2) / den
-            else:
-                jain_fairness = 1.0
-
-            # =====================================================
-            # CLIENT MODEL FAIRNESS (custo teórico)
-            # =====================================================
-
-            client_model_errors = []
-
-            for cid in range(NUM_CLIENTS):
-
-                r_cifar = client_resource_usage[cid]["cifar"]
-                r_gtsrb = client_resource_usage[cid]["gtsrb"]
-
-                total = r_cifar + r_gtsrb
-
-                if total > 0:
-                    error = abs(r_cifar - r_gtsrb) / total
-                    client_model_errors.append(error)
-
-            if len(client_model_errors) > 0:
-                client_model_fairness = np.mean(client_model_errors)
-            else:
-                client_model_fairness = 0.0
-
-            # =====================================================
-            # PER-MODEL CLIENT FAIRNESS
-            # =====================================================
-
-            usage_cifar = [
-                client_resource_usage[cid]["cifar"]
-                for cid in range(NUM_CLIENTS)
-            ]
-
-            usage_gtsrb = [
-                client_resource_usage[cid]["gtsrb"]
-                for cid in range(NUM_CLIENTS)
-            ]
-
-            def jain_index(values):
-
-                s = sum(values)
-                sq = sum(v * v for v in values)
-
-                if sq == 0:
-                    return 1.0
-
-                return (s * s) / (NUM_CLIENTS * sq)
-
-            client_fairness_cifar = jain_index(usage_cifar)
-            client_fairness_gtsrb = jain_index(usage_gtsrb)
-
             # =====================================================
             # CLIENT CAPACITY FAIRNESS
             # =====================================================
@@ -680,13 +619,11 @@ def run_experiment():
                 real_training_counter["gtsrb"] * MODEL_COST["gtsrb"]
             )
 
+            # fairness entre modelos
             baseline_logs["fairness_resource"].append(fairness_resource)
-            baseline_logs["jain_fairness"].append(jain_fairness)
-            baseline_logs["client_model_fairness"].append(client_model_fairness)
-            baseline_logs["client_capacity_fairness"].append(client_capacity_fairness)
 
-            baseline_logs["client_fairness_cifar"].append(client_fairness_cifar)
-            baseline_logs["client_fairness_gtsrb"].append(client_fairness_gtsrb)
+            # fairness considerando capacidade dos clientes
+            baseline_logs["client_capacity_fairness"].append(client_capacity_fairness)
 
             # 4) Avaliação global
             for model_name, model in global_models.items():
@@ -711,7 +648,7 @@ def run_experiment():
                 )
 
                 row_data = {
-                    "algorithm": "fair_resource",
+                    "algorithm": "baseline_resource",
                     "fold": fold,
                     "round": rnd,
                     "dataset": model_name,
@@ -728,13 +665,7 @@ def run_experiment():
                     "resource_usage_gtsrb": baseline_logs["resource_usage_gtsrb"][-1],
 
                     # fairness metrics
-                    "client_fairness_cifar": baseline_logs["client_fairness_cifar"][-1],
-                    "client_fairness_gtsrb": baseline_logs["client_fairness_gtsrb"][-1],
-
-
                     "fairness_resource": baseline_logs["fairness_resource"][-1],
-                    "jain_fairness": baseline_logs["jain_fairness"][-1],
-                    "client_model_fairness": baseline_logs["client_model_fairness"][-1],
                     "client_capacity_fairness": baseline_logs["client_capacity_fairness"][-1],
                 }
 

@@ -138,7 +138,7 @@ def evaluate(model, loader, criterion, device):
 
 if __name__ == "__main__":
 
-    HF_REPO = "claudiogsc/foursquare-us-sequences-highlevel-200000-samples"
+    HF_REPO = "claudiogsc/foursquare-us-sequences-highlevel-20000-samples"
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 

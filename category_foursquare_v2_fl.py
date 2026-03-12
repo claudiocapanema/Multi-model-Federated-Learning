@@ -219,7 +219,7 @@ def fedavg_weighted(global_model, client_models, client_sizes):
 
 if __name__ == "__main__":
 
-    HF_REPO = "claudiogsc/foursquare-us-sequences-highlevel-200000-samples"
+    HF_REPO = "claudiogsc/foursquare-us-sequences-highlevel-20000-samples"
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
     NUM_CLIENTS = 20
