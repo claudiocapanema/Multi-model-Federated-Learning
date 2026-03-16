@@ -96,9 +96,15 @@ class NextCategoryLSTMWithTime(nn.Module):
         num_categories,
         cat_emb_dim=4,
         hour_emb_dim=3,
-        hidden_dim=64,
+        hidden_dim=300,
         num_layers=1,
         dropout=0.5
+        # bom para 20 seq len
+        # cat_emb_dim=4,
+        # hour_emb_dim=3,
+        # hidden_dim=300,
+        # num_layers=1,
+        # dropout=0.5
     ):
         super().__init__()
 

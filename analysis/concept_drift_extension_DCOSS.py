@@ -2,7 +2,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import scipy.stats as st
-from numpy import trapz
 
 import copy
 
@@ -176,7 +175,7 @@ def table_per_dataset(df, write_path, metric, solutions_order, ci=0.95):
             escape=False,
             column_format="l" + "c" * len(alphas),
             index_names=False
-        )
+        )#.replace("MFP_v2", "$\\text{MFP}_{\\text{v2}}$")
 
         latex_complete = f"""
 \\begin{{table}}[t]
@@ -235,16 +234,21 @@ if __name__ == "__main__":
     total_clients = 40
     dataset = ["WISDM-W", "ImageNet10", "Foursquare"]
     model_name = ["gru", "CNN", "lstm"]
-    fraction_fit = 0.3
+    fraction_fit = 0.375
     number_of_rounds = 100
     local_epochs = 1
     train_test = "test"
 
     solutions = [
-        "MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh",
-        "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+MFP",
-        "MultiFedAvg+FPD", "MultiFedAvg+FP",
-        "DMA-FL", "MultiFedAvg"
+        "MultiFedAvg+MFP_v2",
+        "MultiFedAvg+MFP_v2_dh",
+        "MultiFedAvg+MFP_v2_iti",
+        # "MultiFedAvg+MFP",
+        "MultiFedAvg+FPD",
+        "MultiFedAvg+FP",
+        "DMA-FL",
+        "MultiFedAvgRR",
+        "MultiFedAvg"
     ]
 
     # "AdaptiveFedAvg",

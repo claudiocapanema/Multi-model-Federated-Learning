@@ -55,9 +55,9 @@ def read_data(read_solutions, read_dataset_order):
     df_concat = None
 
     solution_strategy_version = {
-        "MultiFedAvg+MFP_v2": {"Strategy": "MultiFedAvg", "Version": "MFP_v2", "Table": "$MultiFedAvg+MFP_{v2}$"},
-        "MultiFedAvg+MFP_v2_dh": {"Strategy": "MultiFedAvg", "Version": "MFP_v2_dh", "Table": "$MultiFedAvg+MFP_{v2dh}$"},
-        "MultiFedAvg+MFP_v2_iti": {"Strategy": "MultiFedAvg", "Version": "MFP_v2_iti", "Table": "$MultiFedAvg+MFP_{v2iti}$"},
+        "MultiFedAvg+MFP_v2": {"Strategy": "MultiFedAvg", "Version": "MFP", "Table": "$MultiFedAvg+MFP_{v2}$"},
+        "MultiFedAvg+MFP_v2_dh": {"Strategy": "MultiFedAvg", "Version": "MFP_dh", "Table": "$MultiFedAvg+MFP_{v2dh}$"},
+        "MultiFedAvg+MFP_v2_iti": {"Strategy": "MultiFedAvg", "Version": "MFP_iti", "Table": "$MultiFedAvg+MFP_{v2iti}$"},
         "MultiFedAvg+MFP": {"Strategy": "MultiFedAvg", "Version": "MFP", "Table": "MultiFedAvg+MFP"},
         "MultiFedAvg+FPD": {"Strategy": "MultiFedAvg", "Version": "FPD", "Table": "MultiFedAvg+FPD"},
         "MultiFedAvg+FP": {"Strategy": "MultiFedAvg", "Version": "FP", "Table": "MultiFedAvg+FP"},
@@ -325,9 +325,9 @@ def generate_rich_heatmaps(df, metric, output_path, baseline="MultiFedAvg"):
         # =====================================================
 
         label_map = {
-            "MultiFedAvg+MFP_v2": "MFPv2",
-            "MultiFedAvg+MFP_v2_dh": "MFPv2-dh",
-            "MultiFedAvg+MFP_v2_iti": "MFPv2-iti",
+            "MultiFedAvg+MFP_v2": "MFP",
+            "MultiFedAvg+MFP_v2_dh": "MFP-dh",
+            "MultiFedAvg+MFP_v2_iti": "MFP-iti",
             "MultiFedAvg+MFP": "MFP",
             "MultiFedAvg+FPD": "FPD",
             "MultiFedAvg+FP": "FP",
@@ -343,6 +343,7 @@ def generate_rich_heatmaps(df, metric, output_path, baseline="MultiFedAvg"):
             name = name.replace("MultiFedAvg + ", "")
             name = name.replace("MultiFedAvg+", "")
             name = name.replace("MultiFedAvg", "MultiFedAvg")
+            name = name.replace("v2", "")
             return name
 
         short_solutions = [shorten_label(s) for s in solutions]
@@ -526,9 +527,9 @@ def generate_summary_table(df_gain, metric, output_path, baseline="MultiFedAvg")
     # =====================================================
 
     name_map = {
-        "MultiFedAvg+MFP_v2": "MFPv2",
-        "MultiFedAvg+MFP_v2_dh": "MFPv2-dh",
-        "MultiFedAvg+MFP_v2_iti": "MFPv2-iti",
+        "MultiFedAvg+MFP_v2": "MFP",
+        "MultiFedAvg+MFP_v2_dh": "MFP-dh",
+        "MultiFedAvg+MFP_v2_iti": "MFP-iti",
         "MultiFedAvg+MFP": "MFP",
         "MultiFedAvg+FPD": "FPD",
         "MultiFedAvg+FP": "FP",
@@ -724,10 +725,10 @@ if __name__ == "__main__":
 
     solutions = [
         "MultiFedAvg+MFP_v2",
-        # "MultiFedAvg+MFP_v2_dh",
-        # "MultiFedAvg+MFP_v2_iti",
+        "MultiFedAvg+MFP_v2_dh",
+        "MultiFedAvg+MFP_v2_iti",
         # "MultiFedAvg+MFP",
-        # "MultiFedAvg+FPD",
+        "MultiFedAvg+FPD",
         "MultiFedAvg+FP",
         "DMA-FL",
         "MultiFedAvgRR",
