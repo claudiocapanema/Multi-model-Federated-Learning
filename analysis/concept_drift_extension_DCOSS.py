@@ -19,9 +19,9 @@ def read_data(read_solutions, read_dataset_order, experiment_id, alpha_value):
         "FedKD": {"Strategy": "FedKD", "Version": "Original", "Table": "FedKD"},
         "FedKD+FP": {"Strategy": "FedKD", "Version": "FP", "Table": "FedKD+FP"},
         "MultiFedAvg+MFP": {"Strategy": "MultiFedAvg", "Version": "MFP", "Table": "MultiFedAvg+MFP"},
-        "MultiFedAvg+MFP_v2": {"Strategy": "MultiFedAvg", "Version": "MFP_v2", "Table": "$MultiFedAvg+MFP_{v2}$"},
-        "MultiFedAvg+MFP_v2_dh": {"Strategy": "MultiFedAvg", "Version": "MFP_v2_dh", "Table": "$MultiFedAvg+MFP_{v2dh}$"},
-        "MultiFedAvg+MFP_v2_iti": {"Strategy": "MultiFedAvg", "Version": "MFP_v2_iti", "Table": "$MultiFedAvg+MFP_{v2iti}$"},
+        "MultiFedAvg+MFP_v2": {"Strategy": "MultiFedAvg", "Version": "MFP", "Table": "$MultiFedAvg+MFP$"},
+        "MultiFedAvg+MFP_v2_dh": {"Strategy": "MultiFedAvg", "Version": "MFP_dh", "Table": "$MultiFedAvg+MFP_{dh}$"},
+        "MultiFedAvg+MFP_v2_iti": {"Strategy": "MultiFedAvg", "Version": "MFP_iti", "Table": "$MultiFedAvg+MFP_{iti}$"},
         "MultiFedAvg+FPD": {"Strategy": "MultiFedAvg", "Version": "FPD", "Table": "MultiFedAvg+FPD"},
         "MultiFedAvg+FP": {"Strategy": "MultiFedAvg", "Version": "FP", "Table": "MultiFedAvg+FP"},
         "MultiFedAvg": {"Strategy": "MultiFedAvg", "Version": "Original", "Table": "MultiFedAvg"},
@@ -175,7 +175,7 @@ def table_per_dataset(df, write_path, metric, solutions_order, ci=0.95):
             escape=False,
             column_format="l" + "c" * len(alphas),
             index_names=False
-        )#.replace("MFP_v2", "$\\text{MFP}_{\\text{v2}}$")
+        ).replace("MFP\_v2\_dh", "$\\textit{MFP}_{\\textit{DDH}}$").replace("MFP\_v2\_iti", "$\\textit{MFP}_{\\textit{ITI}}$").replace("MFP\_v2", "$\\textit{MFP}$")
 
         latex_complete = f"""
 \\begin{{table}}[t]
