@@ -87,10 +87,12 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
         self.train_losses = {me: [] for me in range(self.ME)}
         self.fit_metrics_aggregation_fn = weighted_average_fit
         self.data_drift_model = -1
-        self.data_shift_type = {me: [] for me in range(self.ME)}
+        # self.data_shift_type = {me: [] for me in range(self.ME)}
         self.reduction_fraction_list = {me: [] for me in range(self.ME)}
         self.ps_list = {me: [] for me in range(self.ME)}
         self.heterogeneity_degree = [-1] * self.ME
+        self.heterogeneity_degree_list = {me: [] for me in range(self.ME)}
+        self.data_shift_type = ["NO_SHIFT"] * self.ME
         self.min_drift_interval = 10
         self.last_drift_round = [-self.min_drift_interval] * self.ME
         self.in_adaptation = [False] * self.ME
@@ -129,7 +131,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             self.selected_clients_m = [[] for me in range(self.ME)]
 
             trained_models = []
-            self.data_shift_type = {me: [] for me in range(self.ME)}
+            # self.data_shift_type = {me: [] for me in range(self.ME)}
 
             results_mefl = {me: [] for me in range(self.ME)}
             for i in range(len(results)):
@@ -140,7 +142,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 client_id = result["client_id"]
                 self.selected_clients_m[me].append(client_id)
                 results_mefl[me].append(results[i])
-                self.data_shift_type[me].append(result["non_iid"]["data_shift_type"])
+                # self.data_shift_type[me].append(result["non_iid"]["data_shift_type"])
 
             aggregated_ndarrays_mefl = {me: [] for me in range(self.ME)}
 
@@ -308,6 +310,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             else:
                 heterogeneity_degree = 0
 
+            global_lr = 1 - heterogeneity_degree
+
             # if self.version in ["iti"] or t == 1 or (self.ps[me] == 0 and heterogeneity_degree < threshold[me]):
             #     heterogeneity_degree = 0
             # heterogeneity_degree = 0
@@ -388,19 +392,32 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 return super().select_clients(t)
 
             drift_ps = [0] * self.ME
+            drift_type = ["NO_SHIFT"] * self.ME
             for me in range(self.ME):
 
                 if len(self.ps_list[me]) == 0:
                     self.ps_list[me].append(self.ps[me])
+                    self.heterogeneity_degree_list[me].append(self.heterogeneity_degree[me])
                 else:
                     ps_list = copy.deepcopy(self.ps_list[me])
+                    heterogeneity_degree_list = copy.deepcopy(self.heterogeneity_degree_list[me])
                     ps_list.append(self.ps[me])
-                    if self.detect_drift_ks(ps_list, window=5, alpha=0.01):
+                    heterogeneity_degree_list.append(self.heterogeneity_degree[me])
+                    shift_detected = self.detect_drift_ks(ps_list, window=5, alpha=0.01)
+                    if shift_detected:
                         drift_ps[me] = self.ps[me]
                     else:
                         self.ps_list[me].append(self.ps[me])
                         # drift_ps[me] = 0
                         drift_ps[me] = self.ps[me]
+                    same_dh_distribution = self.detect_drift_ks(drift_type, window=5, alpha=0.01)
+                    if (shift_detected or t <= self.adaptation_until[me]) and same_dh_distribution:
+                        self.data_shift_type[me] = "CONCEPT_DRIFT"
+                    elif shift_detected or t < self.adaptation_until[me]:
+                        self.data_shift_type[me] = "LABEL_SHIFT"
+                    else:
+                        self.data_shift_type[me] = "NO_SHIFT"
+
 
 
             # 🔄 Finaliza adaptação apenas no início do round
@@ -489,7 +506,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             for me in range(self.ME):
                 clients_evaluate_list = []
                 metrics = {"fc": self.fc[me], "il": self.il[me], "heterogeneity_degree": self.heterogeneity_degree[me],
-                           "ps": self.ps[me], "similarity": self.similarity[me], "data_shift_type": "CONCEPT_DRIFT" if "concept_drift" in self.experiment_id else Counter(self.data_shift_type[me]).most_common(1)[0][0]}
+                           "ps": self.ps[me], "similarity": self.similarity[me], "data_shift_type": self.data_shift_type[me]}
                 print(f"data shift type na rodada {t} no modelo {me} {metrics["data_shift_type"]}")
                 for i in range(len(self.clients)):
                     client_dict = {}

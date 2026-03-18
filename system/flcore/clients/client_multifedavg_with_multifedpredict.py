@@ -286,8 +286,8 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             a = [0, 0, 0]  # fc > a gw=1
             b = [0.59, 0.59, 0.65]  # il < b gw=1
             # b = [1, 1, 1]  # il < b gw=1
-            c = [0.31, 0.28, 0.33]  # dh < c gw=1 # 0.43
-            c = [0.31, 0.32, 0.39]  # dh < c gw=1 # 0.43
+            tau_dh = [0.31, 0.28, 0.33]  # dh < c gw=1 # 0.43
+            tau_dh = [0.31, 0.32, 0.39]  # dh < c gw=1 # 0.43
             # c = [1, 1, 1]  # dh < c gw=1 # 0.43
             d = 0.1  # ps > d gw=1
 
@@ -310,7 +310,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             # elif similarity_server < 0:
             #     similarity_server = 0
 
-            if fc > a[me] and il < b[me] and data_heterogeneity_degree < c[me] and ps > d and nt > 0:
+            if fc > a[me] and il < b[me] and data_heterogeneity_degree < tau_dh[me] and ps > d and nt > 0:
                 print(f"usou incorretamente. cliente {self.client_id} rodada {t} modelo {me} valores: {fc}, {il}, {data_heterogeneity_degree} {ps} {nt}")
 
 
@@ -320,7 +320,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             # else:
             #     similarity = similarity_local
             print(f"model {me} valor t {t} nt {nt} tamanho {len(global_model)} heterogeneity degree cliente {data_heterogeneity_degree}")
-            if self.lt[me] < self.data_shift_round[me] and data_heterogeneity_degree < c[me]:
+            if self.lt[me] < self.data_shift_round[me] and data_heterogeneity_degree < tau_dh[me]:
                 similarity = 1
                 t_hat = 1
                 print("entrou parou")
@@ -337,7 +337,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                                                      data_shift_round=self.data_shift_round[me],
                                                      # fc={'global': fc, 'reference': a[me]},
                                                      # il={'global': il, 'reference': b[me]},
-                                                     dh={'global': data_heterogeneity_degree, 'reference': c[me]},
+                                                     dh={'global': data_heterogeneity_degree, 'reference': tau_dh[me]},
                                                      ps={'global': ps, 'reference': d},
                                                      data_shift_type=data_shift_type,
                                                      device=self.device,
@@ -349,7 +349,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             #     set_weights(self.global_model[me], global_model)
             #     combined_model = self.global_model[me]
 
-            if (gw == 1 and t > 10 and data_heterogeneity_degree < c[me] and ps > d):
+            if (gw == 1 and t > 10 and data_heterogeneity_degree < tau_dh[me] and ps > d):
                 similarity = 1 # keeps the standard degree of personalization and does not apply weighted predictions (used for data shift and delayed labeling)
                 set_weights(self.global_model[me], global_model)
                 combined_model = self.global_model[me]

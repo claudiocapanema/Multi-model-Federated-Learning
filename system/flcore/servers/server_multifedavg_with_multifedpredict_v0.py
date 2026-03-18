@@ -92,7 +92,7 @@ class MultiFedAvgWithMultiFedPredictv0(MultiFedAvg):
     def __init__(self, args, times, fold_id):
         super().__init__(args, times, fold_id)
         self.test_metrics_names = ["Accuracy", "Balanced accuracy", "Loss", "Round (t)", "Fraction fit",
-                                   "# training clients", "training clients and models", "Model size", "Fold ID", "fc", "il", "dh", "ps", "Alpha", "gw", "lw"]
+                                   "# training clients", "training clients and models", "Model size", "Fold ID", "fc", "il", "dh", "ps", "Alpha", "Data shift", "gw", "lw"]
         self.results_test_metrics = {me: {metric: [] for metric in self.test_metrics_names} for me in range(self.ME)}
         self.compression = ""
         self.similarity_list_per_layer = {me: {} for me in range(self.ME)}
@@ -375,6 +375,7 @@ class MultiFedAvgWithMultiFedPredictv0(MultiFedAvg):
             metrics_aggregated[me]["ps"] = self.ps[me]
             metrics_aggregated[me]["gw"] = self.gw[me]
             metrics_aggregated[me]["lw"] = self.lw[me]
+            metrics_aggregated[me]["Data shift"] = self.data_shift_type[me]
 
             print("gw lw: ", me, self.gw[me])
 
