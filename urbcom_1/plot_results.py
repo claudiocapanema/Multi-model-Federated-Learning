@@ -23,6 +23,51 @@ METRIC_DIRECTION = {
     "resource_usage_gtsrb": "resource usage"
 }
 
+# =====================================================
+# FAIRNESS ACUMULADA AO LONGO DAS RODADAS
+# =====================================================
+
+def plot_cumulative_fairness(df):
+
+    metrics = [
+        "fairness_resource",
+        "client_capacity_fairness"
+    ]
+
+    for metric in metrics:
+
+        for dataset in DATASETS:
+
+            subset = df[df["dataset"] == dataset]
+
+            plt.figure(figsize=(6,4))
+
+            for alg in subset["algorithm"].unique():
+
+                alg_df = subset[subset["algorithm"] == alg].copy()
+
+                curve = (
+                    alg_df
+                    .groupby("round")[metric]
+                    .mean()
+                    .cumsum()
+                )
+
+                plt.plot(curve.index, curve.values, label=alg)
+
+            direction = METRIC_DIRECTION.get(metric, "")
+
+            plt.title(f"Cumulative {metric} ({dataset}) ({direction})")
+            plt.xlabel("Round")
+            plt.ylabel(f"Cumulative {metric}")
+
+            plt.legend()
+            plt.grid()
+
+            plt.tight_layout()
+
+            plt.savefig(f"{RESULTS_DIR}/cumulative_{metric}_{dataset}.png")
+            plt.close()
 
 # =====================================================
 # CARREGAR RESULTADOS
@@ -83,6 +128,47 @@ def plot_metric(df, metric):
 
     plt.savefig(f"{RESULTS_DIR}/{metric}.png")
     plt.close()
+
+# =====================================================
+# CLIENTES SELECIONADOS ACUMULADOS AO LONGO DAS RODADAS
+# =====================================================
+
+def plot_cumulative_clients_selected(df):
+
+    metric = "clients_selected_total"
+
+    for dataset in DATASETS:
+
+        subset = df[df["dataset"] == dataset]
+
+        plt.figure(figsize=(6,4))
+
+        for alg in subset["algorithm"].unique():
+
+            alg_df = subset[subset["algorithm"] == alg].copy()
+
+            curve = (
+                alg_df
+                .groupby("round")[metric]
+                .mean()
+                .cumsum()
+            )
+
+            plt.plot(curve.index, curve.values, label=alg)
+
+        direction = METRIC_DIRECTION.get(metric, "")
+
+        plt.title(f"Cumulative Clients Selected ({dataset}) ({direction})")
+        plt.xlabel("Round")
+        plt.ylabel("Cumulative Clients Selected")
+
+        plt.legend()
+        plt.grid()
+
+        plt.tight_layout()
+
+        plt.savefig(f"{RESULTS_DIR}/cumulative_clients_selected_{dataset}.png")
+        plt.close()
 
 
 # =====================================================
@@ -222,6 +308,49 @@ def plot_accuracy_vs_resource(df):
         plt.savefig(f"{RESULTS_DIR}/accuracy_vs_resource_{dataset}.png")
         plt.close()
 
+# =====================================================
+# RECURSO ACUMULADO AO LONGO DAS RODADAS (POR DATASET)
+# =====================================================
+
+def plot_cumulative_resource_usage(df):
+
+    metrics = {
+        "cifar": "resource_usage_cifar",
+        "gtsrb": "resource_usage_gtsrb"
+    }
+
+    for dataset, metric in metrics.items():
+
+        subset = df[df["dataset"] == dataset]
+
+        plt.figure(figsize=(6,4))
+
+        for alg in subset["algorithm"].unique():
+
+            alg_df = subset[subset["algorithm"] == alg].copy()
+
+            curve = (
+                alg_df
+                .groupby("round")[metric]
+                .mean()
+                .cumsum()
+            )
+
+            plt.plot(curve.index, curve.values, label=alg)
+
+        direction = METRIC_DIRECTION.get(metric, "")
+
+        plt.title(f"Cumulative Resource Usage ({dataset})")
+        plt.xlabel("Round")
+        plt.ylabel("Cumulative Resource Usage")
+
+        plt.legend()
+        plt.grid()
+
+        plt.tight_layout()
+
+        plt.savefig(f"{RESULTS_DIR}/cumulative_resource_{dataset}.png")
+        plt.close()
 
 # =====================================================
 # TABELA RESUMO
@@ -281,10 +410,6 @@ def summary_table(df):
 
     summary.to_csv(f"{RESULTS_DIR}/summary_comparison.csv")
 
-# =====================================================
-# MAIN
-# =====================================================
-
 def main():
 
     df = load_results()
@@ -295,7 +420,13 @@ def main():
 
     plot_all_metrics(df)
 
+    plot_cumulative_fairness(df)
+
+    plot_cumulative_clients_selected(df)
+
     plot_resource_usage(df)
+
+    plot_cumulative_resource_usage(df)  # ✅ NOVO
 
     plot_accuracy_vs_resource(df)
 

@@ -300,7 +300,7 @@ if __name__ == "__main__":
     total_clients = 40
     datasets = ["WISDM-W", "ImageNet10", "Foursquare"]
     model_name = ["gru", "CNN", "lstm"]
-    fraction_fit = 0.3
+    fraction_fit = 0.375
     number_of_rounds = 100
     local_epochs = 1
     train_test = "test"
@@ -312,7 +312,7 @@ if __name__ == "__main__":
         "MultiFedAvg"
     ]
 
-    write_path = f"plots/MEFL/multi_experiments/analysis/rounds_{number_of_rounds}/"
+    write_path = f"plots/MEFL/multi_experiments/analysis/fc_{fraction_fit}/rounds_{number_of_rounds}/"
 
     df = read_data_multi_experiments(
         experiment_ids,
