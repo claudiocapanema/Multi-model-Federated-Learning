@@ -16,6 +16,8 @@ RESOURCE_METRICS = [
 
 ALGORITHM_ORDER = [
     "proposta",
+    "fairhetero",
+    "fedbalancer",
     "baseline_f0.2",
     "baseline_f0.3",
     "baseline_f0.4"
@@ -202,11 +204,40 @@ def load_results():
 
                 dfs.append(df)
 
+        # -----------------------------
+        # FAIRHETERO
+        # -----------------------------
+        elif file.startswith("fairhetero_"):
+
+            if f"frac_{FRAC}" in file and f"alpha_{ALPHA}" in file:
+
+                df = pd.read_csv(path)
+
+                df["algorithm"] = "fairhetero"
+                df["frac"] = FRAC
+
+                dfs.append(df)
+
+        # -----------------------------
+        # FEDBALANCER
+        # -----------------------------
+        elif file.startswith("fedbalancer_"):
+
+            if f"frac_{FRAC}" in file and f"alpha_{ALPHA}" in file:
+
+                df = pd.read_csv(path)
+
+                df["algorithm"] = "fedbalancer"
+                df["frac"] = FRAC
+
+                dfs.append(df)
+
     if len(dfs) == 0:
         raise ValueError("Nenhum CSV encontrado em results/")
 
     df = pd.concat(dfs, ignore_index=True)
 
+    # ordenar para consistência
     df = df.sort_values(["algorithm", "dataset", "round"])
 
     return df
