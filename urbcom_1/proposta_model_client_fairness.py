@@ -443,7 +443,7 @@ def run_experiment():
             train_loaders[cid]["gtsrb"] = train_loader
             test_loaders[cid]["gtsrb"] = test_loader
 
-        reset_experiment_state()
+        reset_experiment_state(train_loaders)
 
         # =====================================================
         # LOOP PRINCIPAL DE RODADAS FEDERADAS

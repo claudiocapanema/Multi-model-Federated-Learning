@@ -42,9 +42,17 @@ LR = 0.01
 # DIRICHLET_ALPHA = 0.1
 DIRICHLET_ALPHA = 1.0
 
+# =====================================================
+# MODEL COST (FLOPs POR AMOSTRA)
+# =====================================================
+
 MODEL_COST = {
-    "cifar": 0.3,
-    "gtsrb": 0.5
+    "cifar": {
+        "flops_per_sample": 5e6,
+    },
+    "gtsrb": {
+        "flops_per_sample": 1.2e7,
+    }
 }
 
 # =====================================================
@@ -60,12 +68,19 @@ assert LAMBDA_CAPACITY + LAMBDA_INTRA <= 1.0
 # FAIR RESOURCE BUDGET
 # =====================================================
 
-LIGHT_MODEL = min(MODEL_COST, key=MODEL_COST.get)
+LIGHT_MODEL = min(
+    MODEL_COST,
+    key=lambda m: MODEL_COST[m]["flops_per_sample"]
+)
 
 # permitir aproximadamente K_CLIENTS treinamentos por rodada
 avg_speed = 0.65
 
-FAIR_RESOURCE_BUDGET = K_CLIENTS * MODEL_COST[LIGHT_MODEL] / avg_speed
+FAIR_RESOURCE_BUDGET = (
+    K_CLIENTS *
+    MODEL_COST[LIGHT_MODEL]["flops_per_sample"] /
+    (1e7 * avg_speed)
+)
 
 Path("results/").mkdir(parents=True, exist_ok=True)
 
@@ -120,27 +135,46 @@ client_resource_usage = {}
 # RECURSOS E VIABILIDADE
 # =====================================================
 
+# =====================================================
+# TRAINING TIME (REALISTA + DIRICHLET)
+# =====================================================
+
 def estimate_training_time(cid, model_name):
 
     speed = client_resources[cid]["speed"]
 
-    # tempo heterogêneo baseado na capacidade do cliente
-    train_time = MODEL_COST[model_name] / speed
+    if model_name == "cifar":
+        data_size = client_resources[cid]["data_size_cifar"]
+    else:
+        data_size = client_resources[cid]["data_size_gtsrb"]
 
-    return train_time
+    flops_per_sample = MODEL_COST[model_name]["flops_per_sample"]
+
+    LOCAL_EPOCHS = 1
+
+    # custo computacional total
+    total_flops = flops_per_sample * data_size * LOCAL_EPOCHS
+
+    # converter para tempo (normalizado)
+    train_time = total_flops / (1e7 * speed)
+
+    # ruído realista (CPU jitter)
+    noise = np.random.uniform(0.9, 1.1)
+
+    return train_time * noise
 
 # =====================================================
 # RESET DO ESTADO GLOBAL (POR FOLD)
 # =====================================================
 
-def reset_experiment_state():
+def reset_experiment_state(train_loaders):
 
     global global_models
     global client_resources
     global client_acc
     global client_loss
     global client_delta_acc
-    global baseline_logs
+    global fedbalancer_logs
     global global_acc_history
 
     # -------- Modelos --------
@@ -155,9 +189,16 @@ def reset_experiment_state():
     }
 
     # -------- Recursos --------
+    # =====================================================
+    # CLIENT RESOURCES (CORRETO COM DATALOADER)
+    # =====================================================
+
     client_resources = {
         cid: {
-            "speed": np.random.uniform(0.3, 1.0)
+            "speed": float(np.clip(np.random.lognormal(-0.3, 0.6), 0.2, 2.0)),
+
+            "data_size_cifar": len(train_loaders[cid]["cifar"].dataset),
+            "data_size_gtsrb": len(train_loaders[cid]["gtsrb"].dataset),
         }
         for cid in range(NUM_CLIENTS)
     }
@@ -190,7 +231,7 @@ def reset_experiment_state():
     }
 
     # -------- Logs --------
-    baseline_logs = {
+    fedbalancer_logs = {
         "clients_per_model": [],
 
         "resource_usage_cifar": [],
@@ -352,14 +393,6 @@ def run_experiment():
         np.random.seed(fold_seed)
         torch.manual_seed(fold_seed)
 
-        # -------------------------------------------------
-        # Reset completo do estado global:
-        # - modelos
-        # - métricas
-        # - recursos acumulados
-        # -------------------------------------------------
-        reset_experiment_state()
-
         # =====================================================
         # CRIAÇÃO DOS DATALOADERS POR CLIENTE
         # Cada cliente recebe uma partição não-iid (Dirichlet)
@@ -398,6 +431,8 @@ def run_experiment():
 
             train_loaders[cid]["gtsrb"] = train_loader
             test_loaders[cid]["gtsrb"] = test_loader
+
+        reset_experiment_state(train_loaders)
 
         # =====================================================
         # LOOP PRINCIPAL DE RODADAS FEDERADAS
