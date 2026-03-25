@@ -338,16 +338,67 @@ def evaluate_global_model(model, test_loaders, dataset_name):
 
     return float(np.mean(accs))
 
+def fairhetero_aggregate(updates, losses, client_ids, model_name):
 
-def fedavg(updates):
+    client_groups = assign_hardware_groups()
 
-    total = sum(n for _, n in updates)
-    avg = {}
+    group_updates = defaultdict(list)
 
-    for k in updates[0][0].keys():
-        avg[k] = sum(state[k] * (n / total) for state, n in updates)
+    for idx, ((state_dict, n_samples)) in enumerate(updates):
+        cid = client_ids[idx]
 
-    return avg
+        g = client_groups[cid]
+        loss = losses[cid][model_name]
+
+        qm = Q_GROUP[g]
+
+        weight = (loss + 1e-8) ** qm
+
+        group_updates[g].append((state_dict, n_samples, weight))
+
+    # -----------------------------
+    # calcular agregação por grupo
+    # -----------------------------
+    group_models = {}
+    group_weights = {}
+
+    for g, entries in group_updates.items():
+
+        total_weight = sum(n * w for _, n, w in entries)
+
+        avg = {}
+
+        for k in entries[0][0].keys():
+            avg[k] = sum(
+                state[k] * (n * w / total_weight)
+                for state, n, w in entries
+            )
+
+        group_models[g] = avg
+
+        # média de loss do grupo
+        group_loss = np.mean([
+            losses[cid][model_name]
+            for cid in client_ids
+            if client_groups[cid] == g
+        ])
+
+        group_weights[g] = (group_loss + 1e-8) ** Q_GLOBAL
+
+    # -----------------------------
+    # agregação global (inter-group)
+    # -----------------------------
+    total_group_weight = sum(group_weights.values()) + 1e-12
+
+    final_model = {}
+
+    for k in group_models[next(iter(group_models))].keys():
+        final_model[k] = sum(
+            group_models[g][k] * (group_weights[g] / total_group_weight)
+            for g in group_models
+        )
+
+    return final_model
 
 # =====================================================
 # PARTE 8 — LOOP FEDERADO COMPLETO
@@ -575,104 +626,38 @@ def run_experiment():
             real_training_counter = {m: 0 for m in global_models}
 
             # =====================================================
-            # FAIRHETERO CLIENT SELECTION
+            # FAIRHETERO CLIENT SELECTION (CORRIGIDO)
             # =====================================================
 
             client_groups = assign_hardware_groups()
-
             all_clients = list(range(NUM_CLIENTS))
 
-            # -----------------------------
-            # COMPUTE GROUP LOSSES
-            # -----------------------------
-            group_losses_cifar = defaultdict(list)
-            group_losses_gtsrb = defaultdict(list)
+            # -------------------------------------------------
+            # SELEÇÃO NEUTRA (IMPORTANTE: FairHetero NÃO usa score)
+            # -------------------------------------------------
+            random.shuffle(all_clients)
 
-            for cid in all_clients:
-                g = client_groups[cid]
+            selected_clients = all_clients[:K_CLIENTS]
 
-                group_losses_cifar[g].append(client_loss[cid]["cifar"])
-                group_losses_gtsrb[g].append(client_loss[cid]["gtsrb"])
+            # -------------------------------------------------
+            # GARANTIR: 1 cliente → 1 modelo
+            # -------------------------------------------------
+            clients_cifar = []
+            clients_gtsrb = []
 
-            # -----------------------------
-            # FAIRHETERO SCORE FUNCTION
-            # -----------------------------
-            def compute_fairhetero_score(cid, model_name):
+            for i, cid in enumerate(selected_clients):
+                if i % 2 == 0:
+                    clients_cifar.append(cid)
+                else:
+                    clients_gtsrb.append(cid)
 
-                g = client_groups[cid]
-
-                loss = client_loss[cid][model_name]
-
-                if not np.isfinite(loss):
-                    return 0.0
-
-                qm = Q_GROUP[g]
-
-                # pegar losses do grupo
-                group_losses = (
-                    group_losses_cifar[g] if model_name == "cifar"
-                    else group_losses_gtsrb[g]
-                )
-
-                # evitar inf dentro do grupo
-                cleaned_losses = [
-                    (l if np.isfinite(l) else 1.0)
-                    for l in group_losses
-                ]
-
-                group_term = sum(
-                    l ** (qm + 1)
-                    for l in cleaned_losses
-                ) / len(cleaned_losses)
-
-                score = (loss ** qm) * (group_term ** ((Q_GLOBAL - qm) / (qm + 1)))
-
-                # pequena perturbação para evitar empates
-                noise = np.random.uniform(0.99, 1.01)
-                score *= noise
-
-                return score
-
-            # -----------------------------
-            # FAIRHETERO SELECTION (MULTI-MODEL CORRETO)
-            # -----------------------------
-
-            # garantir loss válida
-            for cid in all_clients:
-                for model_name in ["cifar", "gtsrb"]:
-                    if not np.isfinite(client_loss[cid][model_name]):
-                        client_loss[cid][model_name] = 1.0
-
-            # =========================
-            # CIFAR
-            # =========================
-            cifar_scores = []
-
-            for cid in all_clients:
-                score = compute_fairhetero_score(cid, "cifar")
-                cifar_scores.append((cid, score))
-
-            # ordenar por score (FairHetero puro)
-            cifar_scores.sort(key=lambda x: x[1], reverse=True)
-
-            # selecionar top-K/2 (mantendo multi-modelo)
-            clients_cifar = [cid for cid, _ in cifar_scores[:K_CLIENTS // 2]]
-
-            # =========================
-            # GTSRB
-            # =========================
-            gtsrb_scores = []
-
-            for cid in all_clients:
-                score = compute_fairhetero_score(cid, "gtsrb")
-                gtsrb_scores.append((cid, score))
-
-            gtsrb_scores.sort(key=lambda x: x[1], reverse=True)
-
-            clients_gtsrb = [cid for cid, _ in gtsrb_scores[:K_CLIENTS // 2]]
+            # garantir divisão equilibrada
+            clients_cifar = clients_cifar[:K_CLIENTS // 2]
+            clients_gtsrb = clients_gtsrb[:K_CLIENTS // 2]
 
             if rnd % 10 == 0:
-                print("Top clients CIFAR:", clients_cifar[:5])
+                print("CIFAR clients:", clients_cifar[:5])
+                print("GTSRB clients:", clients_gtsrb[:5])
 
             # -----------------------------
             # UPDATE RESOURCE TRACKING
@@ -726,12 +711,28 @@ def run_experiment():
                 real_training_counter["gtsrb"] += 1
 
             # =====================================================
-            # 4) AGREGAÇÃO FEDAVG
+            # 4) AGREGAÇÃO FAIRHETERO (CORRIGIDO)
             # =====================================================
-            for model_name, updates in model_updates.items():
-                if len(updates) > 0:
-                    new_state = fedavg(updates)
-                    global_models[model_name].load_state_dict(new_state)
+
+            # -------- CIFAR --------
+            if len(model_updates["cifar"]) > 0:
+                new_state = fairhetero_aggregate(
+                    model_updates["cifar"],
+                    client_loss,
+                    clients_cifar,
+                    "cifar"
+                )
+                global_models["cifar"].load_state_dict(new_state)
+
+            # -------- GTSRB --------
+            if len(model_updates["gtsrb"]) > 0:
+                new_state = fairhetero_aggregate(
+                    model_updates["gtsrb"],
+                    client_loss,
+                    clients_gtsrb,
+                    "gtsrb"
+                )
+                global_models["gtsrb"].load_state_dict(new_state)
 
             # =====================================================
             # 5) MÉTRICAS DE FAIRNESS (PADRONIZADAS ↑)

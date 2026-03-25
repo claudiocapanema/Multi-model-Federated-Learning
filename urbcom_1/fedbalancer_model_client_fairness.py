@@ -43,6 +43,9 @@ LR = 0.01
 # DIRICHLET_ALPHA = 0.1
 DIRICHLET_ALPHA = 1.0
 
+LOSS_THRESHOLD = 0.0
+LOSS_THRESHOLD_RATIO = 0.0
+
 # =====================================================
 # MODEL COST (FLOPs POR AMOSTRA)
 # =====================================================
@@ -126,9 +129,25 @@ logs = {}
 
 client_resource_usage = {}
 
-# =====================================================
-# RECURSOS E VIABILIDADE
-# =====================================================
+def update_loss_threshold(client_loss):
+
+    losses = []
+
+    for cid in client_loss:
+        for m in client_loss[cid]:
+            losses.append(client_loss[cid][m])
+
+    ll = min(losses)
+    lh = np.percentile(losses, 80)
+
+    return ll + (lh - ll) * LOSS_THRESHOLD_RATIO
+
+def compute_deadline(clients):
+
+    times = [estimate_training_time(cid, "cifar") for cid in clients]
+
+    # simples: percentil 80 (proxy do paper)
+    return np.percentile(times, 80)
 
 # =====================================================
 # TRAINING TIME (REALISTA + DIRICHLET)
@@ -256,7 +275,7 @@ DATASET_INPUT_MAP = {
 }
 
 
-def client_update(dataset_name, model, loader, epochs, lr):
+def client_update(dataset_name, model, loader, epochs, lr, cid, model_name, deadline):
 
     model = copy.deepcopy(model)
     model.train()
@@ -267,8 +286,17 @@ def client_update(dataset_name, model, loader, epochs, lr):
     total_loss, total_samples = 0.0, 0
     key = DATASET_INPUT_MAP[dataset_name]
 
+    selected_loader = select_samples(
+        loader,
+        client_loss[cid][model_name],
+        LOSS_THRESHOLD,
+        cid,
+        model_name,
+        deadline
+    )
+
     for _ in range(epochs):
-        for batch in loader:
+        for batch in selected_loader:
 
             x = batch[key]
             y = batch["label"]
@@ -284,7 +312,8 @@ def client_update(dataset_name, model, loader, epochs, lr):
             total_loss += loss.item() * x.size(0)
             total_samples += x.size(0)
 
-    return model.state_dict(), total_loss / total_samples, total_samples
+    avg_loss = total_loss / total_samples if total_samples > 0 else 0.0
+    return model.state_dict(), avg_loss, total_samples
 
 
 @torch.no_grad()
@@ -360,7 +389,36 @@ def clear_previous_results():
         if os.path.exists(filename):
             os.remove(filename)
 
+def select_samples(loader, loss_value, threshold, cid, model_name, deadline, p=0.7):
 
+    selected_batches = []
+
+    # tempo total disponível
+    train_time = estimate_training_time(cid, model_name)
+
+    if train_time == 0:
+        return loader
+
+    # fração treinável (proxy de S)
+    frac = min(1.0, deadline / train_time)
+
+    max_batches = max(1, int(len(loader) * frac))
+
+    for batch in loader:
+
+        batch_loss = loss_value * np.random.uniform(0.8, 1.2)
+
+        if batch_loss >= threshold:
+            selected_batches.append(batch)
+        else:
+            if np.random.rand() < (1 - p):
+                selected_batches.append(batch)
+
+        # ❗ limitar por capacidade (ESSENCIAL)
+        if len(selected_batches) >= max_batches:
+            break
+
+    return selected_batches
 
 def run_experiment():
 
@@ -580,86 +638,51 @@ def run_experiment():
             real_training_counter = {m: 0 for m in global_models}
 
             # =====================================================
-            # 1) SELEÇÃO DE CLIENTES (CORE DO MÉTO DO)
-            # Balanced Resource + Fairness entre clientes
+            # CLIENT SELECTION (ORDEM CORRETA)
             # =====================================================
+
+            all_clients = list(range(NUM_CLIENTS))
+            random.shuffle(all_clients)
+
+            # oversampling
+            candidate_clients = all_clients[:K_CLIENTS * 3]
+
+            # ✅ DEADLINE precisa vir antes
+            DEADLINE = compute_deadline(candidate_clients)
+
+            valid_clients = []
+
+            for cid in candidate_clients:
+                train_time_cifar = estimate_training_time(cid, "cifar")
+                train_time_gtsrb = estimate_training_time(cid, "gtsrb")
+
+                if (train_time_cifar <= DEADLINE) or (train_time_gtsrb <= DEADLINE):
+                    valid_clients.append(cid)
+
+            # limitar no máximo K_CLIENTS
+            selected_clients = valid_clients[:K_CLIENTS]
 
             clients_cifar = []
             clients_gtsrb = []
 
-            # controle de budget por rodada
-            resource_usage = {
-                "cifar": 0.0,
-                "gtsrb": 0.0
-            }
+            for i, cid in enumerate(selected_clients):
+                if i % 2 == 0:
+                    clients_cifar.append(cid)
+                else:
+                    clients_gtsrb.append(cid)
 
-            # embaralha clientes (ordem aleatória)
-            all_clients = list(range(NUM_CLIENTS))
-
-            # =========================
-            # CIFAR
-            # =========================
-            cifar_scores = []
-
-            for cid in all_clients:
-
-                loss = client_loss[cid]["cifar"]
-
-                train_time = estimate_training_time(cid, "cifar")
-
-                if train_time <= 0:
-                    continue
-
-                # FedBalancer (estável)
-                score = loss / (train_time + 1e-8)
-
-                # pequena perturbação para evitar empates determinísticos
-                score *= np.random.uniform(0.99, 1.01)
-
-                cifar_scores.append((cid, score))
-
-            # ordenar por score
-            cifar_scores.sort(key=lambda x: x[1], reverse=True)
-
-            # selecionar top-K (multi-modelo mantido)
-            clients_cifar = [cid for cid, _ in cifar_scores[:K_CLIENTS // 2]]
-
-            # =========================
-            # GTSRB
-            # =========================
-            gtsrb_scores = []
-
-            for cid in all_clients:
-
-                loss = client_loss[cid]["gtsrb"]
-
-                train_time = estimate_training_time(cid, "gtsrb")
-
-                if train_time <= 0:
-                    continue
-
-                # FedBalancer (estável)
-                score = loss / (train_time + 1e-8)
-
-                # pequena perturbação para evitar empates determinísticos
-                score *= np.random.uniform(0.99, 1.01)
-
-                gtsrb_scores.append((cid, score))
-
-            gtsrb_scores.sort(key=lambda x: x[1], reverse=True)
-
-            clients_gtsrb = [cid for cid, _ in gtsrb_scores[:K_CLIENTS // 2]]
+            clients_cifar = clients_cifar[:K_CLIENTS // 2]
+            clients_gtsrb = clients_gtsrb[:K_CLIENTS // 2]
 
             # -----------------------------
             # UPDATE RESOURCE TRACKING
             # -----------------------------
-            for cid in clients_cifar:
-                train_time = estimate_training_time(cid, "cifar")
-                client_resource_usage[cid]["cifar"] += train_time
+            for cid in selected_clients:
+                if cid in clients_cifar:
+                    client_resource_usage[cid]["cifar"] += estimate_training_time(cid, "cifar")
 
-            for cid in clients_gtsrb:
-                train_time = estimate_training_time(cid, "gtsrb")
-                client_resource_usage[cid]["gtsrb"] += train_time
+                if cid in clients_gtsrb:
+                    client_resource_usage[cid]["gtsrb"] += estimate_training_time(cid, "gtsrb")
 
             # =====================================================
             # 2) TREINAMENTO LOCAL — CIFAR
@@ -667,14 +690,21 @@ def run_experiment():
             for cid in clients_cifar:
 
                 train_time = estimate_training_time(cid, "cifar")
+
+                if train_time > DEADLINE:
+                    continue
+
                 local_model = copy.deepcopy(global_models["cifar"])
 
                 state_dict, loss, n_samples = client_update(
                     "CIFAR10",
                     local_model,
                     train_loaders[cid]["cifar"],
-                    epochs=LOCAL_EPOCHS,
-                    lr=LR
+                    LOCAL_EPOCHS,
+                    LR,
+                    cid,
+                    "cifar",
+                    DEADLINE
                 )
 
                 client_loss[cid]["cifar"] = loss
@@ -688,14 +718,21 @@ def run_experiment():
             for cid in clients_gtsrb:
 
                 train_time = estimate_training_time(cid, "gtsrb")
+
+                if train_time > DEADLINE:
+                    continue
+
                 local_model = copy.deepcopy(global_models["gtsrb"])
 
                 state_dict, loss, n_samples = client_update(
                     "GTSRB",
                     local_model,
                     train_loaders[cid]["gtsrb"],
-                    epochs=LOCAL_EPOCHS,
-                    lr=LR
+                    LOCAL_EPOCHS,
+                    LR,
+                    cid,
+                    "gtsrb",
+                    DEADLINE
                 )
 
                 client_loss[cid]["gtsrb"] = loss
@@ -844,6 +881,16 @@ def run_experiment():
                 f"CIFAR: {real_training_counter['cifar']} | "
                 f"GTSRB: {real_training_counter['gtsrb']}"
             )
+
+            # =====================================================
+            # UPDATE LOSS THRESHOLD (FedBalancer)
+            # =====================================================
+            global LOSS_THRESHOLD, LOSS_THRESHOLD_RATIO
+
+            # crescimento gradual (simples e estável)
+            LOSS_THRESHOLD_RATIO = min(1.0, LOSS_THRESHOLD_RATIO + 0.02)
+
+            LOSS_THRESHOLD = update_loss_threshold(client_loss)
 
 
 if __name__ == "__main__":

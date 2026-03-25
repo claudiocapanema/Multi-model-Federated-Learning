@@ -32,7 +32,7 @@ BASE_SEED = 42
 NUM_FOLDS = 1
 NUM_CLIENTS = 40
 ROUNDS = 100
-FRAC = 0.2
+FRAC = 0.5
 K_CLIENTS = int(FRAC * NUM_CLIENTS)   # exemplo: 30% no máximo
 
 LOCAL_EPOCHS = 1
@@ -505,10 +505,19 @@ def run_experiment():
             all_clients = list(range(NUM_CLIENTS))
             random.shuffle(all_clients)
 
-            clients_cifar = all_clients[:K_CLIENTS]
+            selected_clients = all_clients[:K_CLIENTS]
 
-            random.shuffle(all_clients)
-            clients_gtsrb = all_clients[:K_CLIENTS]
+            # -------------------------------------------------
+            # GARANTIR: 1 cliente → 1 modelo
+            # -------------------------------------------------
+            clients_cifar = []
+            clients_gtsrb = []
+
+            for i, cid in enumerate(selected_clients):
+                if i % 2 == 0:
+                    clients_cifar.append(cid)
+                else:
+                    clients_gtsrb.append(cid)
 
             # controle de recurso (mantido só para logging)
             resource_usage = {

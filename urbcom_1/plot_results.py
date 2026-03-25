@@ -7,7 +7,7 @@ RESULTS_DIR = "results"
 FRAC = 0.3
 ALPHA = 1.0
 
-BASELINE_FRACS = [0.2, 0.3, 0.4]
+BASELINE_FRACS = [0.2, 0.3, 0.4, 0.5]
 
 RESOURCE_METRICS = [
     "resource_usage_cifar",
@@ -15,12 +15,13 @@ RESOURCE_METRICS = [
 ]
 
 ALGORITHM_ORDER = [
-    "proposta",
+    "fair_resource",
     "fairhetero",
     "fedbalancer",
     "baseline_f0.2",
     "baseline_f0.3",
-    "baseline_f0.4"
+    "baseline_f0.4",
+    "baseline_f0.5"
 ]
 
 def get_algorithm_order(df):
@@ -195,14 +196,12 @@ def load_results():
         # -----------------------------
         elif file.startswith("proposta_"):
 
-            if f"frac_{FRAC}" in file and f"alpha_{ALPHA}" in file:
+            df = pd.read_csv(path)
 
-                df = pd.read_csv(path)
+            df["algorithm"] = "fair_resource"
+            df["frac"] = FRAC
 
-                df["algorithm"] = "proposta"
-                df["frac"] = FRAC
-
-                dfs.append(df)
+            dfs.append(df)
 
         # -----------------------------
         # FAIRHETERO
@@ -251,12 +250,18 @@ def plot_accuracy(df):
         plt.figure(figsize=(6,4))
 
         for alg in get_algorithm_order(df):
+            subset = df[df["algorithm"] == alg]
+
+            print(f"\nALG: {alg}")
+            print(subset.head())
 
             curve = (
                 subset[subset["algorithm"] == alg]
                 .groupby("round")["global_acc"]
                 .mean()
             )
+
+            print("curva: ", alg, curve)
 
             plt.plot(curve.index, curve.values, label=alg)
 
@@ -328,9 +333,13 @@ def plot_cumulative_fairness(df):
         plt.close()
 
 def main():
-
     df = load_results()
 
+    print("\nALGORITHMS FOUND:")
+    print(df["algorithm"].unique())
+
+    print("\nFILES LOADED:")
+    print(len(df))
     # accuracy por dataset
     plot_accuracy(df)
 
