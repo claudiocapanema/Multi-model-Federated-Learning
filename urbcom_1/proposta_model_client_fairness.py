@@ -42,6 +42,8 @@ LR = 0.01
 # DIRICHLET_ALPHA = 0.1
 DIRICHLET_ALPHA = 1.0
 
+global FAIR_RESOURCE_BUDGET
+
 MODEL_COST = {
     "cifar": {
         "flops_per_sample": 5e6,   # modelo leve
@@ -71,12 +73,6 @@ LIGHT_MODEL = min(
 
 # permitir aproximadamente K_CLIENTS treinamentos por rodada
 avg_speed = 0.65
-
-FAIR_RESOURCE_BUDGET = (
-    K_CLIENTS *
-    MODEL_COST[LIGHT_MODEL]["flops_per_sample"] /
-    (1e7 * avg_speed)
-)
 
 Path("results/").mkdir(parents=True, exist_ok=True)
 
@@ -119,7 +115,7 @@ client_acc = {}
 client_loss = {}
 client_delta_acc = {}
 global_acc_history = {}
-proposta_logs = {}
+logs = {}
 
 # =====================================================
 # FAIRNESS STATES
@@ -166,7 +162,7 @@ def reset_experiment_state(train_loaders):
     global client_acc
     global client_loss
     global client_delta_acc
-    global proposta_logs
+    global logs
     global global_acc_history
 
     # -------- Modelos --------
@@ -235,7 +231,7 @@ def reset_experiment_state(train_loaders):
     }
 
     # -------- Logs --------
-    proposta_logs = {
+    logs = {
         "clients_per_model": [],
 
         "resource_usage_cifar": [],
@@ -445,6 +441,44 @@ def run_experiment():
 
         reset_experiment_state(train_loaders)
 
+        global FAIR_RESOURCE_BUDGET
+
+        avg_data_cifar = np.mean([client_resources[c]["data_size_cifar"] for c in range(NUM_CLIENTS)])
+        avg_data_gtsrb = np.mean([client_resources[c]["data_size_gtsrb"] for c in range(NUM_CLIENTS)])
+
+        avg_data = min(avg_data_cifar, avg_data_gtsrb)
+
+        FAIR_RESOURCE_BUDGET = (
+                K_CLIENTS *
+                MODEL_COST[LIGHT_MODEL]["flops_per_sample"] *
+                avg_data /
+                (1e7 * avg_speed)
+        )
+
+        # =====================================================
+        # FAIR RESOURCE BUDGET (AGORA COM client_resources válido)
+        # =====================================================
+        avg_data_cifar = np.mean([
+            client_resources[c]["data_size_cifar"]
+            for c in range(NUM_CLIENTS)
+        ])
+
+        avg_data_gtsrb = np.mean([
+            client_resources[c]["data_size_gtsrb"]
+            for c in range(NUM_CLIENTS)
+        ])
+
+        avg_data = min(avg_data_cifar, avg_data_gtsrb)
+
+        FAIR_RESOURCE_BUDGET = (
+                K_CLIENTS *
+                MODEL_COST[LIGHT_MODEL]["flops_per_sample"] *
+                avg_data /
+                (1e7 * avg_speed)
+        )
+
+        print(f"💰 FAIR_RESOURCE_BUDGET: {FAIR_RESOURCE_BUDGET:.4f}")
+
         # =====================================================
         # LOOP PRINCIPAL DE RODADAS FEDERADAS
         # =====================================================
@@ -461,6 +495,24 @@ def run_experiment():
             # =====================================================
             # PRECOMPUTE PARA JAIN (INTER-CLIENT FAIRNESS)
             # =====================================================
+
+            # -------------------------------------------------
+            # Seed por rodada (garante reprodutibilidade completa)
+            # -------------------------------------------------
+            round_seed = fold_seed + rnd
+            random.seed(round_seed)
+            np.random.seed(round_seed)
+            torch.manual_seed(round_seed)
+
+            # =====================================================
+            # CACHE DE TEMPO DE TREINO (CRÍTICO)
+            # =====================================================
+            training_time_cache = {}
+
+            def get_train_time(cid, model_name):
+                if (cid, model_name) not in training_time_cache:
+                    training_time_cache[(cid, model_name)] = estimate_training_time(cid, model_name)
+                return training_time_cache[(cid, model_name)]
 
             utilization = []
 
@@ -514,17 +566,27 @@ def run_experiment():
             # =====================================================
             # LOOP DE DECISÃO POR CLIENTE (NOVO — MAX FAIRNESS)
             # =====================================================
+            # =====================================================
+            # LOOP DE DECISÃO POR CLIENTE (FIXED — STABLE FAIRNESS)
+            # =====================================================
+
             total_cifar_usage = sum(client_resource_usage[c]["cifar"] for c in range(NUM_CLIENTS))
             total_gtsrb_usage = sum(client_resource_usage[c]["gtsrb"] for c in range(NUM_CLIENTS))
 
+            max_total_clients = K_CLIENTS * 2  # garante mínimo de updates
+
             for cid in all_clients:
+
+                # 🔒 garante limite de clientes (evita under-training)
+                if len(clients_cifar) + len(clients_gtsrb) >= max_total_clients:
+                    break
 
                 candidates = []
 
                 # =========================
                 # TESTA CIFAR
                 # =========================
-                train_time = estimate_training_time(cid, "cifar")
+                train_time = get_train_time(cid, "cifar")
 
                 if resource_usage["cifar"] + train_time <= FAIR_RESOURCE_BUDGET:
 
@@ -532,19 +594,14 @@ def run_experiment():
                     other_usage = total_gtsrb_usage
                     total = new_usage + other_usage
 
-                    # -------- Inter-model fairness (↑ melhor)
                     if total > 0:
                         imbalance = abs(new_usage - other_usage) / total
                         inter_model_fairness = 1.0 - imbalance
                     else:
                         inter_model_fairness = 1.0
 
-                    # =========================
-                    # INTER-CLIENT FAIRNESS (JAIN INCREMENTAL)
-                    # =========================
-
+                    # -------- Jain incremental
                     capacity = client_resources[cid]["speed"]
-
                     current_usage = (
                             client_resource_usage[cid]["cifar"] +
                             client_resource_usage[cid]["gtsrb"]
@@ -557,45 +614,39 @@ def run_experiment():
                         u_old = 0.0
                         u_new = 0.0
 
-                    # atualiza soma e soma dos quadrados incrementalmente
                     new_sum_u = sum_u - u_old + u_new
                     new_sum_u2 = sum_u2 - (u_old * u_old) + (u_new * u_new)
 
                     if new_sum_u2 > 0:
-                        inter_client_fairness = (new_sum_u ** 2) / (N * new_sum_u2)
+                        inter_client_fairness = (new_sum_u ** 2) / (NUM_CLIENTS * new_sum_u2)
                     else:
                         inter_client_fairness = 1.0
 
-                    # -------- Intra-client fairness
+                    # -------- Intra-client
                     client_cifar = client_resource_usage[cid]["cifar"] + train_time
                     client_gtsrb = client_resource_usage[cid]["gtsrb"]
-                    client_total = client_cifar + client_gtsrb
+                    total_client = client_cifar + client_gtsrb
 
-                    if client_total > 0:
-                        intra_imbalance = abs(client_cifar - client_gtsrb) / client_total
+                    if total_client > 0:
+                        intra_imbalance = abs(client_cifar - client_gtsrb) / total_client
                         intra_client_fairness = 1.0 - intra_imbalance
                     else:
                         intra_client_fairness = 1.0
 
-                    # -------- Score (MAXIMIZAR)
                     score = (
                             (1 - LAMBDA_CAPACITY - LAMBDA_INTRA) * inter_model_fairness
                             + LAMBDA_CAPACITY * inter_client_fairness
                             + LAMBDA_INTRA * intra_client_fairness
                     )
 
-                    candidates.append(("cifar", score))
+                    candidates.append(("cifar", score, train_time))
 
                 # =========================
                 # TESTA GTSRB
                 # =========================
-                train_time = estimate_training_time(cid, "gtsrb")
+                train_time = get_train_time(cid, "gtsrb")
 
                 if resource_usage["gtsrb"] + train_time <= FAIR_RESOURCE_BUDGET:
-
-                    # =========================
-                    # INTER-MODEL FAIRNESS GLOBAL
-                    # =========================
 
                     new_usage = total_gtsrb_usage + train_time
                     other_usage = total_cifar_usage
@@ -607,12 +658,7 @@ def run_experiment():
                     else:
                         inter_model_fairness = 1.0
 
-                    # =========================
-                    # INTER-CLIENT FAIRNESS (JAIN INCREMENTAL)
-                    # =========================
-
                     capacity = client_resources[cid]["speed"]
-
                     current_usage = (
                             client_resource_usage[cid]["cifar"] +
                             client_resource_usage[cid]["gtsrb"]
@@ -629,16 +675,16 @@ def run_experiment():
                     new_sum_u2 = sum_u2 - (u_old * u_old) + (u_new * u_new)
 
                     if new_sum_u2 > 0:
-                        inter_client_fairness = (new_sum_u ** 2) / (N * new_sum_u2)
+                        inter_client_fairness = (new_sum_u ** 2) / (NUM_CLIENTS * new_sum_u2)
                     else:
                         inter_client_fairness = 1.0
 
                     client_cifar = client_resource_usage[cid]["cifar"]
                     client_gtsrb = client_resource_usage[cid]["gtsrb"] + train_time
-                    client_total = client_cifar + client_gtsrb
+                    total_client = client_cifar + client_gtsrb
 
-                    if client_total > 0:
-                        intra_imbalance = abs(client_cifar - client_gtsrb) / client_total
+                    if total_client > 0:
+                        intra_imbalance = abs(client_cifar - client_gtsrb) / total_client
                         intra_client_fairness = 1.0 - intra_imbalance
                     else:
                         intra_client_fairness = 1.0
@@ -649,30 +695,26 @@ def run_experiment():
                             + LAMBDA_INTRA * intra_client_fairness
                     )
 
-                    candidates.append(("gtsrb", score))
+                    candidates.append(("gtsrb", score, train_time))
 
                 if not candidates:
                     continue
 
-                # 🔥 AGORA MAXIMIZA
+                # =========================
+                # ESCOLHA ÓTIMA
+                # =========================
+                chosen_model, _, train_time = max(candidates, key=lambda x: x[1])
 
-                chosen_model = max(candidates, key=lambda x: x[1])[0]
-
-                # PRIMEIRO recalcula
-                train_time = estimate_training_time(cid, chosen_model)
-
-                # DEPOIS atualiza
+                # -------- atualiza uso global
                 if chosen_model == "cifar":
                     total_cifar_usage += train_time
+                    clients_cifar.append(cid)
                 else:
                     total_gtsrb_usage += train_time
+                    clients_gtsrb.append(cid)
 
-                # =====================================================
-                # ATUALIZA JAIN GLOBAL APÓS ESCOLHA
-                # =====================================================
-
+                # -------- atualiza Jain incremental
                 capacity = client_resources[cid]["speed"]
-
                 current_usage = (
                         client_resource_usage[cid]["cifar"] +
                         client_resource_usage[cid]["gtsrb"]
@@ -688,11 +730,7 @@ def run_experiment():
                 sum_u = sum_u - u_old + u_new
                 sum_u2 = sum_u2 - (u_old * u_old) + (u_new * u_new)
 
-                if chosen_model == "cifar":
-                    clients_cifar.append(cid)
-                else:
-                    clients_gtsrb.append(cid)
-
+                # -------- atualiza recursos
                 resource_usage[chosen_model] += train_time
                 client_resource_usage[cid][chosen_model] += train_time
 
@@ -701,7 +739,7 @@ def run_experiment():
             # =====================================================
             for cid in clients_cifar:
 
-                train_time = estimate_training_time(cid, "cifar")
+                train_time = get_train_time(cid, "cifar")
                 local_model = copy.deepcopy(global_models["cifar"])
 
                 state_dict, loss, n_samples = client_update(
@@ -720,7 +758,7 @@ def run_experiment():
             # =====================================================
             for cid in clients_gtsrb:
 
-                train_time = estimate_training_time(cid, "gtsrb")
+                train_time = get_train_time(cid, "gtsrb")
                 local_model = copy.deepcopy(global_models["gtsrb"])
 
                 state_dict, loss, n_samples = client_update(
@@ -809,17 +847,19 @@ def run_experiment():
                 for cid in clients_gtsrb
             )
 
-            proposta_logs["resource_usage_cifar"].append(resource_cifar_real)
-            proposta_logs["resource_usage_gtsrb"].append(resource_gtsrb_real)
+            logs["resource_usage_cifar"].append(resource_cifar_real)
+            logs["resource_usage_gtsrb"].append(resource_gtsrb_real)
 
-            proposta_logs["inter_model_fairness"].append(inter_model_fairness)
-            proposta_logs["inter_client_fairness"].append(inter_client_fairness)
-            proposta_logs["intra_client_fairness"].append(intra_client_fairness)
+            logs["inter_model_fairness"].append(inter_model_fairness)
+            logs["inter_client_fairness"].append(inter_client_fairness)
+            logs["intra_client_fairness"].append(intra_client_fairness)
+            # =====================================================
+            # 7) AVALIAÇÃO GLOBAL
+            # =====================================================
             # =====================================================
             # 7) AVALIAÇÃO GLOBAL
             # =====================================================
             for model_name, model in global_models.items():
-
                 dataset_name = {
                     "cifar": "CIFAR10",
                     "gtsrb": "GTSRB"
@@ -832,6 +872,11 @@ def run_experiment():
                 )
 
                 global_acc_history[model_name].append(global_acc)
+
+                # 🔥 PRINT DA ACURÁCIA POR RODADA
+                print(
+                    f"📊 Rodada {rnd:03d} | {model_name.upper()} Accuracy: {global_acc:.4f}"
+                )
 
                 # salvar linha no CSV
                 row_data = {
@@ -847,12 +892,12 @@ def run_experiment():
                     "clients_selected": real_training_counter[model_name],
                     "clients_selected_total": sum(real_training_counter.values()),
 
-                    "resource_usage_cifar": proposta_logs["resource_usage_cifar"][-1],
-                    "resource_usage_gtsrb": proposta_logs["resource_usage_gtsrb"][-1],
+                    "resource_usage_cifar": logs["resource_usage_cifar"][-1],
+                    "resource_usage_gtsrb": logs["resource_usage_gtsrb"][-1],
 
-                    "inter_model_fairness": proposta_logs["inter_model_fairness"][-1],
-                    "inter_client_fairness": proposta_logs["inter_client_fairness"][-1],
-                    "intra_client_fairness": proposta_logs["intra_client_fairness"][-1],
+                    "inter_model_fairness": logs["inter_model_fairness"][-1],
+                    "inter_client_fairness": logs["inter_client_fairness"][-1],
+                    "intra_client_fairness": logs["intra_client_fairness"][-1],
                 }
 
                 filename = (
@@ -862,13 +907,14 @@ def run_experiment():
                     f"_lambdaCap_{LAMBDA_CAPACITY}"
                     f"_lambdaIntra_{LAMBDA_INTRA}.csv"
                 )
+
                 append_result_to_csv(row_data, filename)
 
             # =====================================================
             # 8) LOG FINAL DA RODADA
             # =====================================================
             clients_per_model = real_training_counter.copy()
-            proposta_logs["clients_per_model"].append(clients_per_model)
+            logs["clients_per_model"].append(clients_per_model)
 
             print(
                 f"📌 Clientes treinados | "

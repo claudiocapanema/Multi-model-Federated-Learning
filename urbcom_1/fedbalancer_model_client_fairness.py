@@ -77,12 +77,6 @@ LIGHT_MODEL = min(
 # permitir aproximadamente K_CLIENTS treinamentos por rodada
 avg_speed = 0.65
 
-FAIR_RESOURCE_BUDGET = (
-    K_CLIENTS *
-    MODEL_COST[LIGHT_MODEL]["flops_per_sample"] /
-    (1e7 * avg_speed)
-)
-
 Path("results/").mkdir(parents=True, exist_ok=True)
 
 # =====================================================
@@ -124,7 +118,7 @@ client_acc = {}
 client_loss = {}
 client_delta_acc = {}
 global_acc_history = {}
-fedbalancer_logs = {}
+logs = {}
 
 # =====================================================
 # FAIRNESS STATES
@@ -175,7 +169,7 @@ def reset_experiment_state(train_loaders):
     global client_acc
     global client_loss
     global client_delta_acc
-    global fedbalancer_logs
+    global logs
     global global_acc_history
 
     # -------- Modelos --------
@@ -232,7 +226,7 @@ def reset_experiment_state(train_loaders):
     }
 
     # -------- Logs --------
-    fedbalancer_logs = {
+    logs = {
         "clients_per_model": [],
 
         "resource_usage_cifar": [],
@@ -436,6 +430,68 @@ def run_experiment():
         reset_experiment_state(train_loaders)
 
         # =====================================================
+        # INICIALIZAÇÃO REAL DO LOSS (ESSENCIAL PARA FEDBALANCER)
+        # =====================================================
+
+        print("🔎 Inicializando loss real dos clientes...")
+
+        loss_fn = nn.CrossEntropyLoss()
+
+        for cid in range(NUM_CLIENTS):
+            for model_name in ["cifar", "gtsrb"]:
+
+                model = global_models[model_name]
+
+                dataset_name = {
+                    "cifar": "CIFAR10",
+                    "gtsrb": "GTSRB"
+                }[model_name]
+
+                loader = train_loaders[cid][model_name]
+
+                model.eval()
+
+                total_loss, total_samples = 0.0, 0
+
+                with torch.no_grad():
+                    for batch in loader:
+                        x = batch[DATASET_INPUT_MAP[dataset_name]]
+                        y = batch["label"]
+
+                        x, y = x.to(DEVICE), y.to(DEVICE)
+
+                        out = model(x)
+                        loss = loss_fn(out, y)
+
+                        total_loss += loss.item() * x.size(0)
+                        total_samples += x.size(0)
+
+                client_loss[cid][model_name] = total_loss / total_samples
+
+        print("✅ Loss inicializado.")
+
+        # =====================================================
+        # FAIR RESOURCE BUDGET (COMPATÍVEL COM train_time)
+        # =====================================================
+
+        avg_data_cifar = np.mean([
+            client_resources[c]["data_size_cifar"]
+            for c in range(NUM_CLIENTS)
+        ])
+
+        avg_data_gtsrb = np.mean([
+            client_resources[c]["data_size_gtsrb"]
+            for c in range(NUM_CLIENTS)
+        ])
+
+        avg_data = min(avg_data_cifar, avg_data_gtsrb)
+
+        avg_speed_real = np.mean([
+            client_resources[c]["speed"]
+            for c in range(NUM_CLIENTS)
+        ])
+
+        # =====================================================
         # LOOP PRINCIPAL DE RODADAS FEDERADAS
         # =====================================================
         for rnd in range(1, ROUNDS + 1):
@@ -449,15 +505,44 @@ def run_experiment():
             torch.manual_seed(round_seed)
 
             # =====================================================
-            # FIX: garantir loss válida (evita infinito na 1ª rodada)
+            # ATUALIZAÇÃO PERIÓDICA DO LOSS (CRÍTICO PARA DINÂMICA)
             # =====================================================
 
-            all_clients = list(range(NUM_CLIENTS))
+            if rnd % 5 == 0:
+                print("🔄 Atualizando loss global...")
 
-            for cid in all_clients:
-                for model_name in ["cifar", "gtsrb"]:
-                    if not np.isfinite(client_loss[cid][model_name]):
-                        client_loss[cid][model_name] = 1.0
+                loss_fn = nn.CrossEntropyLoss()
+
+                for cid in range(NUM_CLIENTS):
+                    for model_name in ["cifar", "gtsrb"]:
+
+                        model = global_models[model_name]
+
+                        dataset_name = {
+                            "cifar": "CIFAR10",
+                            "gtsrb": "GTSRB"
+                        }[model_name]
+
+                        loader = train_loaders[cid][model_name]
+
+                        model.eval()
+
+                        total_loss, total_samples = 0.0, 0
+
+                        with torch.no_grad():
+                            for batch in loader:
+                                x = batch[DATASET_INPUT_MAP[dataset_name]]
+                                y = batch["label"]
+
+                                x, y = x.to(DEVICE), y.to(DEVICE)
+
+                                out = model(x)
+                                loss = loss_fn(out, y)
+
+                                total_loss += loss.item() * x.size(0)
+                                total_samples += x.size(0)
+
+                        client_loss[cid][model_name] = total_loss / total_samples
 
             # =====================================================
             # PRECOMPUTE PARA JAIN (INTER-CLIENT FAIRNESS)
@@ -511,90 +596,59 @@ def run_experiment():
             # embaralha clientes (ordem aleatória)
             all_clients = list(range(NUM_CLIENTS))
 
-            # =====================================================
-            # FEDBALANCER CLIENT SELECTION
-            # =====================================================
-
-            clients_cifar = []
-            clients_gtsrb = []
-
-            resource_usage = {
-                "cifar": 0.0,
-                "gtsrb": 0.0
-            }
-
-            all_clients = list(range(NUM_CLIENTS))
-
-            # -----------------------------
+            # =========================
             # CIFAR
-            # -----------------------------
+            # =========================
             cifar_scores = []
 
             for cid in all_clients:
 
                 loss = client_loss[cid]["cifar"]
 
-                # tratamento mínimo (necessário, mas não altera o algoritmo)
-                if not np.isfinite(loss):
-                    loss = 1.0
-
                 train_time = estimate_training_time(cid, "cifar")
 
                 if train_time <= 0:
                     continue
 
-                # FedBalancer PURO
-                score = loss / train_time
+                # FedBalancer (estável)
+                score = loss / (train_time + 1e-8)
+
+                # pequena perturbação para evitar empates determinísticos
+                score *= np.random.uniform(0.99, 1.01)
 
                 cifar_scores.append((cid, score))
 
+            # ordenar por score
             cifar_scores.sort(key=lambda x: x[1], reverse=True)
 
-            for cid, _ in cifar_scores:
+            # selecionar top-K (multi-modelo mantido)
+            clients_cifar = [cid for cid, _ in cifar_scores[:K_CLIENTS // 2]]
 
-                if len(clients_cifar) >= K_CLIENTS:
-                    break
-
-                train_time = estimate_training_time(cid, "cifar")
-
-                if resource_usage["cifar"] + train_time <= FAIR_RESOURCE_BUDGET:
-                    clients_cifar.append(cid)
-                    resource_usage["cifar"] += train_time
-
-            # -----------------------------
+            # =========================
             # GTSRB
-            # -----------------------------
+            # =========================
             gtsrb_scores = []
 
             for cid in all_clients:
 
                 loss = client_loss[cid]["gtsrb"]
 
-                if not np.isfinite(loss):
-                    loss = 1.0
-
                 train_time = estimate_training_time(cid, "gtsrb")
 
                 if train_time <= 0:
                     continue
 
-                # FedBalancer PURO
-                score = loss / train_time
+                # FedBalancer (estável)
+                score = loss / (train_time + 1e-8)
+
+                # pequena perturbação para evitar empates determinísticos
+                score *= np.random.uniform(0.99, 1.01)
 
                 gtsrb_scores.append((cid, score))
 
             gtsrb_scores.sort(key=lambda x: x[1], reverse=True)
 
-            for cid, _ in gtsrb_scores:
-
-                if len(clients_gtsrb) >= K_CLIENTS:
-                    break
-
-                train_time = estimate_training_time(cid, "gtsrb")
-
-                if resource_usage["gtsrb"] + train_time <= FAIR_RESOURCE_BUDGET:
-                    clients_gtsrb.append(cid)
-                    resource_usage["gtsrb"] += train_time
+            clients_gtsrb = [cid for cid, _ in gtsrb_scores[:K_CLIENTS // 2]]
 
             # -----------------------------
             # UPDATE RESOURCE TRACKING
@@ -724,12 +778,12 @@ def run_experiment():
                 for cid in clients_gtsrb
             )
 
-            fedbalancer_logs["resource_usage_cifar"].append(resource_cifar_real)
-            fedbalancer_logs["resource_usage_gtsrb"].append(resource_gtsrb_real)
+            logs["resource_usage_cifar"].append(resource_cifar_real)
+            logs["resource_usage_gtsrb"].append(resource_gtsrb_real)
 
-            fedbalancer_logs["inter_model_fairness"].append(inter_model_fairness)
-            fedbalancer_logs["inter_client_fairness"].append(inter_client_fairness)
-            fedbalancer_logs["intra_client_fairness"].append(intra_client_fairness)
+            logs["inter_model_fairness"].append(inter_model_fairness)
+            logs["inter_client_fairness"].append(inter_client_fairness)
+            logs["intra_client_fairness"].append(intra_client_fairness)
             # =====================================================
             # 7) AVALIAÇÃO GLOBAL
             # =====================================================
@@ -762,12 +816,12 @@ def run_experiment():
                     "clients_selected": real_training_counter[model_name],
                     "clients_selected_total": sum(real_training_counter.values()),
 
-                    "resource_usage_cifar": fedbalancer_logs["resource_usage_cifar"][-1],
-                    "resource_usage_gtsrb": fedbalancer_logs["resource_usage_gtsrb"][-1],
+                    "resource_usage_cifar": logs["resource_usage_cifar"][-1],
+                    "resource_usage_gtsrb": logs["resource_usage_gtsrb"][-1],
 
-                    "inter_model_fairness": fedbalancer_logs["inter_model_fairness"][-1],
-                    "inter_client_fairness": fedbalancer_logs["inter_client_fairness"][-1],
-                    "intra_client_fairness": fedbalancer_logs["intra_client_fairness"][-1],
+                    "inter_model_fairness": logs["inter_model_fairness"][-1],
+                    "inter_client_fairness": logs["inter_client_fairness"][-1],
+                    "intra_client_fairness": logs["intra_client_fairness"][-1],
                 }
 
                 filename = (
@@ -783,7 +837,7 @@ def run_experiment():
             # 8) LOG FINAL DA RODADA
             # =====================================================
             clients_per_model = real_training_counter.copy()
-            fedbalancer_logs["clients_per_model"].append(clients_per_model)
+            logs["clients_per_model"].append(clients_per_model)
 
             print(
                 f"📌 Clientes treinados | "

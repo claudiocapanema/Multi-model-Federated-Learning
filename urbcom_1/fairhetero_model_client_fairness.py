@@ -65,23 +65,6 @@ LAMBDA_INTRA = 0.3
 assert LAMBDA_CAPACITY + LAMBDA_INTRA <= 1.0
 
 # =====================================================
-# FAIR RESOURCE BUDGET
-# =====================================================
-LIGHT_MODEL = min(
-    MODEL_COST,
-    key=lambda m: MODEL_COST[m]["flops_per_sample"]
-)
-
-# permitir aproximadamente K_CLIENTS treinamentos por rodada
-avg_speed = 0.65
-
-FAIR_RESOURCE_BUDGET = (
-    K_CLIENTS *
-    MODEL_COST[LIGHT_MODEL]["flops_per_sample"] /
-    (1e7 * avg_speed)
-)
-
-# =====================================================
 # FAIRHETERO PARAMETERS
 # =====================================================
 
@@ -133,17 +116,13 @@ client_acc = {}
 client_loss = {}
 client_delta_acc = {}
 global_acc_history = {}
-fairhetero_logs = {}
+logs = {}
 
 # =====================================================
 # FAIRNESS STATES
 # =====================================================
 
 client_resource_usage = {}
-
-# =====================================================
-# RECURSOS E VIABILIDADE
-# =====================================================
 
 # =====================================================
 # TRAINING TIME (REALISTA + DIRICHLET)
@@ -184,7 +163,7 @@ def reset_experiment_state(train_loaders):
     global client_acc
     global client_loss
     global client_delta_acc
-    global fairhetero_logs
+    global logs
     global global_acc_history
 
     # -------- Modelos --------
@@ -241,13 +220,12 @@ def reset_experiment_state(train_loaders):
     }
 
     # -------- Logs --------
-    fedbalancer_logs = {
+    logs = {
         "clients_per_model": [],
 
         "resource_usage_cifar": [],
         "resource_usage_gtsrb": [],
 
-        # fairness padronizadas (↑ melhor)
         "inter_model_fairness": [],
         "inter_client_fairness": [],
         "intra_client_fairness": []
@@ -469,6 +447,47 @@ def run_experiment():
         reset_experiment_state(train_loaders)
 
         # =====================================================
+        # INICIALIZAÇÃO REAL DO LOSS (ESSENCIAL)
+        # =====================================================
+
+        print("🔎 Inicializando loss real dos clientes...")
+
+        for cid in range(NUM_CLIENTS):
+            for model_name in ["cifar", "gtsrb"]:
+
+                model = global_models[model_name]
+
+                dataset_name = {
+                    "cifar": "CIFAR10",
+                    "gtsrb": "GTSRB"
+                }[model_name]
+
+                loader = train_loaders[cid][model_name]
+
+                # calcular loss média
+                model.eval()
+                loss_fn = nn.CrossEntropyLoss()
+
+                total_loss, total_samples = 0.0, 0
+
+                with torch.no_grad():
+                    for batch in loader:
+                        x = batch[DATASET_INPUT_MAP[dataset_name]]
+                        y = batch["label"]
+
+                        x, y = x.to(DEVICE), y.to(DEVICE)
+
+                        out = model(x)
+                        loss = loss_fn(out, y)
+
+                        total_loss += loss.item() * x.size(0)
+                        total_samples += x.size(0)
+
+                client_loss[cid][model_name] = total_loss / total_samples
+
+        print("✅ Loss inicializado.")
+
+        # =====================================================
         # LOOP PRINCIPAL DE RODADAS FEDERADAS
         # =====================================================
         for rnd in range(1, ROUNDS + 1):
@@ -480,6 +499,45 @@ def run_experiment():
             random.seed(round_seed)
             np.random.seed(round_seed)
             torch.manual_seed(round_seed)
+
+            # =====================================================
+            # ATUALIZAÇÃO PERIÓDICA DO LOSS GLOBAL (CRÍTICO)
+            # =====================================================
+
+            if rnd % 5 == 0:
+                print("🔄 Atualizando loss global...")
+
+                for cid in range(NUM_CLIENTS):
+                    for model_name in ["cifar", "gtsrb"]:
+
+                        model = global_models[model_name]
+
+                        dataset_name = {
+                            "cifar": "CIFAR10",
+                            "gtsrb": "GTSRB"
+                        }[model_name]
+
+                        loader = train_loaders[cid][model_name]
+
+                        model.eval()
+                        loss_fn = nn.CrossEntropyLoss()
+
+                        total_loss, total_samples = 0.0, 0
+
+                        with torch.no_grad():
+                            for batch in loader:
+                                x = batch[DATASET_INPUT_MAP[dataset_name]]
+                                y = batch["label"]
+
+                                x, y = x.to(DEVICE), y.to(DEVICE)
+
+                                out = model(x)
+                                loss = loss_fn(out, y)
+
+                                total_loss += loss.item() * x.size(0)
+                                total_samples += x.size(0)
+
+                        client_loss[cid][model_name] = total_loss / total_samples
 
             # =====================================================
             # PRECOMPUTE PARA JAIN (INTER-CLIENT FAIRNESS)
@@ -517,35 +575,10 @@ def run_experiment():
             real_training_counter = {m: 0 for m in global_models}
 
             # =====================================================
-            # 1) SELEÇÃO DE CLIENTES (CORE DO MÉTO DO)
-            # Balanced Resource + Fairness entre clientes
-            # =====================================================
-
-            clients_cifar = []
-            clients_gtsrb = []
-
-            # controle de budget por rodada
-            resource_usage = {
-                "cifar": 0.0,
-                "gtsrb": 0.0
-            }
-
-            # embaralha clientes (ordem aleatória)
-            all_clients = list(range(NUM_CLIENTS))
-
-            # =====================================================
             # FAIRHETERO CLIENT SELECTION
             # =====================================================
 
             client_groups = assign_hardware_groups()
-
-            clients_cifar = []
-            clients_gtsrb = []
-
-            resource_usage = {
-                "cifar": 0.0,
-                "gtsrb": 0.0
-            }
 
             all_clients = list(range(NUM_CLIENTS))
 
@@ -570,9 +603,8 @@ def run_experiment():
 
                 loss = client_loss[cid][model_name]
 
-                # evitar inf inicial
                 if not np.isfinite(loss):
-                    loss = 1.0
+                    return 0.0
 
                 qm = Q_GROUP[g]
 
@@ -593,76 +625,54 @@ def run_experiment():
                     for l in cleaned_losses
                 ) / len(cleaned_losses)
 
-                # ===== FORMULAÇÃO CORRETA (gradiente Δm) =====
                 score = (loss ** qm) * (group_term ** ((Q_GLOBAL - qm) / (qm + 1)))
+
+                # pequena perturbação para evitar empates
+                noise = np.random.uniform(0.99, 1.01)
+                score *= noise
 
                 return score
 
             # -----------------------------
-            # CIFAR SELECTION
+            # FAIRHETERO SELECTION (MULTI-MODEL CORRETO)
             # -----------------------------
-            scores = []
 
-            # garantir que todos tenham loss válido
+            # garantir loss válida
             for cid in all_clients:
                 for model_name in ["cifar", "gtsrb"]:
                     if not np.isfinite(client_loss[cid][model_name]):
                         client_loss[cid][model_name] = 1.0
 
-            for cid in all_clients:
+            # =========================
+            # CIFAR
+            # =========================
+            cifar_scores = []
 
+            for cid in all_clients:
                 score = compute_fairhetero_score(cid, "cifar")
-                train_time = estimate_training_time(cid, "cifar")
+                cifar_scores.append((cid, score))
 
-                if train_time <= 0:
-                    continue
+            # ordenar por score (FairHetero puro)
+            cifar_scores.sort(key=lambda x: x[1], reverse=True)
 
-                final_score = score / (1 + train_time)
+            # selecionar top-K/2 (mantendo multi-modelo)
+            clients_cifar = [cid for cid, _ in cifar_scores[:K_CLIENTS // 2]]
 
-                scores.append((cid, final_score))
-
-            scores.sort(key=lambda x: x[1], reverse=True)
-
-            for cid, _ in scores:
-
-                if len(clients_cifar) >= K_CLIENTS:
-                    break
-
-                train_time = estimate_training_time(cid, "cifar")
-
-                if resource_usage["cifar"] + train_time <= FAIR_RESOURCE_BUDGET:
-                    clients_cifar.append(cid)
-                    resource_usage["cifar"] += train_time
-
-            # -----------------------------
-            # GTSRB SELECTION
-            # -----------------------------
-            scores = []
+            # =========================
+            # GTSRB
+            # =========================
+            gtsrb_scores = []
 
             for cid in all_clients:
-
                 score = compute_fairhetero_score(cid, "gtsrb")
-                train_time = estimate_training_time(cid, "gtsrb")
+                gtsrb_scores.append((cid, score))
 
-                if train_time <= 0:
-                    continue
+            gtsrb_scores.sort(key=lambda x: x[1], reverse=True)
 
-                final_score = score / (1 + train_time)
+            clients_gtsrb = [cid for cid, _ in gtsrb_scores[:K_CLIENTS // 2]]
 
-                scores.append((cid, final_score))
-
-            scores.sort(key=lambda x: x[1], reverse=True)
-
-            for cid, _ in scores:
-
-                if len(clients_gtsrb) >= K_CLIENTS:
-                    break
-
-                train_time = estimate_training_time(cid, "gtsrb")
-
-                if resource_usage["gtsrb"] + train_time <= FAIR_RESOURCE_BUDGET:
-                    clients_gtsrb.append(cid)
-                    resource_usage["gtsrb"] += train_time
+            if rnd % 10 == 0:
+                print("Top clients CIFAR:", clients_cifar[:5])
 
             # -----------------------------
             # UPDATE RESOURCE TRACKING
@@ -790,12 +800,12 @@ def run_experiment():
                 for cid in clients_gtsrb
             )
 
-            fairhetero_logs["resource_usage_cifar"].append(resource_cifar_real)
-            fairhetero_logs["resource_usage_gtsrb"].append(resource_gtsrb_real)
+            logs["resource_usage_cifar"].append(resource_cifar_real)
+            logs["resource_usage_gtsrb"].append(resource_gtsrb_real)
 
-            fairhetero_logs["inter_model_fairness"].append(inter_model_fairness)
-            fairhetero_logs["inter_client_fairness"].append(inter_client_fairness)
-            fairhetero_logs["intra_client_fairness"].append(intra_client_fairness)
+            logs["inter_model_fairness"].append(inter_model_fairness)
+            logs["inter_client_fairness"].append(inter_client_fairness)
+            logs["intra_client_fairness"].append(intra_client_fairness)
             # =====================================================
             # 7) AVALIAÇÃO GLOBAL
             # =====================================================
@@ -828,12 +838,12 @@ def run_experiment():
                     "clients_selected": real_training_counter[model_name],
                     "clients_selected_total": sum(real_training_counter.values()),
 
-                    "resource_usage_cifar": fairhetero_logs["resource_usage_cifar"][-1],
-                    "resource_usage_gtsrb": fairhetero_logs["resource_usage_gtsrb"][-1],
+                    "resource_usage_cifar": logs["resource_usage_cifar"][-1],
+                    "resource_usage_gtsrb": logs["resource_usage_gtsrb"][-1],
 
-                    "inter_model_fairness": fairhetero_logs["inter_model_fairness"][-1],
-                    "inter_client_fairness": fairhetero_logs["inter_client_fairness"][-1],
-                    "intra_client_fairness": fairhetero_logs["intra_client_fairness"][-1],
+                    "inter_model_fairness": logs["inter_model_fairness"][-1],
+                    "inter_client_fairness": logs["inter_client_fairness"][-1],
+                    "intra_client_fairness": logs["intra_client_fairness"][-1],
                 }
 
                 filename = (
@@ -849,7 +859,7 @@ def run_experiment():
             # 8) LOG FINAL DA RODADA
             # =====================================================
             clients_per_model = real_training_counter.copy()
-            fairhetero_logs["clients_per_model"].append(clients_per_model)
+            logs["clients_per_model"].append(clients_per_model)
 
             print(
                 f"📌 Clientes treinados | "

@@ -32,7 +32,7 @@ BASE_SEED = 42
 NUM_FOLDS = 1
 NUM_CLIENTS = 40
 ROUNDS = 100
-FRAC = 0.3
+FRAC = 0.2
 K_CLIENTS = int(FRAC * NUM_CLIENTS)   # exemplo: 30% no máximo
 
 LOCAL_EPOCHS = 1
@@ -71,15 +71,6 @@ assert LAMBDA_CAPACITY + LAMBDA_INTRA <= 1.0
 LIGHT_MODEL = min(
     MODEL_COST,
     key=lambda m: MODEL_COST[m]["flops_per_sample"]
-)
-
-# permitir aproximadamente K_CLIENTS treinamentos por rodada
-avg_speed = 0.65
-
-FAIR_RESOURCE_BUDGET = (
-    K_CLIENTS *
-    MODEL_COST[LIGHT_MODEL]["flops_per_sample"] /
-    (1e7 * avg_speed)
 )
 
 Path("results/").mkdir(parents=True, exist_ok=True)
@@ -123,7 +114,7 @@ client_acc = {}
 client_loss = {}
 client_delta_acc = {}
 global_acc_history = {}
-baseline_logs = {}
+logs = {}
 
 # =====================================================
 # FAIRNESS STATES
@@ -231,13 +222,14 @@ def reset_experiment_state(train_loaders):
     }
 
     # -------- Logs --------
-    fedbalancer_logs = {
+    global logs
+
+    logs = {
         "clients_per_model": [],
 
         "resource_usage_cifar": [],
         "resource_usage_gtsrb": [],
 
-        # fairness padronizadas (↑ melhor)
         "inter_model_fairness": [],
         "inter_client_fairness": [],
         "intra_client_fairness": []
@@ -648,17 +640,16 @@ def run_experiment():
                 for cid in clients_gtsrb
             )
 
-            baseline_logs["resource_usage_cifar"].append(resource_cifar_real)
-            baseline_logs["resource_usage_gtsrb"].append(resource_gtsrb_real)
+            logs["resource_usage_cifar"].append(resource_cifar_real)
+            logs["resource_usage_gtsrb"].append(resource_gtsrb_real)
 
-            baseline_logs["inter_model_fairness"].append(inter_model_fairness)
-            baseline_logs["inter_client_fairness"].append(inter_client_fairness)
-            baseline_logs["intra_client_fairness"].append(intra_client_fairness)
+            logs["inter_model_fairness"].append(inter_model_fairness)
+            logs["inter_client_fairness"].append(inter_client_fairness)
+            logs["intra_client_fairness"].append(intra_client_fairness)
             # =====================================================
             # 7) AVALIAÇÃO GLOBAL
             # =====================================================
             for model_name, model in global_models.items():
-
                 dataset_name = {
                     "cifar": "CIFAR10",
                     "gtsrb": "GTSRB"
@@ -671,6 +662,11 @@ def run_experiment():
                 )
 
                 global_acc_history[model_name].append(global_acc)
+
+                # =========================
+                # 🔥 PRINT DA ACURÁCIA
+                # =========================
+                print(f"📊 {model_name.upper()} | Round {rnd} | Acc: {global_acc:.4f}")
 
                 # salvar linha no CSV
                 row_data = {
@@ -686,12 +682,12 @@ def run_experiment():
                     "clients_selected": real_training_counter[model_name],
                     "clients_selected_total": sum(real_training_counter.values()),
 
-                    "resource_usage_cifar": baseline_logs["resource_usage_cifar"][-1],
-                    "resource_usage_gtsrb": baseline_logs["resource_usage_gtsrb"][-1],
+                    "resource_usage_cifar": logs["resource_usage_cifar"][-1],
+                    "resource_usage_gtsrb": logs["resource_usage_gtsrb"][-1],
 
-                    "inter_model_fairness": baseline_logs["inter_model_fairness"][-1],
-                    "inter_client_fairness": baseline_logs["inter_client_fairness"][-1],
-                    "intra_client_fairness": baseline_logs["intra_client_fairness"][-1],
+                    "inter_model_fairness": logs["inter_model_fairness"][-1],
+                    "inter_client_fairness": logs["inter_client_fairness"][-1],
+                    "intra_client_fairness": logs["intra_client_fairness"][-1],
                 }
 
                 filename = (
@@ -707,7 +703,7 @@ def run_experiment():
             # 8) LOG FINAL DA RODADA
             # =====================================================
             clients_per_model = real_training_counter.copy()
-            baseline_logs["clients_per_model"].append(clients_per_model)
+            logs["clients_per_model"].append(clients_per_model)
 
             print(
                 f"📌 Clientes treinados | "
