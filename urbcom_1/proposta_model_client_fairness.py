@@ -43,6 +43,8 @@ LR = 0.01
 DIRICHLET_ALPHA = 1.0
 
 global FAIR_RESOURCE_BUDGET
+global loss_cifar_norm, loss_gtsrb_norm
+global data_cifar_norm, data_gtsrb_norm
 
 MODEL_COST = {
     "cifar": {
@@ -365,7 +367,98 @@ def clear_previous_results():
         if os.path.exists(filename):
             os.remove(filename)
 
+def compute_inter_client_fairness_with_delta(
+        cid,
+        train_time,
+        loss_cifar_norm,
+        loss_gtsrb_norm,
+        data_cifar_norm,
+        data_gtsrb_norm
+):
 
+    utilization = []
+    eps = 1e-8
+
+    for c in range(NUM_CLIENTS):
+
+        capacity = client_resources[c]["speed"]
+
+        usage = (
+            client_resource_usage[c]["cifar"] +
+            client_resource_usage[c]["gtsrb"]
+        )
+
+        # 👉 simula adição para o cliente candidato
+        if c == cid:
+            usage += train_time
+
+        # -------- UTILITY --------
+        loss_cifar = client_loss[c]["cifar"]
+        loss_gtsrb = client_loss[c]["gtsrb"]
+
+        loss_cifar = loss_cifar if np.isfinite(loss_cifar) else 1.0
+        loss_gtsrb = loss_gtsrb if np.isfinite(loss_gtsrb) else 1.0
+
+        data_cifar = client_resources[c]["data_size_cifar"]
+        data_gtsrb = client_resources[c]["data_size_gtsrb"]
+
+        # -------- UTILITY NORMALIZADA --------
+
+        utility = (
+                data_cifar_norm[c] * loss_cifar_norm[c] +
+                data_gtsrb_norm[c] * loss_gtsrb_norm[c]
+        )
+
+        value = usage / (capacity * (utility + eps))
+        utilization.append(value)
+
+    if len(utilization) > 0:
+        num = (sum(utilization) ** 2)
+        den = NUM_CLIENTS * sum(u ** 2 for u in utilization)
+        return num / den if den > 0 else 1.0
+    else:
+        return 1.0
+
+def compute_inter_client_fairness(loss_cifar_norm,
+        loss_gtsrb_norm,
+        data_cifar_norm,
+        data_gtsrb_norm):
+
+    utilization = []
+    eps = 1e-8
+
+    for cid in range(NUM_CLIENTS):
+
+        capacity = client_resources[cid]["speed"]
+
+        usage = (
+            client_resource_usage[cid]["cifar"] +
+            client_resource_usage[cid]["gtsrb"]
+        )
+
+        loss_cifar = client_loss[cid]["cifar"]
+        loss_gtsrb = client_loss[cid]["gtsrb"]
+
+        loss_cifar = loss_cifar if np.isfinite(loss_cifar) else 1.0
+        loss_gtsrb = loss_gtsrb if np.isfinite(loss_gtsrb) else 1.0
+
+        data_cifar = client_resources[cid]["data_size_cifar"]
+        data_gtsrb = client_resources[cid]["data_size_gtsrb"]
+
+        utility = (
+                data_cifar_norm[cid] * loss_cifar_norm[cid] +
+                data_gtsrb_norm[cid] * loss_gtsrb_norm[cid]
+        )
+
+        value = usage / (capacity * (utility + eps))
+        utilization.append(value)
+
+    if len(utilization) > 0:
+        num = (sum(utilization) ** 2)
+        den = NUM_CLIENTS * sum(u ** 2 for u in utilization)
+        return num / den if den > 0 else 1.0
+    else:
+        return 1.0
 
 def run_experiment():
 
@@ -456,45 +549,9 @@ def run_experiment():
         )
 
         # =====================================================
-        # FAIR RESOURCE BUDGET (AGORA COM client_resources válido)
-        # =====================================================
-        avg_data_cifar = np.mean([
-            client_resources[c]["data_size_cifar"]
-            for c in range(NUM_CLIENTS)
-        ])
-
-        avg_data_gtsrb = np.mean([
-            client_resources[c]["data_size_gtsrb"]
-            for c in range(NUM_CLIENTS)
-        ])
-
-        avg_data = min(avg_data_cifar, avg_data_gtsrb)
-
-        FAIR_RESOURCE_BUDGET = (
-                K_CLIENTS *
-                MODEL_COST[LIGHT_MODEL]["flops_per_sample"] *
-                avg_data /
-                (1e7 * avg_speed)
-        )
-
-        print(f"💰 FAIR_RESOURCE_BUDGET: {FAIR_RESOURCE_BUDGET:.4f}")
-
-        # =====================================================
         # LOOP PRINCIPAL DE RODADAS FEDERADAS
         # =====================================================
         for rnd in range(1, ROUNDS + 1):
-
-            # -------------------------------------------------
-            # Seed por rodada (garante reprodutibilidade completa)
-            # -------------------------------------------------
-            round_seed = fold_seed + rnd
-            random.seed(round_seed)
-            np.random.seed(round_seed)
-            torch.manual_seed(round_seed)
-
-            # =====================================================
-            # PRECOMPUTE PARA JAIN (INTER-CLIENT FAIRNESS)
-            # =====================================================
 
             # -------------------------------------------------
             # Seed por rodada (garante reprodutibilidade completa)
@@ -514,24 +571,6 @@ def run_experiment():
                     training_time_cache[(cid, model_name)] = estimate_training_time(cid, model_name)
                 return training_time_cache[(cid, model_name)]
 
-            utilization = []
-
-            for cid in range(NUM_CLIENTS):
-                capacity = client_resources[cid]["speed"]
-                usage = (
-                        client_resource_usage[cid]["cifar"] +
-                        client_resource_usage[cid]["gtsrb"]
-                )
-
-                if capacity > 0:
-                    utilization.append(usage / capacity)
-                else:
-                    utilization.append(0.0)
-
-            sum_u = sum(utilization)
-            sum_u2 = sum(u * u for u in utilization)
-            N = NUM_CLIENTS
-
             # =====================================================
             # Estrutura para armazenar updates locais (FedAvg)
             # =====================================================
@@ -544,6 +583,40 @@ def run_experiment():
 
             # Contador REAL de clientes que treinaram
             real_training_counter = {m: 0 for m in global_models}
+
+            # =====================================================
+            # NORMALIZAÇÃO POR DATASET (CRÍTICO)
+            # =====================================================
+
+            loss_cifar_vals = []
+            loss_gtsrb_vals = []
+            data_cifar_vals = []
+            data_gtsrb_vals = []
+
+            for cid in range(NUM_CLIENTS):
+                lc = client_loss[cid]["cifar"]
+                lg = client_loss[cid]["gtsrb"]
+
+                lc = lc if np.isfinite(lc) else 1.0
+                lg = lg if np.isfinite(lg) else 1.0
+
+                loss_cifar_vals.append(lc)
+                loss_gtsrb_vals.append(lg)
+
+                data_cifar_vals.append(client_resources[cid]["data_size_cifar"])
+                data_gtsrb_vals.append(client_resources[cid]["data_size_gtsrb"])
+
+            def minmax(arr):
+                mn, mx = min(arr), max(arr)
+                if mx - mn < 1e-8:
+                    return [1.0 for _ in arr]
+                return [(x - mn) / (mx - mn + 1e-8) for x in arr]
+
+            loss_cifar_norm = minmax(loss_cifar_vals)
+            loss_gtsrb_norm = minmax(loss_gtsrb_vals)
+
+            data_cifar_norm = minmax(data_cifar_vals)
+            data_gtsrb_norm = minmax(data_gtsrb_vals)
 
             # =====================================================
             # 1) SELEÇÃO DE CLIENTES (CORE DO MÉTO DO)
@@ -600,28 +673,6 @@ def run_experiment():
                     else:
                         inter_model_fairness = 1.0
 
-                    # -------- Jain incremental
-                    capacity = client_resources[cid]["speed"]
-                    current_usage = (
-                            client_resource_usage[cid]["cifar"] +
-                            client_resource_usage[cid]["gtsrb"]
-                    )
-
-                    if capacity > 0:
-                        u_old = current_usage / capacity
-                        u_new = (current_usage + train_time) / capacity
-                    else:
-                        u_old = 0.0
-                        u_new = 0.0
-
-                    new_sum_u = sum_u - u_old + u_new
-                    new_sum_u2 = sum_u2 - (u_old * u_old) + (u_new * u_new)
-
-                    if new_sum_u2 > 0:
-                        inter_client_fairness = (new_sum_u ** 2) / (NUM_CLIENTS * new_sum_u2)
-                    else:
-                        inter_client_fairness = 1.0
-
                     # -------- Intra-client
                     client_cifar = client_resource_usage[cid]["cifar"] + train_time
                     client_gtsrb = client_resource_usage[cid]["gtsrb"]
@@ -658,26 +709,15 @@ def run_experiment():
                     else:
                         inter_model_fairness = 1.0
 
-                    capacity = client_resources[cid]["speed"]
-                    current_usage = (
-                            client_resource_usage[cid]["cifar"] +
-                            client_resource_usage[cid]["gtsrb"]
+                    # -------- Inter-client fairness (MULTI-DIMENSIONAL) --------
+                    inter_client_fairness = compute_inter_client_fairness_with_delta(
+                        cid,
+                        train_time,
+                        loss_cifar_norm,
+                        loss_gtsrb_norm,
+                        data_cifar_norm,
+                        data_gtsrb_norm
                     )
-
-                    if capacity > 0:
-                        u_old = current_usage / capacity
-                        u_new = (current_usage + train_time) / capacity
-                    else:
-                        u_old = 0.0
-                        u_new = 0.0
-
-                    new_sum_u = sum_u - u_old + u_new
-                    new_sum_u2 = sum_u2 - (u_old * u_old) + (u_new * u_new)
-
-                    if new_sum_u2 > 0:
-                        inter_client_fairness = (new_sum_u ** 2) / (NUM_CLIENTS * new_sum_u2)
-                    else:
-                        inter_client_fairness = 1.0
 
                     client_cifar = client_resource_usage[cid]["cifar"]
                     client_gtsrb = client_resource_usage[cid]["gtsrb"] + train_time
@@ -712,23 +752,6 @@ def run_experiment():
                 else:
                     total_gtsrb_usage += train_time
                     clients_gtsrb.append(cid)
-
-                # -------- atualiza Jain incremental
-                capacity = client_resources[cid]["speed"]
-                current_usage = (
-                        client_resource_usage[cid]["cifar"] +
-                        client_resource_usage[cid]["gtsrb"]
-                )
-
-                if capacity > 0:
-                    u_old = current_usage / capacity
-                    u_new = (current_usage + train_time) / capacity
-                else:
-                    u_old = 0.0
-                    u_new = 0.0
-
-                sum_u = sum_u - u_old + u_new
-                sum_u2 = sum_u2 - (u_old * u_old) + (u_new * u_new)
 
                 # -------- atualiza recursos
                 resource_usage[chosen_model] += train_time
@@ -797,23 +820,12 @@ def run_experiment():
                 inter_model_fairness = 1.0
 
             # -------- Inter-client fairness (Jain) --------
-            utilization = []
-
-            for cid in range(NUM_CLIENTS):
-                capacity = client_resources[cid]["speed"]
-                resource = (
-                        client_resource_usage[cid]["cifar"] +
-                        client_resource_usage[cid]["gtsrb"]
-                )
-                if capacity > 0:
-                    utilization.append(resource / capacity)
-
-            if len(utilization) > 0:
-                num = (sum(utilization) ** 2)
-                den = NUM_CLIENTS * sum(u ** 2 for u in utilization)
-                inter_client_fairness = num / den if den > 0 else 1.0
-            else:
-                inter_client_fairness = 1.0
+            inter_client_fairness = compute_inter_client_fairness(
+                loss_cifar_norm,
+                loss_gtsrb_norm,
+                data_cifar_norm,
+                data_gtsrb_norm
+            )
 
             # -------- Intra-client fairness --------
             imbalances = []

@@ -16,6 +16,7 @@ RESOURCE_METRICS = [
 
 ALGORITHM_ORDER = [
     "fair_resource",
+    "oort",                 # 🔥 ADD
     "fairhetero",
     "fedbalancer",
     "baseline_f0.2",
@@ -100,6 +101,63 @@ def plot_cumulative_clients(df):
     plt.tight_layout()
 
     plt.savefig(f"{RESULTS_DIR}/cumulative_clients_selected.png")
+    plt.close()
+
+def plot_mean_fairness(df):
+
+    # 🔥 cria coluna nova com média das fairness
+    df["mean_fairness"] = df[FAIRNESS_METRICS].mean(axis=1)
+
+    plt.figure(figsize=(6,4))
+
+    for alg in get_algorithm_order(df):
+
+        curve = (
+            df[df["algorithm"] == alg]
+            .groupby("round")["mean_fairness"]
+            .mean()
+        )
+
+        plt.plot(curve.index, curve.values, label=alg)
+
+    plt.title("Mean Fairness")
+    plt.xlabel("Round")
+    plt.ylabel("Fairness (avg)")
+
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
+
+    plt.savefig(f"{RESULTS_DIR}/mean_fairness.png")
+    plt.close()
+
+def plot_cumulative_mean_fairness(df):
+
+    df["mean_fairness"] = df[FAIRNESS_METRICS].mean(axis=1)
+
+    plt.figure(figsize=(6,4))
+
+    for alg in get_algorithm_order(df):
+
+        curve = (
+            df[df["algorithm"] == alg]
+            .groupby("round")["mean_fairness"]
+            .mean()
+            .expanding()
+            .mean()
+        )
+
+        plt.plot(curve.index, curve.values, label=alg)
+
+    plt.title("Cumulative Mean Fairness")
+    plt.xlabel("Round")
+    plt.ylabel("Fairness (avg)")
+
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
+
+    plt.savefig(f"{RESULTS_DIR}/cumulative_mean_fairness.png")
     plt.close()
 
 def plot_resource_usage(df):
@@ -204,6 +262,19 @@ def load_results():
             dfs.append(df)
 
         # -----------------------------
+        # OORT
+        # -----------------------------
+        elif file.startswith("oort_"):
+
+            if f"frac_{FRAC}" in file and f"alpha_{ALPHA}" in file:
+                df = pd.read_csv(path)
+
+                df["algorithm"] = "oort"
+                df["frac"] = FRAC
+
+                dfs.append(df)
+
+        # -----------------------------
         # FAIRHETERO
         # -----------------------------
         elif file.startswith("fairhetero_"):
@@ -242,6 +313,38 @@ def load_results():
     return df
 
 def plot_accuracy(df):
+
+    for dataset in df["dataset"].unique():
+
+        subset_dataset = df[df["dataset"] == dataset]
+
+        plt.figure(figsize=(6,4))
+
+        for alg in get_algorithm_order(df):
+
+            subset_alg = subset_dataset[subset_dataset["algorithm"] == alg]
+
+            if len(subset_alg) == 0:
+                continue
+
+            curve = (
+                subset_alg
+                .groupby("round")["global_acc"]
+                .mean()
+            )
+
+            plt.plot(curve.index, curve.values, label=alg)
+
+        plt.title(f"Accuracy ({dataset})")
+        plt.xlabel("Round")
+        plt.ylabel("Accuracy")
+
+        plt.legend()
+        plt.grid()
+        plt.tight_layout()
+
+        plt.savefig(f"{RESULTS_DIR}/accuracy_{dataset}.png")
+        plt.close()
 
     for dataset in df["dataset"].unique():
 
@@ -354,6 +457,10 @@ def main():
     # recursos
     plot_resource_usage(df)
     plot_cumulative_resource_usage(df)
+
+    # fairness médio
+    plot_mean_fairness(df)
+    plot_cumulative_mean_fairness(df)
 
     print("\n✔ Todos os plots gerados")
 
