@@ -358,7 +358,7 @@ def append_result_to_csv(row_dict, filename):
 def clear_previous_results():
     for model_name in ["cifar", "gtsrb"]:
         filename = (
-    f"results/proposta_{model_name}"
+    f"results/proposta_budget_{model_name}"
     f"_frac_{FRAC}"
     f"_alpha_{DIRICHLET_ALPHA}"
     f"_lambdaCap_{LAMBDA_CAPACITY}"
@@ -684,6 +684,16 @@ def run_experiment():
                     else:
                         intra_client_fairness = 1.0
 
+                    # -------- Inter-client fairness (MULTI-DIMENSIONAL) --------
+                    inter_client_fairness = compute_inter_client_fairness_with_delta(
+                        cid,
+                        train_time,
+                        loss_cifar_norm,
+                        loss_gtsrb_norm,
+                        data_cifar_norm,
+                        data_gtsrb_norm
+                    )
+
                     score = (
                             (1 - LAMBDA_CAPACITY - LAMBDA_INTRA) * inter_model_fairness
                             + LAMBDA_CAPACITY * inter_client_fairness
@@ -709,16 +719,6 @@ def run_experiment():
                     else:
                         inter_model_fairness = 1.0
 
-                    # -------- Inter-client fairness (MULTI-DIMENSIONAL) --------
-                    inter_client_fairness = compute_inter_client_fairness_with_delta(
-                        cid,
-                        train_time,
-                        loss_cifar_norm,
-                        loss_gtsrb_norm,
-                        data_cifar_norm,
-                        data_gtsrb_norm
-                    )
-
                     client_cifar = client_resource_usage[cid]["cifar"]
                     client_gtsrb = client_resource_usage[cid]["gtsrb"] + train_time
                     total_client = client_cifar + client_gtsrb
@@ -728,6 +728,16 @@ def run_experiment():
                         intra_client_fairness = 1.0 - intra_imbalance
                     else:
                         intra_client_fairness = 1.0
+
+                    # -------- Inter-client fairness (MULTI-DIMENSIONAL) --------
+                    inter_client_fairness = compute_inter_client_fairness_with_delta(
+                        cid,
+                        train_time,
+                        loss_cifar_norm,
+                        loss_gtsrb_norm,
+                        data_cifar_norm,
+                        data_gtsrb_norm
+                    )
 
                     score = (
                             (1 - LAMBDA_CAPACITY - LAMBDA_INTRA) * inter_model_fairness
@@ -865,9 +875,7 @@ def run_experiment():
             logs["inter_model_fairness"].append(inter_model_fairness)
             logs["inter_client_fairness"].append(inter_client_fairness)
             logs["intra_client_fairness"].append(intra_client_fairness)
-            # =====================================================
-            # 7) AVALIAÇÃO GLOBAL
-            # =====================================================
+
             # =====================================================
             # 7) AVALIAÇÃO GLOBAL
             # =====================================================
@@ -892,7 +900,7 @@ def run_experiment():
 
                 # salvar linha no CSV
                 row_data = {
-                    "algorithm": "fair_resource",
+                    "algorithm": "fair_resource_budget",
                     "fold": fold,
                     "round": rnd,
                     "dataset": model_name,
@@ -913,7 +921,7 @@ def run_experiment():
                 }
 
                 filename = (
-                    f"results/proposta_{model_name}"
+                    f"results/proposta_budget_{model_name}"
                     f"_frac_{FRAC}"
                     f"_alpha_{DIRICHLET_ALPHA}"
                     f"_lambdaCap_{LAMBDA_CAPACITY}"

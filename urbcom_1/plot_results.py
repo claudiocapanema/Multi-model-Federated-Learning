@@ -15,8 +15,9 @@ RESOURCE_METRICS = [
 ]
 
 ALGORITHM_ORDER = [
-    "fair_resource",
-    "oort",                 # 🔥 ADD
+    "fair_resource_k",
+    "fair_resource_budget",
+    "oort",
     "fairhetero",
     "fedbalancer",
     "baseline_f0.2",
@@ -26,7 +27,38 @@ ALGORITHM_ORDER = [
 ]
 
 def get_algorithm_order(df):
-    return [alg for alg in ALGORITHM_ORDER if alg in df["algorithm"].unique()]
+
+    algs = list(df["algorithm"].unique())
+
+    import re
+
+    def sort_key(a):
+
+        # 🔥 fair_resource_kX
+        match = re.search(r'fair_resource_k(\d+\.\d+)', a)
+        if match:
+            return (0, float(match.group(1)))
+
+        # budget
+        if a == "fair_resource_budget":
+            return (1, 0)
+
+        # outros métodos
+        if a == "oort":
+            return (2, 0)
+        if a == "fairhetero":
+            return (3, 0)
+        if a == "fedbalancer":
+            return (4, 0)
+
+        # baselines
+        match = re.search(r'baseline_f(\d+\.\d+)', a)
+        if match:
+            return (5, float(match.group(1)))
+
+        return (6, 0)
+
+    return sorted(algs, key=sort_key)
 
 # =====================================================
 # MÉTRICAS
@@ -83,14 +115,24 @@ def plot_cumulative_clients(df):
 
     for alg in get_algorithm_order(df):
 
+        subset = df[df["algorithm"] == alg]
+
+        # 🔥 pega um único valor por rodada (evita duplicação CIFAR/GTSRB)
         curve = (
-            df[df["algorithm"] == alg]
+            subset
             .groupby("round")["clients_selected_total"]
-            .mean()
-            .cumsum()
+            .first()   # ou .max() (ambos funcionam aqui)
+            .sort_index()
         )
 
-        plt.plot(curve.index, curve.values, label=alg)
+        # 🔥 soma acumulada correta
+        cumulative = curve.cumsum()
+
+        plt.plot(
+            cumulative.index,
+            cumulative.values,
+            label=alg
+        )
 
     plt.title("Cumulative Clients Selected")
     plt.xlabel("Round")
@@ -197,14 +239,24 @@ def plot_cumulative_resource_usage(df):
 
         for alg in get_algorithm_order(df):
 
+            subset = df[df["algorithm"] == alg]
+
+            # 🔥 soma por rodada (CIFAR + GTSRB corretamente)
             curve = (
-                df[df["algorithm"] == alg]
+                subset
                 .groupby("round")[metric]
-                .mean()
-                .cumsum()
+                .sum()
+                .sort_index()
             )
 
-            plt.plot(curve.index, curve.values, label=alg)
+            # 🔥 acumulado correto
+            cumulative = curve.cumsum()
+
+            plt.plot(
+                cumulative.index,
+                cumulative.values,
+                label=alg
+            )
 
         title_name = metric.replace("_", " ").title()
 
@@ -252,14 +304,50 @@ def load_results():
         # -----------------------------
         # PROPOSTA
         # -----------------------------
-        elif file.startswith("proposta_"):
+        # -----------------------------
+        # PROPOSTA - K
+        # -----------------------------
+        elif file.startswith("proposta_k_"):
 
-            df = pd.read_csv(path)
+            if f"alpha_{ALPHA}" in file:
 
-            df["algorithm"] = "fair_resource"
-            df["frac"] = FRAC
+                df = pd.read_csv(path)
 
-            dfs.append(df)
+                # 🔥 extrai frac do nome do arquivo
+                frac_value = None
+
+                for frac in BASELINE_FRACS + [FRAC]:
+                    if f"frac_{frac}" in file:
+                        frac_value = frac
+                        break
+
+                # fallback (caso não esteja na lista)
+                if frac_value is None:
+                    import re
+                    match = re.search(r'frac_(\d+\.\d+)', file)
+                    if match:
+                        frac_value = float(match.group(1))
+
+                # 🔥 nome do algoritmo com K (= frac)
+                alg_name = f"fair_resource_k{frac_value}"
+
+                df["algorithm"] = alg_name
+                df["frac"] = frac_value
+
+                dfs.append(df)
+
+        # -----------------------------
+        # PROPOSTA - BUDGET
+        # -----------------------------
+        elif file.startswith("proposta_budget_"):
+
+            if f"alpha_{ALPHA}" in file:
+                df = pd.read_csv(path)
+
+                df["algorithm"] = "fair_resource_budget"
+                df["frac"] = FRAC
+
+                dfs.append(df)
 
         # -----------------------------
         # OORT
@@ -414,19 +502,28 @@ def plot_cumulative_fairness(df):
 
         for alg in get_algorithm_order(df):
 
+            subset = df[df["algorithm"] == alg].copy()
+
+            # 🔥 agrega por rodada (evita duplicação CIFAR/GTSRB distorcer)
             curve = (
-                df[df["algorithm"] == alg]
+                subset
                 .groupby("round")[metric]
                 .mean()
-                .expanding()
-                .mean()
+                .sort_index()
             )
 
-            plt.plot(curve.index, curve.values, label=alg)
+            # 🔥 soma acumulada REAL (CORRETO)
+            cumulative = curve.cumsum()
+
+            plt.plot(
+                cumulative.index,
+                cumulative.values,
+                label=alg
+            )
 
         plt.title(f"Cumulative {METRIC_LABEL[metric]}")
         plt.xlabel("Round")
-        plt.ylabel(METRIC_LABEL[metric])
+        plt.ylabel(f"Cumulative {METRIC_LABEL[metric]}")
 
         plt.legend()
         plt.grid()
@@ -460,7 +557,7 @@ def main():
 
     # fairness médio
     plot_mean_fairness(df)
-    plot_cumulative_mean_fairness(df)
+    # plot_cumulative_mean_fairness(df)
 
     print("\n✔ Todos os plots gerados")
 
