@@ -32,7 +32,7 @@ BASE_SEED = 42
 NUM_FOLDS = 1
 NUM_CLIENTS = 40
 ROUNDS = 100
-FRAC = 0.3
+FRAC = 0.2
 K_CLIENTS = int(FRAC * NUM_CLIENTS)   # exemplo: 30% no máximo
 
 LOCAL_EPOCHS = 1
@@ -534,6 +534,9 @@ def run_experiment():
 
         reset_experiment_state(train_loaders)
 
+        num_models = len(global_models)
+        MAX_CLIENTS_PER_MODEL = K_CLIENTS // num_models
+
         global FAIR_RESOURCE_BUDGET
 
         # avg_data_cifar = np.mean([client_resources[c]["data_size_cifar"] for c in range(NUM_CLIENTS)])
@@ -637,26 +640,13 @@ def run_experiment():
             random.shuffle(all_clients)
 
             # =====================================================
-            # LOOP DE DECISÃO POR CLIENTE (NOVO — MAX FAIRNESS)
-            # =====================================================
-            # LOOP DE DECISÃO POR CLIENTE (FAIRNESS EMERGENTE)
-            # =====================================================
-
-            total_cifar_usage = sum(client_resource_usage[c]["cifar"] for c in range(NUM_CLIENTS))
-            total_gtsrb_usage = sum(client_resource_usage[c]["gtsrb"] for c in range(NUM_CLIENTS))
-
-            max_total_clients = K_CLIENTS * 1  # limite leve (não interfere na fairness)
-
-            # =====================================================
             # SELEÇÃO GLOBAL BASEADA EM SCORE (TOP-K)
             # =====================================================
 
-            candidates_global = []
-
             total_cifar_usage = sum(client_resource_usage[c]["cifar"] for c in range(NUM_CLIENTS))
             total_gtsrb_usage = sum(client_resource_usage[c]["gtsrb"] for c in range(NUM_CLIENTS))
 
-            for cid in range(NUM_CLIENTS):
+            for cid in all_clients:
 
                 # =========================
                 # CIFAR
@@ -669,21 +659,23 @@ def run_experiment():
 
                 if total > 0:
                     imbalance = abs(new_usage - other_usage) / total
-                    inter_model_fairness_cifar = 1.0 - imbalance
+                    inter_model_fairness = 1.0 - imbalance
                 else:
-                    inter_model_fairness_cifar = 1.0
+                    inter_model_fairness = 1.0
 
+                # -------- Intra-client
                 client_cifar = client_resource_usage[cid]["cifar"] + train_time_cifar
                 client_gtsrb = client_resource_usage[cid]["gtsrb"]
                 total_client = client_cifar + client_gtsrb
 
                 if total_client > 0:
                     intra_imbalance = abs(client_cifar - client_gtsrb) / total_client
-                    intra_client_fairness_cifar = 1.0 - intra_imbalance
+                    intra_client_fairness = 1.0 - intra_imbalance
                 else:
-                    intra_client_fairness_cifar = 1.0
+                    intra_client_fairness = 1.0
 
-                inter_client_fairness_cifar = compute_inter_client_fairness_with_delta(
+                # -------- Inter-client fairness (MULTI-DIMENSIONAL) --------
+                inter_client_fairness = compute_inter_client_fairness_with_delta(
                     cid,
                     train_time_cifar,
                     loss_cifar_norm,
@@ -693,13 +685,13 @@ def run_experiment():
                 )
 
                 score_cifar = (
-                        (1 - LAMBDA_CAPACITY - LAMBDA_INTRA) * inter_model_fairness_cifar
-                        + LAMBDA_CAPACITY * inter_client_fairness_cifar
-                        + LAMBDA_INTRA * intra_client_fairness_cifar
+                        (1 - LAMBDA_CAPACITY - LAMBDA_INTRA) * inter_model_fairness
+                        + LAMBDA_CAPACITY * inter_client_fairness
+                        + LAMBDA_INTRA * intra_client_fairness
                 )
 
                 # =========================
-                # GTSRB
+                # TESTA GTSRB
                 # =========================
                 train_time_gtsrb = get_train_time(cid, "gtsrb")
 
@@ -709,9 +701,9 @@ def run_experiment():
 
                 if total > 0:
                     imbalance = abs(new_usage - other_usage) / total
-                    inter_model_fairness_gtsrb = 1.0 - imbalance
+                    inter_model_fairness = 1.0 - imbalance
                 else:
-                    inter_model_fairness_gtsrb = 1.0
+                    inter_model_fairness = 1.0
 
                 client_cifar = client_resource_usage[cid]["cifar"]
                 client_gtsrb = client_resource_usage[cid]["gtsrb"] + train_time_gtsrb
@@ -719,11 +711,12 @@ def run_experiment():
 
                 if total_client > 0:
                     intra_imbalance = abs(client_cifar - client_gtsrb) / total_client
-                    intra_client_fairness_gtsrb = 1.0 - intra_imbalance
+                    intra_client_fairness = 1.0 - intra_imbalance
                 else:
-                    intra_client_fairness_gtsrb = 1.0
+                    intra_client_fairness = 1.0
 
-                inter_client_fairness_gtsrb = compute_inter_client_fairness_with_delta(
+                # -------- Inter-client fairness (MULTI-DIMENSIONAL) --------
+                inter_client_fairness = compute_inter_client_fairness_with_delta(
                     cid,
                     train_time_gtsrb,
                     loss_cifar_norm,
@@ -733,40 +726,36 @@ def run_experiment():
                 )
 
                 score_gtsrb = (
-                        (1 - LAMBDA_CAPACITY - LAMBDA_INTRA) * inter_model_fairness_gtsrb
-                        + LAMBDA_CAPACITY * inter_client_fairness_gtsrb
-                        + LAMBDA_INTRA * intra_client_fairness_gtsrb
+                        (1 - LAMBDA_CAPACITY - LAMBDA_INTRA) * inter_model_fairness
+                        + LAMBDA_CAPACITY * inter_client_fairness
+                        + LAMBDA_INTRA * intra_client_fairness
                 )
 
                 # =========================
-                # ESCOLHE MELHOR MODELO PARA O CLIENTE
+                # ESCOLHA DO MODELO
                 # =========================
                 if score_cifar >= score_gtsrb:
-                    candidates_global.append((cid, "cifar", score_cifar, train_time_cifar))
+                    chosen_model = "cifar"
+                    train_time = train_time_cifar
                 else:
-                    candidates_global.append((cid, "gtsrb", score_gtsrb, train_time_gtsrb))
+                    chosen_model = "gtsrb"
+                    train_time = train_time_gtsrb
 
-            # =====================================================
-            # ORDENA GLOBALMENTE
-            # =====================================================
-            candidates_global.sort(key=lambda x: x[2], reverse=True)
-
-            # =====================================================
-            # SELECIONA TOP-K
-            # =====================================================
-            max_total_clients = K_CLIENTS * 2
-
-            clients_cifar = []
-            clients_gtsrb = []
-
-            for cid, model, score, train_time in candidates_global[:max_total_clients]:
-
-                if model == "cifar":
+                # =========================
+                # APLICA LIMITE + SELEÇÃO
+                # =========================
+                if chosen_model == "cifar":
                     clients_cifar.append(cid)
+                    resource_usage["cifar"] += train_time
+                    client_resource_usage[cid]["cifar"] += train_time
+
                 else:
                     clients_gtsrb.append(cid)
+                    resource_usage["gtsrb"] += train_time
+                    client_resource_usage[cid]["gtsrb"] += train_time
 
-                client_resource_usage[cid][model] += train_time
+                if (len(clients_cifar) + len(clients_gtsrb)) >= K_CLIENTS:
+                    break
 
             # =====================================================
             # 2) TREINAMENTO LOCAL — CIFAR

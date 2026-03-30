@@ -659,11 +659,11 @@ def run_experiment():
                 # =========================
                 # TESTA CIFAR
                 # =========================
-                train_time = get_train_time(cid, "cifar")
+                train_time_cifar = get_train_time(cid, "cifar")
 
-                if resource_usage["cifar"] + train_time <= FAIR_RESOURCE_BUDGET:
+                if resource_usage["cifar"] + train_time_cifar <= FAIR_RESOURCE_BUDGET:
 
-                    new_usage = total_cifar_usage + train_time
+                    new_usage = total_cifar_usage + train_time_cifar
                     other_usage = total_gtsrb_usage
                     total = new_usage + other_usage
 
@@ -674,7 +674,7 @@ def run_experiment():
                         inter_model_fairness = 1.0
 
                     # -------- Intra-client
-                    client_cifar = client_resource_usage[cid]["cifar"] + train_time
+                    client_cifar = client_resource_usage[cid]["cifar"] + train_time_cifar
                     client_gtsrb = client_resource_usage[cid]["gtsrb"]
                     total_client = client_cifar + client_gtsrb
 
@@ -687,29 +687,29 @@ def run_experiment():
                     # -------- Inter-client fairness (MULTI-DIMENSIONAL) --------
                     inter_client_fairness = compute_inter_client_fairness_with_delta(
                         cid,
-                        train_time,
+                        train_time_cifar,
                         loss_cifar_norm,
                         loss_gtsrb_norm,
                         data_cifar_norm,
                         data_gtsrb_norm
                     )
 
-                    score = (
+                    score_cifar = (
                             (1 - LAMBDA_CAPACITY - LAMBDA_INTRA) * inter_model_fairness
                             + LAMBDA_CAPACITY * inter_client_fairness
                             + LAMBDA_INTRA * intra_client_fairness
                     )
 
-                    candidates.append(("cifar", score, train_time))
+                    candidates.append(("cifar", score_cifar, train_time_cifar))
 
                 # =========================
                 # TESTA GTSRB
                 # =========================
-                train_time = get_train_time(cid, "gtsrb")
+                train_time_gtsrb = get_train_time(cid, "gtsrb")
 
-                if resource_usage["gtsrb"] + train_time <= FAIR_RESOURCE_BUDGET:
+                if resource_usage["gtsrb"] + train_time_gtsrb <= FAIR_RESOURCE_BUDGET:
 
-                    new_usage = total_gtsrb_usage + train_time
+                    new_usage = total_gtsrb_usage + train_time_gtsrb
                     other_usage = total_cifar_usage
                     total = new_usage + other_usage
 
@@ -720,7 +720,7 @@ def run_experiment():
                         inter_model_fairness = 1.0
 
                     client_cifar = client_resource_usage[cid]["cifar"]
-                    client_gtsrb = client_resource_usage[cid]["gtsrb"] + train_time
+                    client_gtsrb = client_resource_usage[cid]["gtsrb"] + train_time_gtsrb
                     total_client = client_cifar + client_gtsrb
 
                     if total_client > 0:
@@ -732,20 +732,20 @@ def run_experiment():
                     # -------- Inter-client fairness (MULTI-DIMENSIONAL) --------
                     inter_client_fairness = compute_inter_client_fairness_with_delta(
                         cid,
-                        train_time,
+                        train_time_gtsrb,
                         loss_cifar_norm,
                         loss_gtsrb_norm,
                         data_cifar_norm,
                         data_gtsrb_norm
                     )
 
-                    score = (
+                    score_gtsrb = (
                             (1 - LAMBDA_CAPACITY - LAMBDA_INTRA) * inter_model_fairness
                             + LAMBDA_CAPACITY * inter_client_fairness
                             + LAMBDA_INTRA * intra_client_fairness
                     )
 
-                    candidates.append(("gtsrb", score, train_time))
+                    candidates.append(("gtsrb", score_gtsrb, train_time_gtsrb))
 
                 if not candidates:
                     continue
