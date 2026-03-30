@@ -675,7 +675,7 @@ def run_experiment():
                     intra_client_fairness = 1.0
 
                 # -------- Inter-client fairness (MULTI-DIMENSIONAL) --------
-                inter_client_fairness = compute_inter_client_fairness_with_delta(
+                inter_client_fairness_cifar = compute_inter_client_fairness_with_delta(
                     cid,
                     train_time_cifar,
                     loss_cifar_norm,
@@ -686,7 +686,7 @@ def run_experiment():
 
                 score_cifar = (
                         (1 - LAMBDA_CAPACITY - LAMBDA_INTRA) * inter_model_fairness
-                        + LAMBDA_CAPACITY * inter_client_fairness
+                        + LAMBDA_CAPACITY * inter_client_fairness_cifar
                         + LAMBDA_INTRA * intra_client_fairness
                 )
 
@@ -716,7 +716,7 @@ def run_experiment():
                     intra_client_fairness = 1.0
 
                 # -------- Inter-client fairness (MULTI-DIMENSIONAL) --------
-                inter_client_fairness = compute_inter_client_fairness_with_delta(
+                inter_client_fairness_gtsrb = compute_inter_client_fairness_with_delta(
                     cid,
                     train_time_gtsrb,
                     loss_cifar_norm,
@@ -727,28 +727,58 @@ def run_experiment():
 
                 score_gtsrb = (
                         (1 - LAMBDA_CAPACITY - LAMBDA_INTRA) * inter_model_fairness
-                        + LAMBDA_CAPACITY * inter_client_fairness
+                        + LAMBDA_CAPACITY * inter_client_fairness_gtsrb
                         + LAMBDA_INTRA * intra_client_fairness
                 )
 
                 # =========================
-                # ESCOLHA DO MODELO
+                # FAIRNESS ATUAL
+                # =========================
+                current_fairness = compute_inter_client_fairness(
+                    loss_cifar_norm,
+                    loss_gtsrb_norm,
+                    data_cifar_norm,
+                    data_gtsrb_norm
+                )
+
+                # =========================
+                # DELTA CIFAR
+                # =========================
+                delta_cifar = inter_client_fairness_cifar - current_fairness
+
+                # =========================
+                # DELTA GTSRB
+                # =========================
+                delta_gtsrb = inter_client_fairness_gtsrb - current_fairness
+
+                # =========================
+                # ESCOLHA COM BASE NO DELTA
+                # =========================
+                # =========================
+                # ESCOLHA PELO SCORE (CORRETO)
                 # =========================
                 if score_cifar >= score_gtsrb:
                     chosen_model = "cifar"
+                    delta = delta_cifar
                     train_time = train_time_cifar
                 else:
                     chosen_model = "gtsrb"
+                    delta = delta_gtsrb
                     train_time = train_time_gtsrb
 
+                DELTA_TOL = -0.02  # permite pequena piora
+
+                if len(clients_cifar) + len(clients_gtsrb) > 0:
+                    if delta < DELTA_TOL:
+                        continue
+
                 # =========================
-                # APLICA LIMITE + SELEÇÃO
+                # AGORA SIM ADICIONA
                 # =========================
                 if chosen_model == "cifar":
                     clients_cifar.append(cid)
                     resource_usage["cifar"] += train_time
                     client_resource_usage[cid]["cifar"] += train_time
-
                 else:
                     clients_gtsrb.append(cid)
                     resource_usage["gtsrb"] += train_time
