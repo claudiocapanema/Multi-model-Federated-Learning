@@ -35,10 +35,11 @@ LOCAL_EPOCHS = 1
 BATCH_SIZE = 64
 LR = 0.01
 
-DIRICHLET_ALPHA = 0.1
+# DIRICHLET_ALPHA = 0.1
+DIRICHLET_ALPHA = 1.0
 regime = "realistic"
 # regime = "benign"
-regime = "severe"
+# regime = "severe"
 
 # =====================================================
 # PARÂMETROS DE UTILIDADE
@@ -108,7 +109,7 @@ client_acc = {}
 client_loss = {}
 client_delta_acc = {}
 global_acc_history = {}
-rawcs_logs = {}
+proposta_logs = {}
 
 # =====================================================
 # REGIMES EXPERIMENTAIS
@@ -122,7 +123,7 @@ def get_regime(name: str):
             "battery_init": (0.8, 1.0),
             "compute": (0.6, 1.0),
             "link": (0.6, 1.0),
-            "BATTERY_DECAY": 0.02,
+            "BATTERY_DECAY": 0.07,
             "TIME_MAX": 3.0,
             "LINK_MIN": 0.3,
         },
@@ -246,10 +247,10 @@ def compute_model_lambda(model_name, round_idx):
     perf_deficit = max(TARGET_ACC[model_name] - global_acc, 0.0)
 
     # Participation deficit
-    if len(rawcs_logs["clients_per_model"]) == 0:
+    if len(proposta_logs["clients_per_model"]) == 0:
         part_deficit = 1.0
     else:
-        prev_clients = rawcs_logs["clients_per_model"][-1][model_name]
+        prev_clients = proposta_logs["clients_per_model"][-1][model_name]
         part_deficit = 1.0 - (prev_clients / NUM_CLIENTS)
 
     lambda_m = (
@@ -277,10 +278,10 @@ def compute_all_lambdas(round_idx):
 
 def check_model_collapse(model_name):
 
-    if len(rawcs_logs["clients_per_model"]) < COLLAPSE_WINDOW:
+    if len(proposta_logs["clients_per_model"]) < COLLAPSE_WINDOW:
         return False
 
-    recent = rawcs_logs["clients_per_model"][-COLLAPSE_WINDOW:]
+    recent = proposta_logs["clients_per_model"][-COLLAPSE_WINDOW:]
     total_clients = sum(r[model_name] for r in recent)
 
     return total_clients == 0
@@ -296,7 +297,7 @@ def reset_experiment_state():
     global client_acc
     global client_loss
     global client_delta_acc
-    global rawcs_logs
+    global proposta_logs
     global global_acc_history
 
     # -------- Modelos --------
@@ -482,35 +483,35 @@ def rawcs_multi_model(t):
     # -------------------------------------------------
     # Logs
     # -------------------------------------------------
-    rawcs_logs["viable_pairs"].append(viable_pairs)
-    rawcs_logs["viable_clients"].append(viable_clients)
-    rawcs_logs["viable_pairs_per_model"].append(viable_pairs_per_model)
+    proposta_logs["viable_pairs"].append(viable_pairs)
+    proposta_logs["viable_clients"].append(viable_clients)
+    proposta_logs["viable_pairs_per_model"].append(viable_pairs_per_model)
 
-    rawcs_logs["avg_cost"].append({
+    proposta_logs["avg_cost"].append({
         m: float(np.mean(costs_per_model[m])) if costs_per_model[m] else None
         for m in global_models
     })
 
-    rawcs_logs["avg_train_time"].append({
+    proposta_logs["avg_train_time"].append({
         m: float(np.mean(train_times_per_model[m])) if train_times_per_model[m] else None
         for m in global_models
     })
 
-    rawcs_logs["max_train_time"].append({
+    proposta_logs["max_train_time"].append({
         m: float(np.max(train_times_per_model[m])) if train_times_per_model[m] else None
         for m in global_models
     })
 
-    rawcs_logs["avg_battery"].append(
+    proposta_logs["avg_battery"].append(
         float(np.mean([client_resources[cid]["battery"] for cid in range(NUM_CLIENTS)]))
     )
 
-    rawcs_logs["avg_link"].append(
+    proposta_logs["avg_link"].append(
         float(np.mean([client_resources[cid]["link"] for cid in range(NUM_CLIENTS)]))
     )
 
     fallback_happened = 1 if len(Sc) == 0 and len(Rc) > 0 else 0
-    rawcs_logs["fallback_rate"].append(fallback_happened)
+    proposta_logs["fallback_rate"].append(fallback_happened)
 
     return assignments
 
@@ -739,13 +740,17 @@ def run_experiment():
                     invalid_models.append(model_name)
 
             if invalid_models:
-                print(f"⚠️ Modelos abaixo do mínimo ({MIN_CLIENTS_PER_MODEL}): {invalid_models}")
-
-                # Remove completamente esses modelos da rodada
                 assignments = {
                     cid: m for cid, m in assignments.items()
                     if m not in invalid_models
                 }
+
+            # -------------------------------------------------
+            # Limite global final da rodada
+            # -------------------------------------------------
+            if len(assignments) > K_CLIENTS:
+                selected_subset = random.sample(list(assignments.keys()), K_CLIENTS)
+                assignments = {cid: assignments[cid] for cid in selected_subset}
 
             selected_clients = list(assignments.keys())
 
@@ -821,10 +826,10 @@ def run_experiment():
                 for cid in range(NUM_CLIENTS)
             ])
 
-            rawcs_logs["energy_consumed_round"].append(energy_this_round)
-            rawcs_logs["cumulative_energy"].append(cumulative_energy)
-            rawcs_logs["drained_clients_round"].append(drained_clients)
-            rawcs_logs["avg_battery_remaining"].append(avg_battery_remaining)
+            proposta_logs["energy_consumed_round"].append(energy_this_round)
+            proposta_logs["cumulative_energy"].append(cumulative_energy)
+            proposta_logs["drained_clients_round"].append(drained_clients)
+            proposta_logs["avg_battery_remaining"].append(avg_battery_remaining)
 
             # 4) Avaliação global
             for model_name, model in global_models.items():
@@ -858,26 +863,26 @@ def run_experiment():
                     "clients_selected": real_training_counter[model_name],
                     "clients_selected_total": sum(real_training_counter.values()),
 
-                    "viable_clients_total": rawcs_logs["viable_clients"][-1],
-                    "viable_pairs_total": rawcs_logs["viable_pairs"][-1],
-                    "viable_cifar": rawcs_logs["viable_pairs_per_model"][-1]["cifar"],
-                    "viable_gtsrb": rawcs_logs["viable_pairs_per_model"][-1]["gtsrb"],
+                    "viable_clients_total": proposta_logs["viable_clients"][-1],
+                    "viable_pairs_total": proposta_logs["viable_pairs"][-1],
+                    "viable_cifar": proposta_logs["viable_pairs_per_model"][-1]["cifar"],
+                    "viable_gtsrb": proposta_logs["viable_pairs_per_model"][-1]["gtsrb"],
 
-                    "avg_battery": rawcs_logs["avg_battery"][-1],
-                    "avg_link": rawcs_logs["avg_link"][-1],
+                    "avg_battery": proposta_logs["avg_battery"][-1],
+                    "avg_link": proposta_logs["avg_link"][-1],
 
-                    "avg_cost_cifar": rawcs_logs["avg_cost"][-1]["cifar"],
-                    "avg_cost_gtsrb": rawcs_logs["avg_cost"][-1]["gtsrb"],
+                    "avg_cost_cifar": proposta_logs["avg_cost"][-1]["cifar"],
+                    "avg_cost_gtsrb": proposta_logs["avg_cost"][-1]["gtsrb"],
 
-                    "avg_train_time_cifar": rawcs_logs["avg_train_time"][-1]["cifar"],
-                    "avg_train_time_gtsrb": rawcs_logs["avg_train_time"][-1]["gtsrb"],
+                    "avg_train_time_cifar": proposta_logs["avg_train_time"][-1]["cifar"],
+                    "avg_train_time_gtsrb": proposta_logs["avg_train_time"][-1]["gtsrb"],
 
-                    "fallback_rate": rawcs_logs["fallback_rate"][-1],
+                    "fallback_rate": proposta_logs["fallback_rate"][-1],
 
-                    "energy_consumed_round": rawcs_logs["energy_consumed_round"][-1],
-                    "cumulative_energy": rawcs_logs["cumulative_energy"][-1],
-                    "drained_clients_round": rawcs_logs["drained_clients_round"][-1],
-                    "avg_battery_remaining": rawcs_logs["avg_battery_remaining"][-1],
+                    "energy_consumed_round": proposta_logs["energy_consumed_round"][-1],
+                    "cumulative_energy": proposta_logs["cumulative_energy"][-1],
+                    "drained_clients_round": proposta_logs["drained_clients_round"][-1],
+                    "avg_battery_remaining": proposta_logs["avg_battery_remaining"][-1],
 
                 }
 
@@ -890,21 +895,21 @@ def run_experiment():
 
             clients_per_model = real_training_counter.copy()
 
-            rawcs_logs["clients_per_model"].append(clients_per_model)
+            proposta_logs["clients_per_model"].append(clients_per_model)
 
             print("🧠 RAWCS | "
-                  f"Viable pairs: {rawcs_logs['viable_pairs'][-1]} | "
-                  f"Viable clients: {rawcs_logs['viable_clients'][-1]} | "
-                  f"Fallback rate: {rawcs_logs['fallback_rate'][-1]:.2f}")
+                  f"Viable pairs: {proposta_logs['viable_pairs'][-1]} | "
+                  f"Viable clients: {proposta_logs['viable_clients'][-1]} | "
+                  f"Fallback rate: {proposta_logs['fallback_rate'][-1]:.2f}")
 
             print("🧠 Viable pairs por modelo:",
-                  rawcs_logs["viable_pairs_per_model"][-1])
+                  proposta_logs["viable_pairs_per_model"][-1])
 
             print("⚙️ Custo médio por modelo:",
-                  rawcs_logs["avg_cost"][-1])
+                  proposta_logs["avg_cost"][-1])
 
             print("⏱️ Tempo médio por modelo:",
-                  rawcs_logs["avg_train_time"][-1])
+                  proposta_logs["avg_train_time"][-1])
 
 if __name__ == "__main__":
 
