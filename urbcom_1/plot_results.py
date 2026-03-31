@@ -2,10 +2,13 @@ import os
 import pandas as pd
 import matplotlib.pyplot as plt
 
-RESULTS_DIR = "results"
-
 FRAC = 0.3
-ALPHA = 1.0
+ALPHA = 0.1
+# ALPHA = 1.0
+
+RESULTS_DIR_WIRTE = "results/alpha_"+str(ALPHA)
+
+RESULTS_DIR = "results/"
 
 BASELINE_FRACS = [0.2, 0.3, 0.4, 0.5]
 
@@ -25,6 +28,8 @@ ALGORITHM_ORDER = [
     "baseline_f0.4",
     "baseline_f0.5"
 ]
+
+os.makedirs(RESULTS_DIR_WIRTE, exist_ok=True)
 
 def get_algorithm_order(df):
 
@@ -106,7 +111,7 @@ def plot_clients_selected(df):
     plt.grid()
     plt.tight_layout()
 
-    plt.savefig(f"{RESULTS_DIR}/clients_selected.png")
+    plt.savefig(f"{RESULTS_DIR_WIRTE}/clients_selected.png")
     plt.close()
 
 def plot_cumulative_clients(df):
@@ -142,7 +147,7 @@ def plot_cumulative_clients(df):
     plt.grid()
     plt.tight_layout()
 
-    plt.savefig(f"{RESULTS_DIR}/cumulative_clients_selected.png")
+    plt.savefig(f"{RESULTS_DIR_WIRTE}/cumulative_clients_selected.png")
     plt.close()
 
 def plot_mean_fairness(df):
@@ -170,7 +175,7 @@ def plot_mean_fairness(df):
     plt.grid()
     plt.tight_layout()
 
-    plt.savefig(f"{RESULTS_DIR}/mean_fairness.png")
+    plt.savefig(f"{RESULTS_DIR_WIRTE}/mean_fairness.png")
     plt.close()
 
 def plot_cumulative_mean_fairness(df):
@@ -199,7 +204,7 @@ def plot_cumulative_mean_fairness(df):
     plt.grid()
     plt.tight_layout()
 
-    plt.savefig(f"{RESULTS_DIR}/cumulative_mean_fairness.png")
+    plt.savefig(f"{RESULTS_DIR_WIRTE}/cumulative_mean_fairness.png")
     plt.close()
 
 def plot_resource_usage(df):
@@ -228,7 +233,7 @@ def plot_resource_usage(df):
         plt.grid()
         plt.tight_layout()
 
-        plt.savefig(f"{RESULTS_DIR}/{metric}.png")
+        plt.savefig(f"{RESULTS_DIR_WIRTE}/{metric}.png")
         plt.close()
 
 def plot_cumulative_resource_usage(df):
@@ -268,7 +273,7 @@ def plot_cumulative_resource_usage(df):
         plt.grid()
         plt.tight_layout()
 
-        plt.savefig(f"{RESULTS_DIR}/cumulative_{metric}.png")
+        plt.savefig(f"{RESULTS_DIR_WIRTE}/cumulative_{metric}.png")
         plt.close()
 
 def load_results():
@@ -391,7 +396,7 @@ def load_results():
                 dfs.append(df)
 
     if len(dfs) == 0:
-        raise ValueError("Nenhum CSV encontrado em results/")
+        raise ValueError("Nenhum CSV encontrado em results/alpha_"+str(ALPHA)+"/")
 
     df = pd.concat(dfs, ignore_index=True)
 
@@ -402,6 +407,9 @@ def load_results():
 
 def plot_accuracy(df):
 
+    # =====================================================
+    # 1) PLOT POR DATASET (CIFAR / GTSRB)
+    # =====================================================
     for dataset in df["dataset"].unique():
 
         subset_dataset = df[df["dataset"] == dataset]
@@ -431,41 +439,380 @@ def plot_accuracy(df):
         plt.grid()
         plt.tight_layout()
 
-        plt.savefig(f"{RESULTS_DIR}/accuracy_{dataset}.png")
+        plt.savefig(f"{RESULTS_DIR_WIRTE}/accuracy_{dataset}.png")
         plt.close()
 
-    for dataset in df["dataset"].unique():
+    # =====================================================
+    # 2) PLOT MÉDIO (CIFAR + GTSRB)
+    # =====================================================
+    plt.figure(figsize=(6,4))
 
-        subset = df[df["dataset"] == dataset]
+    for alg in get_algorithm_order(df):
 
-        plt.figure(figsize=(6,4))
+        subset_alg = df[df["algorithm"] == alg]
 
-        for alg in get_algorithm_order(df):
-            subset = df[df["algorithm"] == alg]
+        if len(subset_alg) == 0:
+            continue
 
-            print(f"\nALG: {alg}")
-            print(subset.head())
+        # 🔥 média entre datasets por rodada
+        curve = (
+            subset_alg
+            .groupby(["round"])["global_acc"]
+            .mean()
+        )
 
-            curve = (
-                subset[subset["algorithm"] == alg]
-                .groupby("round")["global_acc"]
-                .mean()
-            )
+        plt.plot(curve.index, curve.values, label=alg)
 
-            print("curva: ", alg, curve)
+    plt.title("Mean Accuracy (CIFAR + GTSRB)")
+    plt.xlabel("Round")
+    plt.ylabel("Accuracy")
 
-            plt.plot(curve.index, curve.values, label=alg)
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
 
-        plt.title(f"Accuracy ({dataset})")
-        plt.xlabel("Round")
-        plt.ylabel("Accuracy")
+    plt.savefig(f"{RESULTS_DIR_WIRTE}/accuracy_mean.png")
+    plt.close()
 
-        plt.legend()
-        plt.grid()
-        plt.tight_layout()
+import numpy as np
+from scipy import stats
+import os
 
-        plt.savefig(f"{RESULTS_DIR}/accuracy_{dataset}.png")
-        plt.close()
+def compute_ci(series, confidence=0.95):
+    mean = np.mean(series)
+    sem = stats.sem(series)
+    h = sem * stats.t.ppf((1 + confidence) / 2., len(series)-1)
+    return mean, h
+
+
+def build_latex_table(df, save_path="results/alpha_"+str(ALPHA)+"/accuracy_table.tex"):
+
+    results = []
+
+    for alg in get_algorithm_order(df):
+
+        subset = df[df["algorithm"] == alg]
+
+        cifar = subset[subset["dataset"] == "cifar"]["global_acc"]
+        gtsrb = subset[subset["dataset"] == "gtsrb"]["global_acc"]
+
+        if len(cifar) == 0 or len(gtsrb) == 0:
+            continue
+
+        mean_cifar, ci_cifar = compute_ci(cifar)
+        mean_gtsrb, ci_gtsrb = compute_ci(gtsrb)
+
+        mean_total = (mean_cifar + mean_gtsrb) / 2
+        ci_total = (ci_cifar + ci_gtsrb) / 2
+
+        results.append({
+            "alg": alg,
+            "cifar_mean": mean_cifar,
+            "cifar_ci": ci_cifar,
+            "gtsrb_mean": mean_gtsrb,
+            "gtsrb_ci": ci_gtsrb,
+            "total_mean": mean_total,
+            "total_ci": ci_total,
+        })
+
+    df_res = pd.DataFrame(results)
+
+    # =====================================================
+    # IDENTIFICAR MELHORES + IC
+    # =====================================================
+
+    def mark_best(col_mean, col_ci):
+
+        best_idx = df_res[col_mean].idxmax()
+        best_mean = df_res.loc[best_idx, col_mean]
+        best_ci = df_res.loc[best_idx, col_ci]
+
+        selected = []
+
+        for i, row in df_res.iterrows():
+
+            lower = row[col_mean] - row[col_ci]
+            upper = row[col_mean] + row[col_ci]
+
+            best_lower = best_mean - best_ci
+            best_upper = best_mean + best_ci
+
+            overlap = not (upper < best_lower or lower > best_upper)
+
+            if overlap:
+                selected.append(i)
+
+        return selected
+
+    best_total = mark_best("total_mean", "total_ci")
+    best_cifar = mark_best("cifar_mean", "cifar_ci")
+    best_gtsrb = mark_best("gtsrb_mean", "gtsrb_ci")
+
+    # =====================================================
+    # GERAR LATEX
+    # =====================================================
+
+    lines = []
+    lines.append("\\begin{table}[t]")
+    lines.append("\\centering")
+    lines.append("\\begin{tabular}{lccc}")
+    lines.append("\\toprule")
+    lines.append("Algorithm & Mean Acc (\\%) & CIFAR (\\%) & GTSRB (\\%) \\\\")
+    lines.append("\\midrule")
+
+    for i, row in df_res.iterrows():
+
+        def fmt(mean, ci, bold):
+            # 🔥 converter para porcentagem
+            mean *= 100
+            ci *= 100
+
+            text = f"{mean:.2f} $\\pm$ {ci:.2f}"
+            return f"\\textbf{{{text}}}" if bold else text
+
+        total = fmt(row["total_mean"], row["total_ci"], i in best_total)
+        cifar = fmt(row["cifar_mean"], row["cifar_ci"], i in best_cifar)
+        gtsrb = fmt(row["gtsrb_mean"], row["gtsrb_ci"], i in best_gtsrb)
+
+        lines.append(f"{row['alg']} & {total} & {cifar} & {gtsrb} \\\\")
+
+    lines.append("\\bottomrule")
+    lines.append("\\end{tabular}")
+    lines.append("\\caption{Accuracy comparison (\\%) with 95\\% confidence intervals.}")
+    lines.append("\\end{table}")
+
+    latex = "\n".join(lines)
+
+    # =====================================================
+    # SALVAR
+    # =====================================================
+
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    with open(save_path, "w") as f:
+        f.write(latex)
+
+    print(f"\n✅ Tabela salva em: {save_path}")
+
+    return latex
+
+def build_fairness_latex_table(df, save_path="results/alpha_"+str(ALPHA)+"/fairness_table.tex"):
+
+    results = []
+
+    for alg in get_algorithm_order(df):
+
+        subset = df[df["algorithm"] == alg]
+
+        if len(subset) == 0:
+            continue
+
+        inter_client = subset["inter_client_fairness"]
+        intra_client = subset["intra_client_fairness"]
+        inter_model = subset["inter_model_fairness"]
+
+        if len(inter_client) == 0:
+            continue
+
+        mean_inter_client, ci_inter_client = compute_ci(inter_client)
+        mean_intra_client, ci_intra_client = compute_ci(intra_client)
+        mean_inter_model, ci_inter_model = compute_ci(inter_model)
+
+        mean_total = np.mean([
+            mean_inter_client,
+            mean_intra_client,
+            mean_inter_model
+        ])
+
+        ci_total = np.mean([
+            ci_inter_client,
+            ci_intra_client,
+            ci_inter_model
+        ])
+
+        results.append({
+            "alg": alg,
+
+            "mean_total": mean_total,
+            "ci_total": ci_total,
+
+            "inter_client_mean": mean_inter_client,
+            "inter_client_ci": ci_inter_client,
+
+            "intra_client_mean": mean_intra_client,
+            "intra_client_ci": ci_intra_client,
+
+            "inter_model_mean": mean_inter_model,
+            "inter_model_ci": ci_inter_model,
+        })
+
+    df_res = pd.DataFrame(results)
+
+    # =====================================================
+    # IDENTIFICAR MELHORES + IC
+    # =====================================================
+
+    def mark_best(col_mean, col_ci):
+
+        best_idx = df_res[col_mean].idxmax()
+        best_mean = df_res.loc[best_idx, col_mean]
+        best_ci = df_res.loc[best_idx, col_ci]
+
+        selected = []
+
+        for i, row in df_res.iterrows():
+
+            lower = row[col_mean] - row[col_ci]
+            upper = row[col_mean] + row[col_ci]
+
+            best_lower = best_mean - best_ci
+            best_upper = best_mean + best_ci
+
+            overlap = not (upper < best_lower or lower > best_upper)
+
+            if overlap:
+                selected.append(i)
+
+        return selected
+
+    best_total = mark_best("mean_total", "ci_total")
+    best_inter_client = mark_best("inter_client_mean", "inter_client_ci")
+    best_intra_client = mark_best("intra_client_mean", "intra_client_ci")
+    best_inter_model = mark_best("inter_model_mean", "inter_model_ci")
+
+    # =====================================================
+    # GERAR LATEX
+    # =====================================================
+
+    lines = []
+    lines.append("\\begin{table}[t]")
+    lines.append("\\centering")
+    lines.append("\\begin{tabular}{lcccc}")
+    lines.append("\\toprule")
+    lines.append("Algorithm & Mean Fairness & Inter-Client & Intra-Client & Inter-Model \\\\")
+    lines.append("\\midrule")
+
+    for i, row in df_res.iterrows():
+
+        def fmt(mean, ci, bold):
+            text = f"{mean:.2f} $\\pm$ {ci:.2f}"
+            return f"\\textbf{{{text}}}" if bold else text
+
+        total = fmt(row["mean_total"], row["ci_total"], i in best_total)
+        inter_c = fmt(row["inter_client_mean"], row["inter_client_ci"], i in best_inter_client)
+        intra_c = fmt(row["intra_client_mean"], row["intra_client_ci"], i in best_intra_client)
+        inter_m = fmt(row["inter_model_mean"], row["inter_model_ci"], i in best_inter_model)
+
+        lines.append(f"{row['alg']} & {total} & {inter_c} & {intra_c} & {inter_m} \\\\")
+
+    lines.append("\\bottomrule")
+    lines.append("\\end{tabular}")
+    lines.append("\\caption{Fairness comparison with 95\\% confidence intervals.}")
+    lines.append("\\end{table}")
+
+    latex = "\n".join(lines)
+
+    # =====================================================
+    # SALVAR
+    # =====================================================
+
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    with open(save_path, "w") as f:
+        f.write(latex)
+
+    print(f"\n✅ Tabela de fairness salva em: {save_path}")
+
+    return latex
+
+def build_resource_latex_table(df, save_path="results/alpha_"+str(ALPHA)+"/resource_table.tex"):
+
+    results = []
+
+    for alg in get_algorithm_order(df):
+
+        subset = df[df["algorithm"] == alg]
+
+        if len(subset) == 0:
+            continue
+
+        # =====================================================
+        # 🔥 SOMATÓRIO REAL POR RODADA (evita duplicação)
+        # =====================================================
+        per_round = (
+            subset
+            .groupby("round")[["resource_usage_cifar", "resource_usage_gtsrb"]]
+            .mean()
+        )
+
+        # =====================================================
+        # 🔥 SOMATÓRIO TOTAL (CORRETO)
+        # =====================================================
+        total_cifar = per_round["resource_usage_cifar"].sum()
+        total_gtsrb = per_round["resource_usage_gtsrb"].sum()
+
+        total_all = total_cifar + total_gtsrb
+
+        results.append({
+            "alg": alg,
+            "cifar_total": total_cifar,
+            "gtsrb_total": total_gtsrb,
+            "total_all": total_all
+        })
+
+    df_res = pd.DataFrame(results)
+
+    # =====================================================
+    # 🔥 MELHOR = MENOR USO TOTAL
+    # =====================================================
+
+    best_idx = df_res["total_all"].idxmin()
+
+    # =====================================================
+    # GERAR LATEX
+    # =====================================================
+
+    lines = []
+    lines.append("\\begin{table}[t]")
+    lines.append("\\centering")
+    lines.append("\\begin{tabular}{lccc}")
+    lines.append("\\toprule")
+    lines.append("Algorithm & Total Resource & CIFAR & GTSRB \\\\")
+    lines.append("\\midrule")
+
+    for i, row in df_res.iterrows():
+
+        def fmt(val, bold):
+            text = f"{val:.2f}"
+            return f"\\textbf{{{text}}}" if bold else text
+
+        is_best = (i == best_idx)
+
+        total = fmt(row["total_all"], is_best)
+        cifar = fmt(row["cifar_total"], False)
+        gtsrb = fmt(row["gtsrb_total"], False)
+
+        lines.append(f"{row['alg']} & {total} & {cifar} & {gtsrb} \\\\")
+
+    lines.append("\\bottomrule")
+    lines.append("\\end{tabular}")
+    lines.append("\\caption{Total resource usage (sum across all rounds). Lower is better.}")
+    lines.append("\\end{table}")
+
+    latex = "\n".join(lines)
+
+    # =====================================================
+    # SALVAR
+    # =====================================================
+
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    with open(save_path, "w") as f:
+        f.write(latex)
+
+    print(f"\n✅ Tabela de resource usage salva em: {save_path}")
+
+    return latex
 
 def plot_fairness(df):
 
@@ -491,7 +838,7 @@ def plot_fairness(df):
         plt.grid()
         plt.tight_layout()
 
-        plt.savefig(f"{RESULTS_DIR}/{METRIC_FILENAME[metric]}.png")
+        plt.savefig(f"{RESULTS_DIR_WIRTE}/{METRIC_FILENAME[metric]}.png")
         plt.close()
 
 def plot_cumulative_fairness(df):
@@ -529,7 +876,7 @@ def plot_cumulative_fairness(df):
         plt.grid()
         plt.tight_layout()
 
-        plt.savefig(f"{RESULTS_DIR}/cumulative_{METRIC_FILENAME[metric]}.png")
+        plt.savefig(f"{RESULTS_DIR_WIRTE}/cumulative_{METRIC_FILENAME[metric]}.png")
         plt.close()
 
 def main():
@@ -558,6 +905,10 @@ def main():
     # fairness médio
     plot_mean_fairness(df)
     # plot_cumulative_mean_fairness(df)
+
+    build_latex_table(df)
+    build_fairness_latex_table(df)  # novo
+    build_resource_latex_table(df)  # 🔥 NOVO
 
     print("\n✔ Todos os plots gerados")
 
