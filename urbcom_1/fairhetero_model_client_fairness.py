@@ -39,8 +39,8 @@ LOCAL_EPOCHS = 1
 BATCH_SIZE = 64
 LR = 0.01
 
-# DIRICHLET_ALPHA = 0.1
-DIRICHLET_ALPHA = 1.0
+DIRICHLET_ALPHA = 0.1
+# DIRICHLET_ALPHA = 1.0
 
 # =====================================================
 # MODEL COST (FLOPs POR AMOSTRA)

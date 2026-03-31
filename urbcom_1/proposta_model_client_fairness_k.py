@@ -32,15 +32,15 @@ BASE_SEED = 42
 NUM_FOLDS = 1
 NUM_CLIENTS = 40
 ROUNDS = 100
-FRAC = 0.2
+FRAC = 0.4
 K_CLIENTS = int(FRAC * NUM_CLIENTS)   # exemplo: 30% no máximo
 
 LOCAL_EPOCHS = 1
 BATCH_SIZE = 64
 LR = 0.01
 
-# DIRICHLET_ALPHA = 0.1
-DIRICHLET_ALPHA = 1.0
+DIRICHLET_ALPHA = 0.1
+# DIRICHLET_ALPHA = 1.0
 
 global FAIR_RESOURCE_BUDGET
 global loss_cifar_norm, loss_gtsrb_norm
@@ -59,10 +59,11 @@ MODEL_COST = {
 # FAIRNESS WEIGHTS (GLOBAL EXPERIMENT CONFIG)
 # =====================================================
 
+LAMBDA_MODEL = 0.3
 LAMBDA_CAPACITY = 0.3
 LAMBDA_INTRA = 0.3
 
-assert LAMBDA_CAPACITY + LAMBDA_INTRA <= 1.0
+assert LAMBDA_MODEL + LAMBDA_CAPACITY + LAMBDA_INTRA <= 1.0
 
 # =====================================================
 # FAIR RESOURCE BUDGET
@@ -657,11 +658,13 @@ def run_experiment():
                 other_usage = total_gtsrb_usage
                 total = new_usage + other_usage
 
-                if total > 0:
-                    imbalance = abs(new_usage - other_usage) / total
-                    inter_model_fairness = 1.0 - imbalance
-                else:
-                    inter_model_fairness = 1.0
+                # útil apenas quando se tem MEFL heterogêneo
+
+                # if total > 0:
+                #     imbalance = abs(new_usage - other_usage) / total
+                #     inter_model_fairness = 1.0 - imbalance
+                # else:
+                #     inter_model_fairness = 1.0
 
                 # -------- Intra-client
                 client_cifar = client_resource_usage[cid]["cifar"] + train_time_cifar
@@ -685,10 +688,15 @@ def run_experiment():
                 )
 
                 score_cifar = (
-                        (1 - LAMBDA_CAPACITY - LAMBDA_INTRA) * inter_model_fairness
                         + LAMBDA_CAPACITY * inter_client_fairness_cifar
                         + LAMBDA_INTRA * intra_client_fairness
                 )
+
+                # score_cifar = (
+                #         LAMBDA_MODEL * inter_model_fairness
+                #         + LAMBDA_CAPACITY * inter_client_fairness_cifar
+                #         + LAMBDA_INTRA * intra_client_fairness
+                # )
 
                 # =========================
                 # TESTA GTSRB
@@ -699,11 +707,11 @@ def run_experiment():
                 other_usage = total_cifar_usage
                 total = new_usage + other_usage
 
-                if total > 0:
-                    imbalance = abs(new_usage - other_usage) / total
-                    inter_model_fairness = 1.0 - imbalance
-                else:
-                    inter_model_fairness = 1.0
+                # if total > 0:
+                #     imbalance = abs(new_usage - other_usage) / total
+                #     inter_model_fairness = 1.0 - imbalance
+                # else:
+                #     inter_model_fairness = 1.0
 
                 client_cifar = client_resource_usage[cid]["cifar"]
                 client_gtsrb = client_resource_usage[cid]["gtsrb"] + train_time_gtsrb
@@ -726,10 +734,15 @@ def run_experiment():
                 )
 
                 score_gtsrb = (
-                        (1 - LAMBDA_CAPACITY - LAMBDA_INTRA) * inter_model_fairness
                         + LAMBDA_CAPACITY * inter_client_fairness_gtsrb
                         + LAMBDA_INTRA * intra_client_fairness
                 )
+
+                # score_gtsrb = (
+                #         LAMBDA_MODEL * inter_model_fairness
+                #         + LAMBDA_CAPACITY * inter_client_fairness_gtsrb
+                #         + LAMBDA_INTRA * intra_client_fairness
+                # )
 
                 # =========================
                 # FAIRNESS ATUAL

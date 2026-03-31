@@ -32,15 +32,15 @@ BASE_SEED = 42
 NUM_FOLDS = 1
 NUM_CLIENTS = 40
 ROUNDS = 100
-FRAC = 0.4
+FRAC = 0.2
 K_CLIENTS = int(FRAC * NUM_CLIENTS)   # exemplo: 30% no máximo
 
 LOCAL_EPOCHS = 1
 BATCH_SIZE = 64
 LR = 0.01
 
-# DIRICHLET_ALPHA = 0.1
-DIRICHLET_ALPHA = 1.0
+DIRICHLET_ALPHA = 0.1
+# DIRICHLET_ALPHA = 1.0
 
 # =====================================================
 # MODEL COST (FLOPs POR AMOSTRA)
