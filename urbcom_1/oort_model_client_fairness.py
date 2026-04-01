@@ -1103,7 +1103,7 @@ def run_experiment():
 
                 # salvar linha no CSV
                 row_data = {
-                    "algorithm": "MultiFedAvg",
+                    "algorithm": "Oort",
                     "fold": fold,
                     "round": rnd,
                     "dataset": model_name,

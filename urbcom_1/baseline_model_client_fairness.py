@@ -39,8 +39,8 @@ LOCAL_EPOCHS = 1
 BATCH_SIZE = 64
 LR = 0.01
 
-DIRICHLET_ALPHA = 0.1
-# DIRICHLET_ALPHA = 1.0
+# DIRICHLET_ALPHA = 0.1
+DIRICHLET_ALPHA = 1.0
 
 # =====================================================
 # MODEL COST (FLOPs POR AMOSTRA)
@@ -51,7 +51,7 @@ MODEL_COST = {
         "flops_per_sample": 5e6,
     },
     "gtsrb": {
-        "flops_per_sample": 1.2e7,
+        "flops_per_sample": 1.2e7, # 2.4 ou 140% mais caro que o cifar
     }
 }
 
