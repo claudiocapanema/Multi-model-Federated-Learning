@@ -32,7 +32,7 @@ BASE_SEED = 42
 NUM_FOLDS = 1
 NUM_CLIENTS = 40
 ROUNDS = 100
-FRAC = 0.2
+FRAC = 0.3
 K_CLIENTS = int(FRAC * NUM_CLIENTS)   # exemplo: 30% no máximo
 
 LOCAL_EPOCHS = 1
@@ -46,14 +46,41 @@ DIRICHLET_ALPHA = 1.0
 # MODEL COST (FLOPs POR AMOSTRA)
 # =====================================================
 
-MODEL_COST = {
-    "cifar": {
-        "flops_per_sample": 5e6,
+# =====================================================
+# MODEL COST SETUPS
+# =====================================================
+
+MODEL_COST_SETUPS = {
+
+    # 🔹 Setup atual (≈2.4x)
+    "cost_2_4x": {
+        "cifar": {
+            "flops_per_sample": 5e6,
+        },
+        "gtsrb": {
+            "flops_per_sample": 1.2e7,
+        }
     },
-    "gtsrb": {
-        "flops_per_sample": 1.2e7, # 2.4 ou 140% mais caro que o cifar
+
+    # 🔹 Novo setup (4x)
+    "cost_4x": {
+        "cifar": {
+            "flops_per_sample": 5e6,
+        },
+        "gtsrb": {
+            "flops_per_sample": 2.0e7,
+        }
     }
 }
+
+# =====================================================
+# SELECT COST SETUP
+# =====================================================
+
+COST_SETUP_NAME = "cost_2_4x"  # 🔥 troque aqui
+COST_SETUP_NAME = "cost_4x"  # 🔥 troque aqui
+
+MODEL_COST = MODEL_COST_SETUPS[COST_SETUP_NAME]
 
 # =====================================================
 # FAIRNESS WEIGHTS (GLOBAL EXPERIMENT CONFIG)
@@ -73,7 +100,33 @@ LIGHT_MODEL = min(
     key=lambda m: MODEL_COST[m]["flops_per_sample"]
 )
 
-Path("results/").mkdir(parents=True, exist_ok=True)
+# =====================================================
+# COST RATIO (AUTOMÁTICO)
+# =====================================================
+
+def compute_cost_ratio():
+    cifar_cost = MODEL_COST["cifar"]["flops_per_sample"]
+    gtsrb_cost = MODEL_COST["gtsrb"]["flops_per_sample"]
+
+    ratio = gtsrb_cost / cifar_cost
+
+    # 🔹 versão para nome de pasta (segura)
+    ratio_str_file = f"{ratio:.1f}x"
+
+    # 🔹 versão para exibição (PT-BR)
+    ratio_str_br = f"{ratio:.1f}".replace(".", ",") + "x"
+
+    return ratio, ratio_str_file, ratio_str_br
+
+
+COST_RATIO, COST_RATIO_STR_FILE, COST_RATIO_STR_BR = compute_cost_ratio()
+
+# =====================================================
+# DIRETÓRIO DE RESULTADOS (COM RATIO)
+# =====================================================
+
+RESULTS_DIR = f"results/gtsrb_{COST_RATIO_STR_FILE}_cifar/"
+Path(RESULTS_DIR).mkdir(parents=True, exist_ok=True)
 
 # =====================================================
 # PARTE 2 — MODELOS
@@ -348,12 +401,12 @@ def append_result_to_csv(row_dict, filename):
 def clear_previous_results():
     for model_name in ["cifar", "gtsrb"]:
         filename = (
-    f"results/baseline_{model_name}"
-    f"_frac_{FRAC}"
-    f"_alpha_{DIRICHLET_ALPHA}"
-    f"_lambdaCap_{LAMBDA_CAPACITY}"
-    f"_lambdaIntra_{LAMBDA_INTRA}.csv"
-)
+            f"{RESULTS_DIR}/baseline_{model_name}"
+            f"_frac_{FRAC}"
+            f"_alpha_{DIRICHLET_ALPHA}"
+            f"_lambdaCap_{LAMBDA_CAPACITY}"
+            f"_lambdaIntra_{LAMBDA_INTRA}.csv"
+        )
         if os.path.exists(filename):
             os.remove(filename)
 
@@ -440,6 +493,61 @@ def compute_normalized_metrics():
         data_cifar_norm,
         data_gtsrb_norm
     )
+
+def compute_intra_client_fairness_utility(
+    loss_cifar_norm,
+    loss_gtsrb_norm,
+    data_cifar_norm,
+    data_gtsrb_norm,
+    beta=1.0,
+    utility_smoothing=0.1,
+    eps=1e-8
+):
+    """
+    Intra-client fairness com awareness de utility.
+
+    Parâmetros:
+    - beta: controla peso da utility (0 = ignora utility, 1 = total)
+    - utility_smoothing: suavização para evitar divisão por zero
+    - eps: estabilidade numérica
+    """
+
+    vals = []
+
+    for cid in range(NUM_CLIENTS):
+
+        # -------- USAGE --------
+        u_cifar = client_resource_usage[cid]["cifar"]
+        u_gtsrb = client_resource_usage[cid]["gtsrb"]
+
+        # -------- UTILITY --------
+        util_cifar = data_cifar_norm[cid] * loss_cifar_norm[cid]
+        util_gtsrb = data_gtsrb_norm[cid] * loss_gtsrb_norm[cid]
+
+        # -------- SMOOTHING (ESSENCIAL) --------
+        util_cifar = utility_smoothing + (1 - utility_smoothing) * util_cifar
+        util_gtsrb = utility_smoothing + (1 - utility_smoothing) * util_gtsrb
+
+        # -------- CONTROLE DE INFLUÊNCIA --------
+        util_cifar = util_cifar ** beta
+        util_gtsrb = util_gtsrb ** beta
+
+        # -------- NORMALIZAÇÃO POR UTILITY --------
+        v1 = u_cifar / (util_cifar + eps)
+        v2 = u_gtsrb / (util_gtsrb + eps)
+
+        total = v1 + v2
+
+        if total == 0:
+            continue
+
+        # -------- JAIN --------
+        num = total ** 2
+        den = 2 * (v1 ** 2 + v2 ** 2)
+
+        vals.append(num / den if den > 0 else 1.0)
+
+    return float(np.mean(vals)) if vals else 1.0
 
 def run_experiment():
 
@@ -673,23 +781,14 @@ def run_experiment():
             )
 
             # -------- Intra-client fairness --------
-            imbalances = []
-
-            for cid in range(NUM_CLIENTS):
-
-                u_cifar = client_resource_usage[cid]["cifar"]
-                u_gtsrb = client_resource_usage[cid]["gtsrb"]
-
-                total = u_cifar + u_gtsrb
-
-                if total > 0:
-                    imbalance = abs(u_cifar - u_gtsrb) / total
-                    imbalances.append(imbalance)
-
-            if len(imbalances) > 0:
-                intra_client_fairness = 1.0 - (sum(imbalances) / len(imbalances))
-            else:
-                intra_client_fairness = 1.0
+            intra_client_fairness = compute_intra_client_fairness_utility(
+                loss_cifar_norm,
+                loss_gtsrb_norm,
+                data_cifar_norm,
+                data_gtsrb_norm,
+                beta=0.7,
+                utility_smoothing=0.1
+            )
 
             # =====================================================
             # 6) LOGS DE RECURSOS E FAIRNESS
@@ -755,7 +854,7 @@ def run_experiment():
                 }
 
                 filename = (
-                    f"results/baseline_{model_name}"
+                    f"{RESULTS_DIR}/baseline_{model_name}"
                     f"_frac_{FRAC}"
                     f"_alpha_{DIRICHLET_ALPHA}"
                     f"_lambdaCap_{LAMBDA_CAPACITY}"

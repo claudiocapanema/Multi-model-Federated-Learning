@@ -46,14 +46,38 @@ global FAIR_RESOURCE_BUDGET
 global loss_cifar_norm, loss_gtsrb_norm
 global data_cifar_norm, data_gtsrb_norm
 
-MODEL_COST = {
-    "cifar": {
-        "flops_per_sample": 5e6,   # modelo leve
+MODEL_COST_SETUPS = {
+
+    # 🔹 Setup atual (≈2.4x)
+    "cost_2_4x": {
+        "cifar": {
+            "flops_per_sample": 5e6,
+        },
+        "gtsrb": {
+            "flops_per_sample": 1.2e7,
+        }
     },
-    "gtsrb": {
-        "flops_per_sample": 1.2e7, # modelo mais pesado
+
+    # 🔹 Novo setup (4x)
+    "cost_4x": {
+        "cifar": {
+            "flops_per_sample": 5e6,
+        },
+        "gtsrb": {
+            "flops_per_sample": 2.0e7,
+        }
     }
 }
+
+# =====================================================
+# SELECT COST SETUP
+# =====================================================
+
+COST_SETUP_NAME = "cost_2_4x"  # 🔥 troque aqui
+COST_SETUP_NAME = "cost_4x"  # 🔥 troque aqui
+
+
+MODEL_COST = MODEL_COST_SETUPS[COST_SETUP_NAME]
 
 # =====================================================
 # FAIRNESS WEIGHTS (GLOBAL EXPERIMENT CONFIG)
@@ -77,7 +101,78 @@ LIGHT_MODEL = min(
 # permitir aproximadamente K_CLIENTS treinamentos por rodada
 avg_speed = 0.65
 
-Path("results/").mkdir(parents=True, exist_ok=True)
+def compute_normalized_metrics():
+
+    loss_cifar_vals = []
+    loss_gtsrb_vals = []
+    data_cifar_vals = []
+    data_gtsrb_vals = []
+
+    for cid in range(NUM_CLIENTS):
+
+        lc = client_loss[cid]["cifar"]
+        lg = client_loss[cid]["gtsrb"]
+
+        # tratar valores inválidos
+        lc = lc if np.isfinite(lc) else 1.0
+        lg = lg if np.isfinite(lg) else 1.0
+
+        loss_cifar_vals.append(lc)
+        loss_gtsrb_vals.append(lg)
+
+        data_cifar_vals.append(client_resources[cid]["data_size_cifar"])
+        data_gtsrb_vals.append(client_resources[cid]["data_size_gtsrb"])
+
+    # -------- FUNÇÃO MIN-MAX --------
+    def minmax(arr):
+        mn, mx = min(arr), max(arr)
+
+        if mx - mn < 1e-8:
+            return [1.0 for _ in arr]
+
+        return [(x - mn) / (mx - mn + 1e-8) for x in arr]
+
+    # -------- NORMALIZAÇÃO --------
+    loss_cifar_norm = minmax(loss_cifar_vals)
+    loss_gtsrb_norm = minmax(loss_gtsrb_vals)
+
+    data_cifar_norm = minmax(data_cifar_vals)
+    data_gtsrb_norm = minmax(data_gtsrb_vals)
+
+    return (
+        loss_cifar_norm,
+        loss_gtsrb_norm,
+        data_cifar_norm,
+        data_gtsrb_norm
+    )
+
+# =====================================================
+# COST RATIO (AUTOMÁTICO)
+# =====================================================
+
+def compute_cost_ratio():
+    cifar_cost = MODEL_COST["cifar"]["flops_per_sample"]
+    gtsrb_cost = MODEL_COST["gtsrb"]["flops_per_sample"]
+
+    ratio = gtsrb_cost / cifar_cost
+
+    # 🔹 versão para nome de pasta (segura)
+    ratio_str_file = f"{ratio:.1f}x"
+
+    # 🔹 versão para exibição (PT-BR)
+    ratio_str_br = f"{ratio:.1f}".replace(".", ",") + "x"
+
+    return ratio, ratio_str_file, ratio_str_br
+
+
+COST_RATIO, COST_RATIO_STR_FILE, COST_RATIO_STR_BR = compute_cost_ratio()
+
+# =====================================================
+# DIRETÓRIO DE RESULTADOS (COM RATIO)
+# =====================================================
+
+RESULTS_DIR = f"results/gtsrb_{COST_RATIO_STR_FILE}_cifar/"
+Path(RESULTS_DIR).mkdir(parents=True, exist_ok=True)
 
 # =====================================================
 # PARTE 2 — MODELOS
@@ -359,12 +454,12 @@ def append_result_to_csv(row_dict, filename):
 def clear_previous_results():
     for model_name in ["cifar", "gtsrb"]:
         filename = (
-    f"results/proposta_k_{model_name}"
-    f"_frac_{FRAC}"
-    f"_alpha_{DIRICHLET_ALPHA}"
-    f"_lambdaCap_{LAMBDA_CAPACITY}"
-    f"_lambdaIntra_{LAMBDA_INTRA}.csv"
-)
+            f"{RESULTS_DIR}/proposta_k_{model_name}"
+            f"_frac_{FRAC}"
+            f"_alpha_{DIRICHLET_ALPHA}"
+            f"_lambdaCap_{LAMBDA_CAPACITY}"
+            f"_lambdaIntra_{LAMBDA_INTRA}.csv"
+        )
         if os.path.exists(filename):
             os.remove(filename)
 
@@ -376,7 +471,6 @@ def compute_inter_client_fairness_with_delta(
         data_cifar_norm,
         data_gtsrb_norm
 ):
-
     utilization = []
     eps = 1e-8
 
@@ -389,38 +483,28 @@ def compute_inter_client_fairness_with_delta(
             client_resource_usage[c]["gtsrb"]
         )
 
-        # 👉 simula adição para o cliente candidato
+        # simula adição
         if c == cid:
             usage += train_time
 
-        # -------- UTILITY --------
-        loss_cifar = client_loss[c]["cifar"]
-        loss_gtsrb = client_loss[c]["gtsrb"]
-
-        loss_cifar = loss_cifar if np.isfinite(loss_cifar) else 1.0
-        loss_gtsrb = loss_gtsrb if np.isfinite(loss_gtsrb) else 1.0
-
-        data_cifar = client_resources[c]["data_size_cifar"]
-        data_gtsrb = client_resources[c]["data_size_gtsrb"]
-
-        # -------- UTILITY NORMALIZADA --------
-
+        # -------- utility consistente --------
         utility = (
-                data_cifar_norm[c] * loss_cifar_norm[c] +
-                data_gtsrb_norm[c] * loss_gtsrb_norm[c]
+            data_cifar_norm[c] * loss_cifar_norm[c] +
+            data_gtsrb_norm[c] * loss_gtsrb_norm[c]
         )
 
         value = usage / (capacity * (utility + eps))
+
         utilization.append(value)
 
-    if len(utilization) > 0:
-        num = (sum(utilization) ** 2)
-        den = NUM_CLIENTS * sum(u ** 2 for u in utilization)
-        return num / den if den > 0 else 1.0
-    else:
-        return 1.0
+    # Jain
+    num = (sum(utilization) ** 2)
+    den = NUM_CLIENTS * sum(u ** 2 for u in utilization)
 
-def compute_inter_client_fairness(loss_cifar_norm,
+    return num / den if den > 0 else 1.0
+
+def compute_inter_client_fairness(
+        loss_cifar_norm,
         loss_gtsrb_norm,
         data_cifar_norm,
         data_gtsrb_norm):
@@ -430,36 +514,88 @@ def compute_inter_client_fairness(loss_cifar_norm,
 
     for cid in range(NUM_CLIENTS):
 
+        # -------- CAPACIDADE --------
         capacity = client_resources[cid]["speed"]
 
+        # -------- USO ACUMULADO --------
         usage = (
             client_resource_usage[cid]["cifar"] +
             client_resource_usage[cid]["gtsrb"]
         )
 
-        loss_cifar = client_loss[cid]["cifar"]
-        loss_gtsrb = client_loss[cid]["gtsrb"]
-
-        loss_cifar = loss_cifar if np.isfinite(loss_cifar) else 1.0
-        loss_gtsrb = loss_gtsrb if np.isfinite(loss_gtsrb) else 1.0
-
-        data_cifar = client_resources[cid]["data_size_cifar"]
-        data_gtsrb = client_resources[cid]["data_size_gtsrb"]
-
+        # -------- UTILITY NORMALIZADA (ALINHADA COM PROPOSTA) --------
         utility = (
-                data_cifar_norm[cid] * loss_cifar_norm[cid] +
-                data_gtsrb_norm[cid] * loss_gtsrb_norm[cid]
+            data_cifar_norm[cid] * loss_cifar_norm[cid] +
+            data_gtsrb_norm[cid] * loss_gtsrb_norm[cid]
         )
 
+        # evitar divisão por zero
         value = usage / (capacity * (utility + eps))
+
         utilization.append(value)
 
+    # -------- ÍNDICE DE JAIN --------
     if len(utilization) > 0:
         num = (sum(utilization) ** 2)
         den = NUM_CLIENTS * sum(u ** 2 for u in utilization)
         return num / den if den > 0 else 1.0
     else:
         return 1.0
+
+def compute_intra_client_fairness_utility(
+    loss_cifar_norm,
+    loss_gtsrb_norm,
+    data_cifar_norm,
+    data_gtsrb_norm,
+    beta=1.0,
+    utility_smoothing=0.1,
+    eps=1e-8
+):
+    """
+    Intra-client fairness com awareness de utility.
+
+    Parâmetros:
+    - beta: controla peso da utility (0 = ignora utility, 1 = total)
+    - utility_smoothing: suavização para evitar divisão por zero
+    - eps: estabilidade numérica
+    """
+
+    vals = []
+
+    for cid in range(NUM_CLIENTS):
+
+        # -------- USAGE --------
+        u_cifar = client_resource_usage[cid]["cifar"]
+        u_gtsrb = client_resource_usage[cid]["gtsrb"]
+
+        # -------- UTILITY --------
+        util_cifar = data_cifar_norm[cid] * loss_cifar_norm[cid]
+        util_gtsrb = data_gtsrb_norm[cid] * loss_gtsrb_norm[cid]
+
+        # -------- SMOOTHING (ESSENCIAL) --------
+        util_cifar = utility_smoothing + (1 - utility_smoothing) * util_cifar
+        util_gtsrb = utility_smoothing + (1 - utility_smoothing) * util_gtsrb
+
+        # -------- CONTROLE DE INFLUÊNCIA --------
+        util_cifar = util_cifar ** beta
+        util_gtsrb = util_gtsrb ** beta
+
+        # -------- NORMALIZAÇÃO POR UTILITY --------
+        v1 = u_cifar / (util_cifar + eps)
+        v2 = u_gtsrb / (util_gtsrb + eps)
+
+        total = v1 + v2
+
+        if total == 0:
+            continue
+
+        # -------- JAIN --------
+        num = total ** 2
+        den = 2 * (v1 ** 2 + v2 ** 2)
+
+        vals.append(num / den if den > 0 else 1.0)
+
+    return float(np.mean(vals)) if vals else 1.0
 
 def run_experiment():
 
@@ -566,16 +702,6 @@ def run_experiment():
             torch.manual_seed(round_seed)
 
             # =====================================================
-            # CACHE DE TEMPO DE TREINO (CRÍTICO)
-            # =====================================================
-            training_time_cache = {}
-
-            def get_train_time(cid, model_name):
-                if (cid, model_name) not in training_time_cache:
-                    training_time_cache[(cid, model_name)] = estimate_training_time(cid, model_name)
-                return training_time_cache[(cid, model_name)]
-
-            # =====================================================
             # Estrutura para armazenar updates locais (FedAvg)
             # =====================================================
             model_updates = {
@@ -589,38 +715,9 @@ def run_experiment():
             real_training_counter = {m: 0 for m in global_models}
 
             # =====================================================
-            # NORMALIZAÇÃO POR DATASET (CRÍTICO)
+            # NORMALIZAÇÃO GLOBAL (UMA VEZ POR RODADA)
             # =====================================================
-
-            loss_cifar_vals = []
-            loss_gtsrb_vals = []
-            data_cifar_vals = []
-            data_gtsrb_vals = []
-
-            for cid in range(NUM_CLIENTS):
-                lc = client_loss[cid]["cifar"]
-                lg = client_loss[cid]["gtsrb"]
-
-                lc = lc if np.isfinite(lc) else 1.0
-                lg = lg if np.isfinite(lg) else 1.0
-
-                loss_cifar_vals.append(lc)
-                loss_gtsrb_vals.append(lg)
-
-                data_cifar_vals.append(client_resources[cid]["data_size_cifar"])
-                data_gtsrb_vals.append(client_resources[cid]["data_size_gtsrb"])
-
-            def minmax(arr):
-                mn, mx = min(arr), max(arr)
-                if mx - mn < 1e-8:
-                    return [1.0 for _ in arr]
-                return [(x - mn) / (mx - mn + 1e-8) for x in arr]
-
-            loss_cifar_norm = minmax(loss_cifar_vals)
-            loss_gtsrb_norm = minmax(loss_gtsrb_vals)
-
-            data_cifar_norm = minmax(data_cifar_vals)
-            data_gtsrb_norm = minmax(data_gtsrb_vals)
+            loss_cifar_norm, loss_gtsrb_norm, data_cifar_norm, data_gtsrb_norm = compute_normalized_metrics()
 
             # =====================================================
             # 1) SELEÇÃO DE CLIENTES (CORE DO MÉTO DO)
@@ -652,32 +749,22 @@ def run_experiment():
                 # =========================
                 # CIFAR
                 # =========================
-                train_time_cifar = get_train_time(cid, "cifar")
+                train_time_cifar = estimate_training_time(cid, "cifar")
 
-                new_usage = total_cifar_usage + train_time_cifar
-                other_usage = total_gtsrb_usage
-                total = new_usage + other_usage
+                # -------- SIMULA USO --------
+                client_resource_usage[cid]["cifar"] += train_time_cifar
 
-                # útil apenas quando se tem MEFL heterogêneo
+                # -------- Intra-client fairness (SIMULADO) --------
+                intra_client_fairness_cifar = compute_intra_client_fairness_utility(
+                    loss_cifar_norm,
+                    loss_gtsrb_norm,
+                    data_cifar_norm,
+                    data_gtsrb_norm,
+                    beta=0.7,
+                    utility_smoothing=0.1
+                )
 
-                # if total > 0:
-                #     imbalance = abs(new_usage - other_usage) / total
-                #     inter_model_fairness = 1.0 - imbalance
-                # else:
-                #     inter_model_fairness = 1.0
-
-                # -------- Intra-client
-                client_cifar = client_resource_usage[cid]["cifar"] + train_time_cifar
-                client_gtsrb = client_resource_usage[cid]["gtsrb"]
-                total_client = client_cifar + client_gtsrb
-
-                if total_client > 0:
-                    intra_imbalance = abs(client_cifar - client_gtsrb) / total_client
-                    intra_client_fairness = 1.0 - intra_imbalance
-                else:
-                    intra_client_fairness = 1.0
-
-                # -------- Inter-client fairness (MULTI-DIMENSIONAL) --------
+                # -------- Inter-client fairness --------
                 inter_client_fairness_cifar = compute_inter_client_fairness_with_delta(
                     cid,
                     train_time_cifar,
@@ -687,43 +774,34 @@ def run_experiment():
                     data_gtsrb_norm
                 )
 
+                # -------- DESFAZ SIMULAÇÃO --------
+                client_resource_usage[cid]["cifar"] -= train_time_cifar
+
+                # -------- SCORE --------
                 score_cifar = (
-                        + LAMBDA_CAPACITY * inter_client_fairness_cifar
-                        + LAMBDA_INTRA * intra_client_fairness
+                        LAMBDA_CAPACITY * inter_client_fairness_cifar
+                        + LAMBDA_INTRA * intra_client_fairness_cifar
                 )
 
-                # score_cifar = (
-                #         LAMBDA_MODEL * inter_model_fairness
-                #         + LAMBDA_CAPACITY * inter_client_fairness_cifar
-                #         + LAMBDA_INTRA * intra_client_fairness
-                # )
-
                 # =========================
-                # TESTA GTSRB
+                # GTSRB
                 # =========================
-                train_time_gtsrb = get_train_time(cid, "gtsrb")
+                train_time_gtsrb = estimate_training_time(cid, "gtsrb")
 
-                new_usage = total_gtsrb_usage + train_time_gtsrb
-                other_usage = total_cifar_usage
-                total = new_usage + other_usage
+                # -------- SIMULA USO --------
+                client_resource_usage[cid]["gtsrb"] += train_time_gtsrb
 
-                # if total > 0:
-                #     imbalance = abs(new_usage - other_usage) / total
-                #     inter_model_fairness = 1.0 - imbalance
-                # else:
-                #     inter_model_fairness = 1.0
+                # -------- Intra-client fairness (SIMULADO) --------
+                intra_client_fairness_gtsrb = compute_intra_client_fairness_utility(
+                    loss_cifar_norm,
+                    loss_gtsrb_norm,
+                    data_cifar_norm,
+                    data_gtsrb_norm,
+                    beta=0.7,
+                    utility_smoothing=0.1
+                )
 
-                client_cifar = client_resource_usage[cid]["cifar"]
-                client_gtsrb = client_resource_usage[cid]["gtsrb"] + train_time_gtsrb
-                total_client = client_cifar + client_gtsrb
-
-                if total_client > 0:
-                    intra_imbalance = abs(client_cifar - client_gtsrb) / total_client
-                    intra_client_fairness = 1.0 - intra_imbalance
-                else:
-                    intra_client_fairness = 1.0
-
-                # -------- Inter-client fairness (MULTI-DIMENSIONAL) --------
+                # -------- Inter-client fairness --------
                 inter_client_fairness_gtsrb = compute_inter_client_fairness_with_delta(
                     cid,
                     train_time_gtsrb,
@@ -733,16 +811,14 @@ def run_experiment():
                     data_gtsrb_norm
                 )
 
-                score_gtsrb = (
-                        + LAMBDA_CAPACITY * inter_client_fairness_gtsrb
-                        + LAMBDA_INTRA * intra_client_fairness
-                )
+                # -------- DESFAZ SIMULAÇÃO --------
+                client_resource_usage[cid]["gtsrb"] -= train_time_gtsrb
 
-                # score_gtsrb = (
-                #         LAMBDA_MODEL * inter_model_fairness
-                #         + LAMBDA_CAPACITY * inter_client_fairness_gtsrb
-                #         + LAMBDA_INTRA * intra_client_fairness
-                # )
+                # -------- SCORE --------
+                score_gtsrb = (
+                        LAMBDA_CAPACITY * inter_client_fairness_gtsrb
+                        + LAMBDA_INTRA * intra_client_fairness_gtsrb
+                )
 
                 # =========================
                 # FAIRNESS ATUAL
@@ -804,8 +880,6 @@ def run_experiment():
             # 2) TREINAMENTO LOCAL — CIFAR
             # =====================================================
             for cid in clients_cifar:
-
-                train_time = get_train_time(cid, "cifar")
                 local_model = copy.deepcopy(global_models["cifar"])
 
                 state_dict, loss, n_samples = client_update(
@@ -816,6 +890,9 @@ def run_experiment():
                     lr=LR
                 )
 
+                # ✅ ATUALIZA LOSS DO CLIENTE (CRÍTICO)
+                client_loss[cid]["cifar"] = loss
+
                 model_updates["cifar"].append((state_dict, n_samples))
                 real_training_counter["cifar"] += 1
 
@@ -823,8 +900,6 @@ def run_experiment():
             # 3) TREINAMENTO LOCAL — GTSRB
             # =====================================================
             for cid in clients_gtsrb:
-
-                train_time = get_train_time(cid, "gtsrb")
                 local_model = copy.deepcopy(global_models["gtsrb"])
 
                 state_dict, loss, n_samples = client_update(
@@ -834,6 +909,9 @@ def run_experiment():
                     epochs=LOCAL_EPOCHS,
                     lr=LR
                 )
+
+                # ✅ ATUALIZA LOSS DO CLIENTE (CRÍTICO)
+                client_loss[cid]["gtsrb"] = loss
 
                 model_updates["gtsrb"].append((state_dict, n_samples))
                 real_training_counter["gtsrb"] += 1
@@ -863,6 +941,8 @@ def run_experiment():
                 inter_model_fairness = 1.0
 
             # -------- Inter-client fairness (Jain) --------
+            # loss_cifar_norm, loss_gtsrb_norm, data_cifar_norm, data_gtsrb_norm = compute_normalized_metrics()
+
             inter_client_fairness = compute_inter_client_fairness(
                 loss_cifar_norm,
                 loss_gtsrb_norm,
@@ -871,23 +951,14 @@ def run_experiment():
             )
 
             # -------- Intra-client fairness --------
-            imbalances = []
-
-            for cid in range(NUM_CLIENTS):
-
-                u_cifar = client_resource_usage[cid]["cifar"]
-                u_gtsrb = client_resource_usage[cid]["gtsrb"]
-
-                total = u_cifar + u_gtsrb
-
-                if total > 0:
-                    imbalance = abs(u_cifar - u_gtsrb) / total
-                    imbalances.append(imbalance)
-
-            if len(imbalances) > 0:
-                intra_client_fairness = 1.0 - (sum(imbalances) / len(imbalances))
-            else:
-                intra_client_fairness = 1.0
+            intra_client_fairness = compute_intra_client_fairness_utility(
+                loss_cifar_norm,
+                loss_gtsrb_norm,
+                data_cifar_norm,
+                data_gtsrb_norm,
+                beta=0.7,
+                utility_smoothing=0.1
+            )
 
             # =====================================================
             # 6) LOGS DE RECURSOS E FAIRNESS
@@ -954,7 +1025,7 @@ def run_experiment():
                 }
 
                 filename = (
-                    f"results/proposta_k_{model_name}"
+                    f"{RESULTS_DIR}/proposta_k_{model_name}"
                     f"_frac_{FRAC}"
                     f"_alpha_{DIRICHLET_ALPHA}"
                     f"_lambdaCap_{LAMBDA_CAPACITY}"

@@ -10,11 +10,11 @@ from scipy import stats
 
 FRAC = 0.3
 # ALPHA = 0.1
-ALPHA = 1.0
+ALPHAS = [0.1, 1.0]  # 🔥 pode adicionar mais aqui
 
 COST_RATIO_STR = "2,4x"
 COST_RATIO_STR = "4.0x"
-RESULTS_DIR_WRITE = f"results/gtsrb_{COST_RATIO_STR}_cifar/plots/alpha_{ALPHA}"
+RESULTS_DIR_WRITE = f"results/gtsrb_{COST_RATIO_STR}_cifar/plots/alpha_{ALPHAS}"
 RESULTS_DIR = f"results/gtsrb_{COST_RATIO_STR}_cifar/"
 
 os.makedirs(RESULTS_DIR_WRITE, exist_ok=True)
@@ -28,6 +28,11 @@ PDF_DIR = os.path.join(RESULTS_DIR_WRITE, "pdf")
 
 os.makedirs(PNG_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
+
+def extract_alpha(file):
+    import re
+    match = re.search(r'alpha_(\d+\.?\d*)', file)
+    return float(match.group(1)) if match else None
 
 # =====================================================
 # 🔥 NOVO: SELEÇÃO DE ALGORITMOS
@@ -245,87 +250,200 @@ def load_results():
 
         path = os.path.join(RESULTS_DIR, file)
 
+        # 🔥 extrai alpha do nome do arquivo
+        alpha = extract_alpha(file)
+
+        if alpha not in ALPHAS:
+            continue
+
         # BASELINE
         if file.startswith("baseline_"):
-
-            if f"alpha_{ALPHA}" not in file:
-                continue
 
             for frac in BASELINE_FRACS:
                 if f"frac_{frac}" in file:
 
                     df = pd.read_csv(path)
                     df["algorithm"] = f"baseline_f{frac}"
+                    df["alpha"] = alpha
                     dfs.append(df)
                     break
 
         # PROPOSTA K
         elif file.startswith("proposta_k_"):
 
-            if f"alpha_{ALPHA}" in file:
+            for frac in BASELINE_FRACS:
+                if f"frac_{frac}" in file:
 
-                df = pd.read_csv(path)
+                    df = pd.read_csv(path)
+                    df["algorithm"] = f"fair_resource_k{frac}"
+                    df["alpha"] = alpha
+                    dfs.append(df)
+                    break
 
-                import re
-                match = re.search(r'frac_(\d+\.\d+)', file)
-                frac_value = float(match.group(1)) if match else FRAC
-
-                df["algorithm"] = f"fair_resource_k{frac_value}"
-                dfs.append(df)
-
+        # FEDFAIRMMFL
         elif file.startswith("fedfairmmfl_"):
-
-            if f"alpha_{ALPHA}" not in file:
-                continue
 
             for frac in BASELINE_FRACS:
                 if f"frac_{frac}" in file:
+
                     df = pd.read_csv(path)
                     df["algorithm"] = f"fedfairmmfl_f{frac}"
+                    df["alpha"] = alpha
                     dfs.append(df)
                     break
 
         # BUDGET
         elif file.startswith("proposta_budget_"):
 
-            if f"alpha_{ALPHA}" in file:
-                df = pd.read_csv(path)
-                df["algorithm"] = "fair_resource_budget"
-                dfs.append(df)
+            df = pd.read_csv(path)
+            df["algorithm"] = "fair_resource_budget"
+            df["alpha"] = alpha
+            dfs.append(df)
 
         # OORT
         elif file.startswith("oort_"):
 
-            if f"alpha_{ALPHA}" in file:
-                df = pd.read_csv(path)
-                df["algorithm"] = "oort"
-                dfs.append(df)
+            df = pd.read_csv(path)
+            df["algorithm"] = "oort"
+            df["alpha"] = alpha
+            dfs.append(df)
 
         # FAIRHETERO
         elif file.startswith("fairhetero_"):
 
-            if f"alpha_{ALPHA}" in file:
-                df = pd.read_csv(path)
-                df["algorithm"] = "fairhetero"
-                dfs.append(df)
+            df = pd.read_csv(path)
+            df["algorithm"] = "fairhetero"
+            df["alpha"] = alpha
+            dfs.append(df)
 
         # FEDBALANCER
         elif file.startswith("fedbalancer_"):
 
-            if f"alpha_{ALPHA}" in file:
-                df = pd.read_csv(path)
-                df["algorithm"] = "fedbalancer"
-                dfs.append(df)
+            df = pd.read_csv(path)
+            df["algorithm"] = "fedbalancer"
+            df["alpha"] = alpha
+            dfs.append(df)
 
     if len(dfs) == 0:
         raise ValueError("Nenhum CSV encontrado.")
 
     df = pd.concat(dfs, ignore_index=True)
 
-    # 🔥 aplicar filtro
+    # 🔥 filtro opcional
     df = filter_algorithms(df)
 
     return df
+
+def build_accuracy_table_multi_alpha(df):
+
+    texts = TEXTS["pt"]
+
+    lines = []
+    lines.append("\\begin{table}[h]")
+    lines.append("\\centering")
+    lines.append("\\small")
+    lines.append("\\renewcommand{\\arraystretch}{1.2}")
+    lines.append("\\setlength{\\tabcolsep}{6pt}")
+    lines.append("\\begin{tabular}{l|c|cc}")
+    lines.append("\\toprule")
+
+    lines.append(
+        f"{texts['algorithm']} & {texts['mean_acc']} & {texts['cifar']} & {texts['gtsrb']} \\\\"
+    )
+
+    for alpha in sorted(df["alpha"].unique()):
+
+        lines.append("\\midrule")
+        lines.append(f"\\multicolumn{{4}}{{c}}{{$\\alpha = {alpha}$}} \\\\")
+        lines.append("\\midrule")
+
+        df_alpha = df[df["alpha"] == alpha]
+
+        results = []
+
+        for alg in get_algorithm_order(df_alpha):
+
+            subset = df_alpha[df_alpha["algorithm"] == alg]
+
+            cifar = subset[subset["dataset"] == "cifar"]["global_acc"]
+            gtsrb = subset[subset["dataset"] == "gtsrb"]["global_acc"]
+
+            if len(cifar) == 0 or len(gtsrb) == 0:
+                continue
+
+            mean_cifar, ci_cifar = compute_ci(cifar)
+            mean_gtsrb, ci_gtsrb = compute_ci(gtsrb)
+
+            mean_total = (mean_cifar + mean_gtsrb) / 2
+            ci_total = (ci_cifar + ci_gtsrb) / 2
+
+            results.append({
+                "alg": alg,
+                "cifar_mean": mean_cifar,
+                "cifar_ci": ci_cifar,
+                "gtsrb_mean": mean_gtsrb,
+                "gtsrb_ci": ci_gtsrb,
+                "total_mean": mean_total,
+                "total_ci": ci_total,
+            })
+
+        df_res = pd.DataFrame(results)
+
+        if df_res.empty:
+            continue
+
+        # 🔥 mesma lógica de overlap que você já usa
+        def mark_best(col_mean, col_ci):
+
+            best_idx = df_res[col_mean].idxmax()
+            best_mean = df_res.loc[best_idx, col_mean]
+            best_ci = df_res.loc[best_idx, col_ci]
+
+            selected = []
+
+            for i, row in df_res.iterrows():
+
+                lower = row[col_mean] - row[col_ci]
+                upper = row[col_mean] + row[col_ci]
+
+                best_lower = best_mean - best_ci
+                best_upper = best_mean + best_ci
+
+                overlap = not (upper < best_lower or lower > best_upper)
+
+                if overlap:
+                    selected.append(i)
+
+            return selected
+
+        best_total = mark_best("total_mean", "total_ci")
+        best_cifar = mark_best("cifar_mean", "cifar_ci")
+        best_gtsrb = mark_best("gtsrb_mean", "gtsrb_ci")
+
+        for i, row in df_res.iterrows():
+
+            def fmt(mean, ci, bold):
+                text = f"{mean*100:.2f} $\\pm$ {ci*100:.2f}"
+                return f"\\textbf{{{text}}}" if bold else text
+
+            total = fmt(row["total_mean"], row["total_ci"], i in best_total)
+            cifar = fmt(row["cifar_mean"], row["cifar_ci"], i in best_cifar)
+            gtsrb = fmt(row["gtsrb_mean"], row["gtsrb_ci"], i in best_gtsrb)
+
+            alg_name = get_display_name(row["alg"])
+
+            lines.append(f"{alg_name} & {total} & {cifar} & {gtsrb} \\\\")
+
+    lines.append("\\bottomrule")
+    lines.append("\\end{tabular}")
+    lines.append("\\caption{Comparação de acurácia (\\%) para diferentes valores de $\\alpha$.}")
+    lines.append("\\label{tab:accuracy}")
+    lines.append("\\end{table}")
+
+    with open(f"{RESULTS_DIR_WRITE}/accuracy_multi_alpha.tex", "w") as f:
+        f.write("\n".join(lines))
+
+    print("✅ Tabela multi-alpha gerada (com destaque correto)")
 
 # =====================================================
 # MÉTRICAS
@@ -785,7 +903,7 @@ def build_accuracy_table(df):
 
         # 🔥 caption com alpha
         lines.append(
-            f"\\caption{{{texts['table_accuracy_caption']} $\\alpha={ALPHA}$.}}"
+            f"\\caption{{{texts['table_accuracy_caption']} $\\alpha={ALPHAS}$.}}"
         )
 
         # 🔥 label
@@ -891,50 +1009,63 @@ def build_final_accuracy_table(df):
 # 🔥 TABELA DE FAIRNESS
 # =====================================================
 
-def build_fairness_table(df):
+def build_fairness_table_multi_alpha(df):
 
-    for lang in LANGUAGES:
+    texts = TEXTS["pt"]
 
-        texts = TEXTS[lang]
+    lines = []
+    lines.append("\\begin{table}[h]")
+    lines.append("\\centering")
+    lines.append("\\small")
+    lines.append("\\renewcommand{\\arraystretch}{1.2}")
+    lines.append("\\setlength{\\tabcolsep}{6pt}")
+    lines.append("\\begin{tabular}{l|c|cc}")
+    lines.append("\\toprule")
+
+    lines.append(
+        f"{texts['algorithm']} & {texts['mean_fairness_col']} & "
+        f"{texts['inter_client']} & {texts['intra_client']} \\\\"
+    )
+
+    for alpha in sorted(df["alpha"].unique()):
+
+        lines.append("\\midrule")
+        lines.append(f"\\multicolumn{{4}}{{c}}{{$\\alpha = {alpha}$}} \\\\")
+        lines.append("\\midrule")
+
+        df_alpha = df[df["alpha"] == alpha]
+
         results = []
 
-        for alg in get_algorithm_order(df):
+        for alg in get_algorithm_order(df_alpha):
 
-            subset = df[df["algorithm"] == alg]
+            subset = df_alpha[df_alpha["algorithm"] == alg]
 
             if len(subset) == 0:
                 continue
 
-            inter_client = subset["inter_client_fairness"]
-            intra_client = subset["intra_client_fairness"]
+            inter = subset["inter_client_fairness"]
+            intra = subset["intra_client_fairness"]
 
-            mean_inter_client, ci_inter_client = compute_ci(inter_client)
-            mean_intra_client, ci_intra_client = compute_ci(intra_client)
+            mean_inter, ci_inter = compute_ci(inter)
+            mean_intra, ci_intra = compute_ci(intra)
 
-            mean_total = np.mean([
-                mean_inter_client,
-                mean_intra_client
-            ])
-
-            ci_total = np.mean([
-                ci_inter_client,
-                ci_intra_client
-            ])
+            mean_total = np.mean([mean_inter, mean_intra])
+            ci_total = np.mean([ci_inter, ci_intra])
 
             results.append({
                 "alg": alg,
-                "mean_total": mean_total,
-                "ci_total": ci_total,
-                "inter_client_mean": mean_inter_client,
-                "inter_client_ci": ci_inter_client,
-                "intra_client_mean": mean_intra_client,
-                "intra_client_ci": ci_intra_client,
+                "inter_mean": mean_inter,
+                "inter_ci": ci_inter,
+                "intra_mean": mean_intra,
+                "intra_ci": ci_intra,
+                "total_mean": mean_total,
+                "total_ci": ci_total,
             })
 
         df_res = pd.DataFrame(results)
 
         if df_res.empty:
-            print(f"⚠️ Nenhum dado para tabela de fairness ({lang}) — pulando.")
             continue
 
         def mark_best(col_mean, col_ci):
@@ -960,21 +1091,9 @@ def build_fairness_table(df):
 
             return selected
 
-        best_total = mark_best("mean_total", "ci_total")
-        best_inter_client = mark_best("inter_client_mean", "inter_client_ci")
-        best_intra_client = mark_best("intra_client_mean", "intra_client_ci")
-
-        lines = []
-        lines.append("\\begin{table}[t]")
-        lines.append("\\centering")
-        lines.append("\\begin{tabular}{lccc}")
-        lines.append("\\toprule")
-
-        lines.append(
-            f"{texts['algorithm']} & {texts['mean_fairness_col']} & {texts['inter_client']} & {texts['intra_client']} \\\\"
-        )
-
-        lines.append("\\midrule")
+        best_total = mark_best("total_mean", "total_ci")
+        best_inter = mark_best("inter_mean", "inter_ci")
+        best_intra = mark_best("intra_mean", "intra_ci")
 
         for i, row in df_res.iterrows():
 
@@ -982,33 +1101,24 @@ def build_fairness_table(df):
                 text = f"{mean:.2f} $\\pm$ {ci:.2f}"
                 return f"\\textbf{{{text}}}" if bold else text
 
-            total = fmt(row["mean_total"], row["ci_total"], i in best_total)
-            inter_c = fmt(row["inter_client_mean"], row["inter_client_ci"], i in best_inter_client)
-            intra_c = fmt(row["intra_client_mean"], row["intra_client_ci"], i in best_intra_client)
+            total = fmt(row["total_mean"], row["total_ci"], i in best_total)
+            inter = fmt(row["inter_mean"], row["inter_ci"], i in best_inter)
+            intra = fmt(row["intra_mean"], row["intra_ci"], i in best_intra)
 
-            alg_name = get_display_name(row['alg'])
-            lines.append(f"{alg_name} & {total} & {inter_c} & {intra_c} \\\\")
+            alg_name = get_display_name(row["alg"])
 
-        lines.append("\\bottomrule")
-        lines.append("\\end{tabular}")
+            lines.append(f"{alg_name} & {total} & {inter} & {intra} \\\\")
 
-        # 🔥 caption com alpha
-        lines.append(
-            f"\\caption{{{texts['table_fairness_caption']} $\\alpha={ALPHA}$.}}"
-        )
+    lines.append("\\bottomrule")
+    lines.append("\\end{tabular}")
+    lines.append("\\caption{Comparação de fairness para diferentes valores de $\\alpha$.}")
+    lines.append("\\label{tab:fairness}")
+    lines.append("\\end{table}")
 
-        # 🔥 label
-        lines.append("\\label{tab:fairness}")
+    with open(f"{RESULTS_DIR_WRITE}/fairness_multi_alpha.tex", "w") as f:
+        f.write("\n".join(lines))
 
-        lines.append("\\end{table}")
-
-        latex = "\n".join(lines)
-
-        path = f"{RESULTS_DIR_WRITE}/fairness_table_{lang}.tex"
-        with open(path, "w") as f:
-            f.write(latex)
-
-        print(f"✅ Fairness table ({lang}) salva em: {path}")
+    print("✅ Tabela multi-alpha de fairness gerada (com destaque correto)")
 
 def build_final_fairness_table(df):
 
@@ -1086,7 +1196,7 @@ def build_final_fairness_table(df):
 
         # 🔥 caption com alpha
         lines.append(
-            f"\\caption{{Final fairness (last round, without inter-model fairness). $\\alpha={ALPHA}$.}}"
+            f"\\caption{{Final fairness (last round, without inter-model fairness). $\\alpha={ALPHAS}$.}}"
         )
 
         # 🔥 label
@@ -1207,8 +1317,8 @@ def main():
     plot_mean_fairness(df)
 
     # TABELAS
-    build_accuracy_table(df)
-    build_fairness_table(df)
+    build_accuracy_table_multi_alpha(df)
+    build_fairness_table_multi_alpha(df)
     build_resource_table(df)
 
     build_final_accuracy_table(df)
