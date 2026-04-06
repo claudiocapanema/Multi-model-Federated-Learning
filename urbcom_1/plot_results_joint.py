@@ -13,6 +13,7 @@ FRAC = 0.3
 ALPHAS = [0.1, 1.0]  # 🔥 pode adicionar mais aqui
 
 COST_RATIO_STR = "2,4x"
+# COST_RATIO_STR = "2.0x"
 COST_RATIO_STR = "4.0x"
 RESULTS_DIR_WRITE = f"results/gtsrb_{COST_RATIO_STR}_cifar/plots/alpha_{ALPHAS}"
 RESULTS_DIR = f"results/gtsrb_{COST_RATIO_STR}_cifar/"
