@@ -43,7 +43,7 @@ SELECTED_ALGORITHMS = None
 
 SELECTED_ALGORITHMS = [
     # "fair_resource_k0.2",
-    "fair_resource_k0.3",
+    # "fair_resource_k0.3",
     # "fair_resource_k0.4",
     # "fair_resource_k0.5",
     "oort",
@@ -375,8 +375,11 @@ def build_accuracy_table_multi_alpha(df):
             mean_cifar, ci_cifar = compute_ci(cifar)
             mean_gtsrb, ci_gtsrb = compute_ci(gtsrb)
 
+            # 🔥 MÉDIA CORRETA
             mean_total = (mean_cifar + mean_gtsrb) / 2
-            ci_total = (ci_cifar + ci_gtsrb) / 2
+
+            # 🔥 IC CORRETO (assumindo independência)
+            ci_total = np.sqrt((ci_cifar ** 2 + ci_gtsrb ** 2)) / 2
 
             results.append({
                 "alg": alg,
@@ -827,7 +830,7 @@ def build_accuracy_table(df):
             mean_gtsrb, ci_gtsrb = compute_ci(gtsrb)
 
             mean_total = (mean_cifar + mean_gtsrb) / 2
-            ci_total = (ci_cifar + ci_gtsrb) / 2
+            ci_total = np.sqrt((ci_cifar**2 + ci_gtsrb**2)) / 2
 
             results.append({
                 "alg": alg,

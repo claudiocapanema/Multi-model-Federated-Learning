@@ -88,8 +88,8 @@ DIRICHLET_ALPHA = 0.1
 # DIRICHLET_ALPHA = 1.0
 
 COST_SETUP_NAME = "cost_2_4x"  # 🔥 troque aqui
-# COST_SETUP_NAME = "cost_2x"  # 🔥 troque aqui
-COST_SETUP_NAME = "cost_4x"  # 🔥 troque aqui
+COST_SETUP_NAME = "cost_2x"  # 🔥 troque aqui
+# COST_SETUP_NAME = "cost_4x"  # 🔥 troque aqui
 
 MODEL_COST = MODEL_COST_SETUPS[COST_SETUP_NAME]
 
@@ -461,43 +461,32 @@ def compute_caf_inter(
     client_resource_usage,
     training_time_cache,
     model_names,
-    gamma=0.5,  # mantido por compatibilidade (não usado)
+    gamma=0.5,
     eps=1e-8,
-    alpha_eff=0.5  # 🔥 NOVO: temperatura da eficiência
+    alpha_eff=0.5
 ):
-    """
-    Inter-client fairness (generalizado para M modelos)
-
-    Mede quão próxima a alocação real está da alocação ideal
-    baseada em eficiência suavizada: (data/time)^alpha_eff.
-
-    alpha_eff:
-        1.0 → comportamento original (baseline)
-        <1 → reduz dominância de clientes muito eficientes
-    """
 
     utility = []
     usage = []
 
     for cid in client_resources:
 
-        # -------- EFFICIENCY SUAVIZADA --------
         w_data = 0.0
 
         for m in model_names:
             n = client_resources[cid][f"data_size_{m}"]
-            t = training_time_cache[cid][m]
+            speed = client_resources[cid]["speed"]
+            flops = MODEL_COST[m]["flops_per_sample"]
 
-            if t < eps:
+            if flops < eps:
                 continue
 
-            # 🔥 ALTERAÇÃO PRINCIPAL (temperatura)
-            w_data += (n / t) ** alpha_eff
+            # 🔥 NOVA MÉTRICA CORRETA
+            w_data += ((n * speed) / flops) ** alpha_eff
 
         if w_data < eps:
             continue
 
-        # -------- USAGE --------
         use = sum(client_resource_usage[cid][m] for m in model_names)
 
         utility.append(w_data)
@@ -506,7 +495,6 @@ def compute_caf_inter(
     if len(utility) == 0:
         return 1.0
 
-    # -------- NORMALIZAÇÃO --------
     total_util = sum(utility) + eps
     total_usage = sum(usage) + eps
 
@@ -516,7 +504,6 @@ def compute_caf_inter(
         actual = usage[i] / total_usage
         ratios.append(actual / (expected + eps))
 
-    # -------- JAIN --------
     num = (sum(ratios) ** 2)
     den = len(ratios) * sum(r**2 for r in ratios)
 
@@ -528,18 +515,8 @@ def compute_caf_intra(
     training_time_cache,
     model_names,
     eps=1e-8,
-    alpha_eff=0.5  # 🔥 NOVO: temperatura da eficiência
+    alpha_eff=0.5
 ):
-    """
-    Intra-client fairness (generalizado para M modelos)
-
-    Mede quão bem cada cliente distribui recursos entre modelos,
-    baseado em eficiência suavizada (data/time)^alpha_eff.
-
-    alpha_eff:
-        1.0 → comportamento original (baseline)
-        <1 → reduz dominância de modelos muito eficientes
-    """
 
     total_weight = 0.0
     weighted_sum = 0.0
@@ -549,17 +526,18 @@ def compute_caf_intra(
         weights = []
         usages = []
 
-        # -------- COLETA --------
         for m in model_names:
             n = client_resources[cid][f"data_size_{m}"]
-            t = training_time_cache[cid][m]
             u = client_resource_usage[cid][m]
 
-            if t < eps:
+            speed = client_resources[cid]["speed"]
+            flops = MODEL_COST[m]["flops_per_sample"]
+
+            if flops < eps:
                 continue
 
-            # 🔥 ALTERAÇÃO PRINCIPAL (temperatura)
-            weights.append((n / t) ** alpha_eff)
+            # 🔥 NOVA DEFINIÇÃO
+            weights.append(((n * speed) / flops) ** alpha_eff)
             usages.append(u)
 
         if len(weights) == 0:
@@ -571,21 +549,18 @@ def compute_caf_intra(
         if total_w < eps or total_u < eps:
             continue
 
-        # -------- RATIOS --------
         ratios = []
         for w, u in zip(weights, usages):
             exp = w / total_w
             act = u / total_u
             ratios.append(act / (exp + eps))
 
-        # -------- JAIN --------
         M = len(ratios)
         num = (sum(ratios) ** 2)
         den = M * sum(r**2 for r in ratios)
 
         J = num / den if den > 0 else 1.0
 
-        # -------- PESO --------
         total_data = sum(
             client_resources[cid][f"data_size_{m}"]
             for m in model_names
