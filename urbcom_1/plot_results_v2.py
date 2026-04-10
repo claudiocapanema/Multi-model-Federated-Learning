@@ -9,8 +9,8 @@ from scipy import stats
 # =====================================================
 
 FRAC = 0.3
-ALPHA = 0.1
-# ALPHA = 1.0
+# ALPHA = 0.1
+ALPHA = 1.0
 
 COST_RATIO_STR = "2,4x"
 COST_RATIO_STR = "2.0x"
