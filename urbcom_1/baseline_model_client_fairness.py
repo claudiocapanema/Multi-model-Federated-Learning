@@ -49,7 +49,17 @@ LR = 0.01
 
 MODEL_COST_SETUPS = {
 
-    # 🔹 Novo setup (2x)
+    # 🔹 BASELINE (1x)
+    "cost_1x": {
+        "cifar": {
+            "flops_per_sample": 5e6,
+        },
+        "gtsrb": {
+            "flops_per_sample": 5e6,
+        }
+    },
+
+    # 🔹 EXISTENTE (2x)
     "cost_2x": {
         "cifar": {
             "flops_per_sample": 5e6,
@@ -59,17 +69,7 @@ MODEL_COST_SETUPS = {
         }
     },
 
-    # 🔹 Setup intermediário (≈2.4x)
-    "cost_2_4x": {
-        "cifar": {
-            "flops_per_sample": 5e6,
-        },
-        "gtsrb": {
-            "flops_per_sample": 1.2e7,
-        }
-    },
-
-    # 🔹 Setup mais extremo (4x)
+    # 🔹 EXISTENTE (4x)
     "cost_4x": {
         "cifar": {
             "flops_per_sample": 5e6,
@@ -77,7 +77,37 @@ MODEL_COST_SETUPS = {
         "gtsrb": {
             "flops_per_sample": 2.0e7,
         }
-    }
+    },
+
+    # 🔥 NOVO (6x)
+    "cost_6x": {
+        "cifar": {
+            "flops_per_sample": 5e6,
+        },
+        "gtsrb": {
+            "flops_per_sample": 3.0e7,
+        }
+    },
+
+    # 🔥 NOVO (8x)
+    "cost_8x": {
+        "cifar": {
+            "flops_per_sample": 5e6,
+        },
+        "gtsrb": {
+            "flops_per_sample": 4.0e7,
+        }
+    },
+
+    # 🔥 NOVO (10x)
+    "cost_10x": {
+        "cifar": {
+            "flops_per_sample": 5e6,
+        },
+        "gtsrb": {
+            "flops_per_sample": 5.0e7,
+        }
+    },
 }
 
 # =====================================================
@@ -87,9 +117,12 @@ MODEL_COST_SETUPS = {
 DIRICHLET_ALPHA = 0.1
 # DIRICHLET_ALPHA = 1.0
 
-COST_SETUP_NAME = "cost_2_4x"  # 🔥 troque aqui
-COST_SETUP_NAME = "cost_2x"  # 🔥 troque aqui
-# COST_SETUP_NAME = "cost_4x"  # 🔥 troque aqui
+COST_SETUP_NAME = "cost_1x"
+# COST_SETUP_NAME = "cost_2x"
+# COST_SETUP_NAME = "cost_4x"
+# COST_SETUP_NAME = "cost_6x"
+# COST_SETUP_NAME = "cost_8x"
+# COST_SETUP_NAME = "cost_10x"
 
 MODEL_COST = MODEL_COST_SETUPS[COST_SETUP_NAME]
 

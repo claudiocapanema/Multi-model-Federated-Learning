@@ -45,17 +45,7 @@ global data_cifar_norm, data_gtsrb_norm
 
 MODEL_COST_SETUPS = {
 
-    # 🔹 BASELINE (1x)
-    "cost_1x": {
-        "cifar": {
-            "flops_per_sample": 5e6,
-        },
-        "gtsrb": {
-            "flops_per_sample": 5e6,
-        }
-    },
-
-    # 🔹 EXISTENTE (2x)
+    # 🔹 Novo setup (2x)
     "cost_2x": {
         "cifar": {
             "flops_per_sample": 5e6,
@@ -65,7 +55,17 @@ MODEL_COST_SETUPS = {
         }
     },
 
-    # 🔹 EXISTENTE (4x)
+    # 🔹 Setup intermediário (≈2.4x)
+    "cost_2_4x": {
+        "cifar": {
+            "flops_per_sample": 5e6,
+        },
+        "gtsrb": {
+            "flops_per_sample": 1.2e7,
+        }
+    },
+
+    # 🔹 Setup mais extremo (4x)
     "cost_4x": {
         "cifar": {
             "flops_per_sample": 5e6,
@@ -73,37 +73,7 @@ MODEL_COST_SETUPS = {
         "gtsrb": {
             "flops_per_sample": 2.0e7,
         }
-    },
-
-    # 🔥 NOVO (6x)
-    "cost_6x": {
-        "cifar": {
-            "flops_per_sample": 5e6,
-        },
-        "gtsrb": {
-            "flops_per_sample": 3.0e7,
-        }
-    },
-
-    # 🔥 NOVO (8x)
-    "cost_8x": {
-        "cifar": {
-            "flops_per_sample": 5e6,
-        },
-        "gtsrb": {
-            "flops_per_sample": 4.0e7,
-        }
-    },
-
-    # 🔥 NOVO (10x)
-    "cost_10x": {
-        "cifar": {
-            "flops_per_sample": 5e6,
-        },
-        "gtsrb": {
-            "flops_per_sample": 5.0e7,
-        }
-    },
+    }
 }
 
 # =====================================================
@@ -113,12 +83,9 @@ MODEL_COST_SETUPS = {
 DIRICHLET_ALPHA = 0.1
 # DIRICHLET_ALPHA = 1.0
 
-COST_SETUP_NAME = "cost_1x"
-# COST_SETUP_NAME = "cost_2x"
-# COST_SETUP_NAME = "cost_4x"
-# COST_SETUP_NAME = "cost_6x"
-# COST_SETUP_NAME = "cost_8x"
-# COST_SETUP_NAME = "cost_10x"
+COST_SETUP_NAME = "cost_2_4x"  # 🔥 troque aqui
+COST_SETUP_NAME = "cost_2x"  # 🔥 troque aqui
+# COST_SETUP_NAME = "cost_4x"  # 🔥 troque aqui
 
 
 MODEL_COST = MODEL_COST_SETUPS[COST_SETUP_NAME]
@@ -680,7 +647,48 @@ def compute_utilities():
 
     return util_cifar, util_gtsrb
 
+def simulate_delta(
+    cid,
+    delta_usage,
+    current_usage,
+    total_usage,
+    total_util,
+    ratios,
+    S1,
+    S2,
+    w_data_cache
+):
+    eps = 1e-8
 
+    old_total = total_usage
+    new_total = total_usage + delta_usage
+
+    if new_total < eps:
+        return 1.0
+
+    scale = old_total / new_total if old_total > 0 else 1.0
+
+    # -------- remove contribuição antiga --------
+    r_k = ratios[cid]
+    S1_new = S1 - r_k
+    S2_new = S2 - r_k * r_k
+
+    # -------- atualiza cliente k --------
+    u_k = current_usage[cid]
+    u_k_new = u_k + delta_usage
+
+    actual_k = u_k_new / new_total
+    expected_k = w_data_cache[cid] / total_util
+
+    r_k_new = actual_k / (expected_k + eps)
+
+    # -------- aplica escala global --------
+    S1_new = S1_new * scale + r_k_new
+    S2_new = S2_new * (scale ** 2) + r_k_new * r_k_new
+
+    J_new = (S1_new ** 2) / (NUM_CLIENTS * S2_new + eps)
+
+    return J_new
 
 def run_experiment():
 
@@ -755,6 +763,23 @@ def run_experiment():
             test_loaders[cid]["gtsrb"] = test_loader
 
         reset_experiment_state(train_loaders)
+
+        # =====================================================
+        # PRECOMPUTE w_data (FIXO)
+        # =====================================================
+
+        w_data_cache = {}
+
+        for cid in range(NUM_CLIENTS):
+            w = 0.0
+            for m in ["cifar", "gtsrb"]:
+                n = client_resources[cid][f"data_size_{m}"]
+                speed = client_resources[cid]["speed"]
+                flops = MODEL_COST[m]["flops_per_sample"]
+
+                w += ((n * speed) / flops) ** 0.5
+
+            w_data_cache[cid] = w
 
         num_models = len(global_models)
         MAX_CLIENTS_PER_MODEL = K_CLIENTS // num_models
@@ -833,31 +858,75 @@ def run_experiment():
 
             model_names = ["cifar", "gtsrb"]
 
+            # =====================================================
+            # ESTADO GLOBAL PARA FAIRNESS (INCREMENTAL)
+            # =====================================================
+
+            current_usage = {
+                cid: sum(client_resource_usage[cid].values())
+                for cid in range(NUM_CLIENTS)
+            }
+
+            total_usage = sum(current_usage.values())
+            total_util = sum(w_data_cache.values())
+
+            ratios = {}
+            S1 = 0.0
+            S2 = 0.0
+
+            for cid in range(NUM_CLIENTS):
+                w = w_data_cache[cid]
+                u = current_usage[cid]
+
+                expected = w / total_util if total_util > 0 else 0.0
+                actual = u / (total_usage + 1e-8)
+
+                r = actual / (expected + 1e-8)
+
+                ratios[cid] = r
+                S1 += r
+                S2 += r * r
+
+            current_J = (S1 ** 2) / (NUM_CLIENTS * S2 + 1e-8)
+
             for cid in all_clients:
 
                 train_time_cifar = training_time_cache[cid]["cifar"]
                 train_time_gtsrb = training_time_cache[cid]["gtsrb"]
 
                 # -------- DELTAS CIFAR --------
-                delta_cifar_inter = compute_inter_client_fairness_with_delta(
-                    cid, "cifar",
-                    client_resources,
-                    client_resource_usage,
-                    training_time_cache,
-                    model_names
+                # -------- DELTA INTER (O(1)) --------
+
+                new_J_cifar = simulate_delta(
+                    cid,
+                    train_time_cifar,
+                    current_usage,
+                    total_usage,
+                    total_util,
+                    ratios,
+                    S1,
+                    S2,
+                    w_data_cache
                 )
+
+                delta_cifar_inter = new_J_cifar - current_J
+
+                new_J_gtsrb = simulate_delta(
+                    cid,
+                    train_time_gtsrb,
+                    current_usage,
+                    total_usage,
+                    total_util,
+                    ratios,
+                    S1,
+                    S2,
+                    w_data_cache
+                )
+
+                delta_gtsrb_inter = new_J_gtsrb - current_J
 
                 delta_cifar_intra = compute_intra_client_fairness_with_delta(
                     cid, "cifar",
-                    client_resources,
-                    client_resource_usage,
-                    training_time_cache,
-                    model_names
-                )
-
-                # -------- DELTAS GTSRB --------
-                delta_gtsrb_inter = compute_inter_client_fairness_with_delta(
-                    cid, "gtsrb",
                     client_resources,
                     client_resource_usage,
                     training_time_cache,
@@ -905,6 +974,44 @@ def run_experiment():
                 else:
                     clients_gtsrb.append(cid)
                     client_resource_usage[cid]["gtsrb"] += train_time
+
+                delta = train_time
+
+                old_total = total_usage
+                new_total = total_usage + delta
+
+                if new_total <= 0:
+                    continue
+
+                scale = old_total / new_total if old_total > 0 else 1.0
+
+                # -------- REMOVE contribuição antiga --------
+                r_old = ratios[cid]
+                S1 -= r_old
+                S2 -= r_old * r_old
+
+                # -------- aplica escala global --------
+                S1 *= scale
+                S2 *= scale * scale
+
+                # -------- atualiza usage --------
+                current_usage[cid] += delta
+                total_usage = new_total
+
+                # -------- novo ratio --------
+                expected = w_data_cache[cid] / total_util
+                actual = current_usage[cid] / total_usage
+
+                r_new = actual / (expected + 1e-8)
+
+                ratios[cid] = r_new
+
+                # -------- adiciona nova contribuição --------
+                S1 += r_new
+                S2 += r_new * r_new
+
+                # -------- atualiza Jain --------
+                current_J = (S1 ** 2) / (NUM_CLIENTS * S2 + 1e-8)
 
                 if (len(clients_cifar) + len(clients_gtsrb)) >= K_CLIENTS:
                     break
