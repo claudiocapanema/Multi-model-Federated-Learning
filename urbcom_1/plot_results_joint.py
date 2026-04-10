@@ -43,7 +43,7 @@ SELECTED_ALGORITHMS = None
 
 SELECTED_ALGORITHMS = [
     # "fair_resource_k0.2",
-    # "fair_resource_k0.3",
+    "fair_resource_k0.3",
     # "fair_resource_k0.4",
     # "fair_resource_k0.5",
     "oort",
@@ -805,6 +805,158 @@ def plot_mean_fairness(df):
         save_figure(f"mean_fairness_{lang}")
         plt.close()
 
+def compute_efficiency_score(fairness, accuracy):
+    """
+    fairness: [0,100]
+    accuracy: [0,100]
+    retorna ES normalizado em [0,1]
+    """
+    f = fairness / 100
+    a = accuracy / 100
+    return np.sqrt(f**2 + a**2) / np.sqrt(2)
+
+def plot_fairness_vs_accuracy(df):
+
+    markers = ['o', 's', '^', 'D', 'P', '*', 'X', 'v']
+
+    for metric in FAIRNESS_METRICS:
+
+        for lang in LANGUAGES:
+
+            texts = TEXTS[lang]
+
+            fig, axes = plt.subplots(1, len(ALPHAS), figsize=(10,4), sharey=True)
+
+            if len(ALPHAS) == 1:
+                axes = [axes]
+
+            for i, alpha in enumerate(sorted(ALPHAS)):
+
+                ax = axes[i]
+
+                df_alpha = df[df["alpha"] == alpha]
+
+                placed_labels = []   # posições de textos
+                points = []          # posições dos pontos
+
+                for j, alg in enumerate(get_algorithm_order(df_alpha)):
+
+                    subset = df_alpha[df_alpha["algorithm"] == alg]
+
+                    if len(subset) == 0:
+                        continue
+
+                    final = (
+                        subset
+                        .sort_values("round")
+                        .groupby(["dataset"])
+                        .tail(1)
+                    )
+
+                    fairness_val = final[metric].mean() * 100
+
+                    cifar = final[final["dataset"] == "cifar"]["global_acc"].mean()
+                    gtsrb = final[final["dataset"] == "gtsrb"]["global_acc"].mean()
+
+                    if np.isnan(cifar) or np.isnan(gtsrb):
+                        continue
+
+                    acc_mean = ((cifar + gtsrb) / 2) * 100
+
+                    # 🔥 ponto
+                    ax.scatter(
+                        fairness_val,
+                        acc_mean,
+                        marker=markers[j % len(markers)],
+                        label=get_display_name(alg),
+                        s=80
+                    )
+
+                    points.append((fairness_val, acc_mean))
+
+                    # 🔥 score harmônico
+                    f = fairness_val / 100
+                    a = acc_mean / 100
+                    score = 2 * f * a / (f + a) if (f + a) > 0 else 0
+
+                    # =====================================================
+                    # 🔥 POSIÇÕES CANDIDATAS (radial)
+                    # =====================================================
+                    directions = [
+                        (0, 5), (5, 0), (-5, 0), (0, -5),
+                        (4, 4), (-4, 4), (4, -4), (-4, -4),
+                        (6, 0), (-6, 0), (0, 7)
+                    ]
+
+                    placed = False
+
+                    for dx, dy in directions:
+
+                        new_x = fairness_val + dx
+                        new_y = acc_mean + dy
+
+                        # 🔥 verifica colisão com textos
+                        overlap_text = any(
+                            abs(new_x - tx) < 4 and abs(new_y - ty) < 4
+                            for tx, ty in placed_labels
+                        )
+
+                        # 🔥 verifica colisão com pontos
+                        overlap_point = any(
+                            abs(new_x - px) < 4 and abs(new_y - py) < 4
+                            for px, py in points
+                        )
+
+                        if not overlap_text and not overlap_point:
+                            ax.text(
+                                new_x,
+                                new_y,
+                                f"{score:.2f}",
+                                fontsize=8,
+                                ha='center',
+                                va='bottom'
+                            )
+                            placed_labels.append((new_x, new_y))
+                            placed = True
+                            break
+
+                    # 🔥 fallback (longe o suficiente)
+                    if not placed:
+                        ax.text(
+                            fairness_val + 12,
+                            acc_mean + 12,
+                            f"{score:.2f}",
+                            fontsize=8,
+                            ha='center',
+                            va='bottom'
+                        )
+                        placed_labels.append((fairness_val + 12, acc_mean + 12))
+
+                ax.set_title(f"$\\alpha = {alpha}$")
+                ax.set_xlabel(texts["fairness"] + " (%)")
+                ax.set_ylim(0, 100)
+                ax.set_xlim(0, 100)
+                ax.grid()
+
+            axes[0].set_ylabel(texts["accuracy"] + " (%)")
+
+            # 🔥 legenda
+            handles, labels = axes[0].get_legend_handles_labels()
+            fig.legend(
+                handles,
+                labels,
+                loc="upper center",
+                bbox_to_anchor=(0.5, 0.92),
+                ncol=3
+            )
+
+            plt.suptitle(f"{texts['fairness']} vs {texts['accuracy']} ({format_metric_name(metric)})")
+
+            plt.tight_layout(rect=[0, 0, 1, 0.85])
+
+            save_figure(f"fairness_vs_accuracy_{metric}_{lang}")
+            plt.close()
+
 # =====================================================
 # 🔥 TABELA DE ACURÁCIA (BILÍNGUE)
 # =====================================================
@@ -1319,6 +1471,7 @@ def main():
     plot_resource_usage(df)
     plot_cumulative_resource_usage(df)
     plot_mean_fairness(df)
+    plot_fairness_vs_accuracy(df)
 
     # TABELAS
     build_accuracy_table_multi_alpha(df)

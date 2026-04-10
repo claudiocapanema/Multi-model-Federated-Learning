@@ -114,15 +114,15 @@ MODEL_COST_SETUPS = {
 # SELECT COST SETUP
 # =====================================================
 
-DIRICHLET_ALPHA = 0.1
-# DIRICHLET_ALPHA = 1.0
+# DIRICHLET_ALPHA = 0.1
+DIRICHLET_ALPHA = 1.0
 
 COST_SETUP_NAME = "cost_1x"
-# COST_SETUP_NAME = "cost_2x"
-# COST_SETUP_NAME = "cost_4x"
-# COST_SETUP_NAME = "cost_6x"
-# COST_SETUP_NAME = "cost_8x"
-# COST_SETUP_NAME = "cost_10x"
+COST_SETUP_NAME = "cost_2x"
+COST_SETUP_NAME = "cost_4x"
+COST_SETUP_NAME = "cost_6x"
+COST_SETUP_NAME = "cost_8x"
+COST_SETUP_NAME = "cost_10x"
 
 
 MODEL_COST = MODEL_COST_SETUPS[COST_SETUP_NAME]

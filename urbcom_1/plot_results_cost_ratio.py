@@ -54,7 +54,7 @@ def get_display_name(alg):
     return alg
 
 def get_algorithm_order(df):
-    return sorted(df["algorithm"].unique())
+    return [alg for alg in SELECTED_ALGORITHMS if alg in df["algorithm"].unique()]
 
 # =====================================================
 # LOAD
@@ -116,6 +116,72 @@ def load_results(cost_ratio):
     return df[df["algorithm"].isin(SELECTED_ALGORITHMS)]
 
 # =====================================================
+# PLOT (1 COLUNA, 3 LINHAS)
+# =====================================================
+
+def plot_all():
+
+    fig, axes = plt.subplots(3, 1, figsize=(6, 10), sharex=True)
+
+    metrics = [
+        ("accuracy", "Accuracy (%)"),
+        ("inter", "Inter-Client Fairness (%)"),
+        ("intra", "Intra-Client Fairness (%)"),
+    ]
+
+    for i, (metric, ylabel) in enumerate(metrics):
+
+        ax = axes[i]
+
+        for alg in get_algorithm_order(df_all):
+
+            sub = df_all[df_all["algorithm"] == alg]
+
+            if len(sub) == 0:
+                continue
+
+            ax.plot(
+                sub["cost"],
+                sub[metric],
+                marker="o",
+                label=get_display_name(alg)
+            )
+
+        ax.set_ylabel(ylabel)
+        ax.set_ylim(0, 100)
+        ax.grid(True)
+
+    # eixo X com explicação clara
+    axes[-1].set_xlabel("Cost Ratio (GTSRB / CIFAR-10)")
+
+    # legenda única bem posicionada
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="upper center",
+        ncol=3,
+        bbox_to_anchor=(0.5, 0.98)
+    )
+
+    fig.suptitle(
+        "Performance and Fairness vs Cost Ratio",
+        fontsize=12,
+        y=0.995
+    )
+
+    # ajuste fino de layout (evita sobreposição)
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+
+    plt.savefig(os.path.join(OUTPUT_DIR, "combined_plot.png"))
+    plt.savefig(os.path.join(OUTPUT_DIR, "combined_plot.pdf"))
+    plt.close()
+
+# =====================================================
+# GERAR FIGURA
+# =====================================================
+
+# =====================================================
 # EXTRAÇÃO (ÚLTIMA RODADA)
 # =====================================================
 
@@ -135,9 +201,9 @@ def extract_metrics(df):
 
         rows.append({
             "algorithm": alg,
-            "accuracy": final["global_acc"].mean(),
-            "inter": final["inter_client_fairness"].mean(),
-            "intra": final["intra_client_fairness"].mean()
+            "accuracy": final["global_acc"].mean() * 100,  # 🔥 só aqui
+            "inter": final["inter_client_fairness"].mean() * 100,
+            "intra": final["intra_client_fairness"].mean() * 100
         })
 
     return pd.DataFrame(rows)
@@ -207,3 +273,7 @@ plot("inter", "Inter-Client Fairness")
 plot("intra", "Intra-Client Fairness")
 
 print("✅ Pronto: gráficos com linhas por algoritmo!")
+
+plot_all()
+
+print("✅ Pronto: figura única com 3 subplots (1 coluna x 3 linhas)!")
