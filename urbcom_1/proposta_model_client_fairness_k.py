@@ -110,12 +110,14 @@ MODEL_COST_SETUPS = {
 # SELECT COST SETUP
 # =====================================================
 
+ALPHA_EFF = 1
+
 # DIRICHLET_ALPHA = 0.1
 DIRICHLET_ALPHA = 1.0
 
 COST_SETUP_NAME = "cost_1x"
-# COST_SETUP_NAME = "cost_2x"
-# COST_SETUP_NAME = "cost_4x"
+COST_SETUP_NAME = "cost_2x"
+COST_SETUP_NAME = "cost_4x"
 # COST_SETUP_NAME = "cost_6x"
 # COST_SETUP_NAME = "cost_8x"
 # COST_SETUP_NAME = "cost_10x"
@@ -461,6 +463,7 @@ def clear_previous_results():
             f"{RESULTS_DIR}/proposta_k_{model_name}"
             f"_frac_{FRAC}"
             f"_alpha_{DIRICHLET_ALPHA}"
+            f"_alphaEff_{ALPHA_EFF}"
             f"_lambdaCap_{LAMBDA_CAPACITY}"
             f"_lambdaIntra_{LAMBDA_INTRA}.csv"
         )
@@ -474,7 +477,7 @@ def compute_caf_inter(
     model_names,
     gamma=0.5,
     eps=1e-8,
-    alpha_eff=0.5
+    alpha_eff=ALPHA_EFF
 ):
 
     utility = []
@@ -526,7 +529,7 @@ def compute_caf_intra(
     training_time_cache,
     model_names,
     eps=1e-8,
-    alpha_eff=0.5
+    alpha_eff=ALPHA_EFF
 ):
 
     total_weight = 0.0
@@ -1058,6 +1061,7 @@ def run_experiment():
                     f"{RESULTS_DIR}/proposta_k_{model_name}"
                     f"_frac_{FRAC}"
                     f"_alpha_{DIRICHLET_ALPHA}"
+                    f"_alphaEff_{ALPHA_EFF}"
                     f"_lambdaCap_{LAMBDA_CAPACITY}"
                     f"_lambdaIntra_{LAMBDA_INTRA}.csv"
                 )

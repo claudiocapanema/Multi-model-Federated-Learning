@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 # =====================================================
 
 ALPHA = 1.0
-ALPHA = 0.1
+# ALPHA = 0.1
 
 COST_RATIOS = ["1.0x", "2.0x", "4.0x", "6.0x", "8.0x", "10.0x"]
 
@@ -83,9 +83,44 @@ def load_results(cost_ratio):
                     df["algorithm"] = f"baseline_f{frac}"
                     dfs.append(df)
 
-        elif file.startswith("proposta_k_") and f"alpha_{ALPHA}" in file:
+
+        elif file.startswith("proposta_k_"):
+
+            # 🔥 FILTROS EXATOS (IMPORTANTÍSSIMO)
+
+            if f"frac_{0.3}" not in file:
+                continue
+
+            if f"alpha_{ALPHA}" not in file:
+                continue
+
+            if f"alphaEff_" not in file:
+                continue
+
+            if f"lambdaCap_" not in file:
+                continue
+
+            if f"lambdaIntra_" not in file:
+                continue
+
             df = pd.read_csv(full)
+
+            # 🔥 extrai dataset do nome (cifar / gtsrb)
+
+            if "_cifar_" in file:
+
+                df["dataset"] = "cifar"
+
+            elif "_gtsrb_" in file:
+
+                df["dataset"] = "gtsrb"
+
+            else:
+
+                raise ValueError(f"Dataset não identificado no arquivo: {file}")
+
             df["algorithm"] = "fair_resource_k0.3"
+
             dfs.append(df)
 
         elif file.startswith("fedfairmmfl_") and f"alpha_{ALPHA}" in file:
