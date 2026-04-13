@@ -15,6 +15,7 @@ ALPHAS = [0.1, 1.0]  # 🔥 pode adicionar mais aqui
 COST_RATIO_STR = "2,4x"
 # COST_RATIO_STR = "2.0x"
 COST_RATIO_STR = "4.0x"
+# COST_RATIO_STR = "10.0x"
 RESULTS_DIR_WRITE = f"results/gtsrb_{COST_RATIO_STR}_cifar/plots/alpha_{ALPHAS}"
 RESULTS_DIR = f"results/gtsrb_{COST_RATIO_STR}_cifar/"
 
@@ -43,7 +44,7 @@ SELECTED_ALGORITHMS = None
 
 SELECTED_ALGORITHMS = [
     # "fair_resource_k0.2",
-    "fair_resource_k0.3",
+    "dpfs_k0.3_b0.5",  # padrão
     # "fair_resource_k0.4",
     # "fair_resource_k0.5",
     "oort",
@@ -60,9 +61,19 @@ SELECTED_ALGORITHMS = [
 ]
 
 def filter_algorithms(df):
+
     if SELECTED_ALGORITHMS is None:
         return df
-    return df[df["algorithm"].isin(SELECTED_ALGORITHMS)]
+
+    selected = set(SELECTED_ALGORITHMS)
+
+    def keep(alg):
+        # 🔥 mantém TODOS os DPFS (independente do beta)
+        if alg.startswith("dpfs_k"):
+            return True
+        return alg in selected
+
+    return df[df["algorithm"].apply(keep)]
 
 # =====================================================
 # 🔥 FORMATADOR DE NOMES (METRICS → HUMAN READABLE)
@@ -111,10 +122,12 @@ def get_display_name(alg):
         return f"FedFairMMFL ({pct}\\%)"
 
     # 🔹 PROPOSTA
-    if alg.startswith("fair_resource_k"):
-        frac = float(alg.split("fair_resource_k")[-1])
-        pct = int(frac * 100)
-        return f"Fair Resource ({pct}\\%)"
+    if alg.startswith("dpfs_k"):
+        import re
+
+        beta = float(re.search(r'b(\d+\.?\d*)', alg).group(1))
+
+        return f"DPFS ($\\beta={beta}$)"
 
     return alg
 
@@ -202,7 +215,15 @@ def get_algorithm_order(df):
 
     def sort_key(a):
 
-        match = re.search(r'fair_resource_k(\d+\.\d+)', a)
+        match = re.search(r'dpfs_k(\d+\.\d+)_b(\d+\.?\d*)', a)
+        if match:
+            frac = float(match.group(1))
+            beta = float(match.group(2))
+
+            # 🔥 força beta=0.5 primeiro
+            beta_priority = 0 if beta == 0.5 else 1
+
+            return (0, frac, beta_priority, beta)
         if match:
             return (0, float(match.group(1)))
 
@@ -272,14 +293,37 @@ def load_results():
         # PROPOSTA K
         elif file.startswith("proposta_k_"):
 
+            matched = False
+
             for frac in BASELINE_FRACS:
-                if f"frac_{frac}" in file:
+
+                if f"frac_{frac}" in file and f"alpha_{alpha}" in file:
 
                     df = pd.read_csv(path)
-                    df["algorithm"] = f"fair_resource_k{frac}"
+
+                    # 🔥 DATASET
+                    if "_cifar_" in file:
+                        df["dataset"] = "cifar"
+                    elif "_gtsrb_" in file:
+                        df["dataset"] = "gtsrb"
+                    else:
+                        raise ValueError(f"Dataset não identificado: {file}")
+
+                    # 🔥 NOVO: extrair beta (alphaEff)
+                    import re
+                    match_beta = re.search(r'alphaEff_(\d+\.?\d*)', file)
+                    beta = float(match_beta.group(1)) if match_beta else 0.5  # default
+
+                    df["beta"] = beta
+                    df["algorithm"] = f"dpfs_k{frac}_b{beta}"
                     df["alpha"] = alpha
+
                     dfs.append(df)
+                    matched = True
                     break
+
+            if not matched:
+                continue
 
         # FEDFAIRMMFL
         elif file.startswith("fedfairmmfl_"):
@@ -817,7 +861,15 @@ def compute_efficiency_score(fairness, accuracy):
 
 def plot_fairness_vs_accuracy(df):
 
-    markers = ['o', 's', '^', 'D', 'P', '*', 'X', 'v']
+    base_markers = ['o', 's', '^', 'D', 'P', '*', 'X', 'v']
+
+    # 🔥 DPFS configs
+    DPFS_BETAS = [0.1, 0.5, 1.0]
+    DPFS_MARKERS = {
+        0.1: 'o',
+        0.5: 's',
+        1.0: '^'
+    }
 
     for metric in FAIRNESS_METRICS:
 
@@ -830,22 +882,59 @@ def plot_fairness_vs_accuracy(df):
             if len(ALPHAS) == 1:
                 axes = [axes]
 
+            # 🔥 paleta automática (resolve problema de cores iguais)
+            all_algs = list(df["algorithm"].unique())
+            color_map = {
+                alg: plt.cm.tab10(i % 10)
+                for i, alg in enumerate(all_algs)
+            }
+
             for i, alpha in enumerate(sorted(ALPHAS)):
 
                 ax = axes[i]
 
                 df_alpha = df[df["alpha"] == alpha]
 
-                placed_labels = []   # posições de textos
-                points = []          # posições dos pontos
+                placed_labels = []
+                points = []
 
-                for j, alg in enumerate(get_algorithm_order(df_alpha)):
+                # =====================================================
+                # 🔥 IMPORTANTE: NÃO usar SELECTED_ALGORITHMS aqui
+                # =====================================================
+                algs = sorted(df_alpha["algorithm"].unique())
+
+                for j, alg in enumerate(algs):
 
                     subset = df_alpha[df_alpha["algorithm"] == alg]
 
                     if len(subset) == 0:
                         continue
 
+                    # =====================================================
+                    # 🔥 DPFS
+                    # =====================================================
+                    if alg.startswith("dpfs_k"):
+
+                        import re
+                        match = re.search(r'b(\d+\.?\d*)', alg)
+                        if not match:
+                            continue
+
+                        beta = float(match.group(1))
+
+                        if beta not in DPFS_BETAS:
+                            continue
+
+                        color = "blue"
+                        marker = DPFS_MARKERS[beta]
+
+                    else:
+                        color = color_map[alg]   # 🔥 FIX: cor única por algoritmo
+                        marker = base_markers[j % len(base_markers)]
+
+                    # =====================================================
+                    # 🔥 FINAL ROUND
+                    # =====================================================
                     final = (
                         subset
                         .sort_values("round")
@@ -863,29 +952,30 @@ def plot_fairness_vs_accuracy(df):
 
                     acc_mean = ((cifar + gtsrb) / 2) * 100
 
-                    # 🔥 ponto
+                    # =====================================================
+                    # 🔥 SCATTER
+                    # =====================================================
                     ax.scatter(
                         fairness_val,
                         acc_mean,
-                        marker=markers[j % len(markers)],
-                        label=get_display_name(alg),
+                        marker=marker,
+                        color=color,
                         s=80
                     )
 
                     points.append((fairness_val, acc_mean))
 
-                    # 🔥 score harmônico
+                    # =====================================================
+                    # 🔥 SCORE
+                    # =====================================================
                     f = fairness_val / 100
                     a = acc_mean / 100
                     score = 2 * f * a / (f + a) if (f + a) > 0 else 0
 
-                    # =====================================================
-                    # 🔥 POSIÇÕES CANDIDATAS (radial)
-                    # =====================================================
+                    # posicionamento inteligente
                     directions = [
                         (0, 5), (5, 0), (-5, 0), (0, -5),
-                        (4, 4), (-4, 4), (4, -4), (-4, -4),
-                        (6, 0), (-6, 0), (0, 7)
+                        (4, 4), (-4, 4), (4, -4), (-4, -4)
                     ]
 
                     placed = False
@@ -895,42 +985,18 @@ def plot_fairness_vs_accuracy(df):
                         new_x = fairness_val + dx
                         new_y = acc_mean + dy
 
-                        # 🔥 verifica colisão com textos
-                        overlap_text = any(
-                            abs(new_x - tx) < 4 and abs(new_y - ty) < 4
-                            for tx, ty in placed_labels
-                        )
-
-                        # 🔥 verifica colisão com pontos
-                        overlap_point = any(
+                        overlap = any(
                             abs(new_x - px) < 4 and abs(new_y - py) < 4
                             for px, py in points
                         )
 
-                        if not overlap_text and not overlap_point:
-                            ax.text(
-                                new_x,
-                                new_y,
-                                f"{score:.2f}",
-                                fontsize=8,
-                                ha='center',
-                                va='bottom'
-                            )
-                            placed_labels.append((new_x, new_y))
+                        if not overlap:
+                            ax.text(new_x, new_y, f"{score:.2f}", fontsize=8)
                             placed = True
                             break
 
-                    # 🔥 fallback (longe o suficiente)
                     if not placed:
-                        ax.text(
-                            fairness_val + 12,
-                            acc_mean + 12,
-                            f"{score:.2f}",
-                            fontsize=8,
-                            ha='center',
-                            va='bottom'
-                        )
-                        placed_labels.append((fairness_val + 12, acc_mean + 12))
+                        ax.text(fairness_val + 10, acc_mean + 10, f"{score:.2f}", fontsize=8)
 
                 ax.set_title(f"$\\alpha = {alpha}$")
                 ax.set_xlabel(texts["fairness"] + " (%)")
@@ -940,17 +1006,64 @@ def plot_fairness_vs_accuracy(df):
 
             axes[0].set_ylabel(texts["accuracy"] + " (%)")
 
-            # 🔥 legenda
-            handles, labels = axes[0].get_legend_handles_labels()
+            # =====================================================
+            # 🔥 LEGENDA CORRETA
+            # =====================================================
+            legend_handles = []
+            legend_labels = []
+
+            import matplotlib.lines as mlines
+            import re
+
+            # 🔵 DPFS (sempre aparece todos os betas)
+            for beta in DPFS_BETAS:
+                handle = mlines.Line2D(
+                    [], [],
+                    color="blue",
+                    marker=DPFS_MARKERS[beta],
+                    linestyle='None',
+                    markersize=8
+                )
+                legend_handles.append(handle)
+                legend_labels.append(f"DPFS ($\\beta={beta}$)")
+
+            # 🎨 OUTROS ALGORITMOS (com cor correta)
+            seen = set()
+
+            for alg in all_algs:
+
+                if alg.startswith("dpfs_k"):
+                    continue
+
+                name = get_display_name(alg)
+
+                if name in seen:
+                    continue
+
+                seen.add(name)
+
+                handle = mlines.Line2D(
+                    [], [],
+                    color=color_map[alg],
+                    marker='o',
+                    linestyle='None',
+                    markersize=8
+                )
+
+                legend_handles.append(handle)
+                legend_labels.append(name)
+
             fig.legend(
-                handles,
-                labels,
+                legend_handles,
+                legend_labels,
                 loc="upper center",
                 bbox_to_anchor=(0.5, 0.92),
-                ncol=3
+                ncol=4
             )
 
-            plt.suptitle(f"{texts['fairness']} vs {texts['accuracy']} ({format_metric_name(metric)})")
+            plt.suptitle(
+                f"{texts['fairness']} vs {texts['accuracy']} ({format_metric_name(metric)})"
+            )
 
             plt.tight_layout(rect=[0, 0, 1, 0.85])
 
