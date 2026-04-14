@@ -43,13 +43,13 @@ def get_display_name(alg):
         return "FedBalancer"
 
     if alg.startswith("baseline_f"):
-        return f"MultiFedAvg ({int(float(alg.split('f')[-1])*100)}%)"
+        return f"MultiFedAvg"
 
     if alg.startswith("fedfairmmfl_f"):
-        return f"FedFairMMFL ({int(float(alg.split('f')[-1])*100)}%)"
+        return f"FedFairMMFL"
 
     if alg.startswith("fair_resource_k"):
-        return f"Fair Resource ({int(float(alg.split('k')[-1])*100)}%)"
+        return "DPFS"
 
     return alg
 
@@ -160,8 +160,8 @@ def plot_all():
 
     metrics = [
         ("accuracy", "Accuracy (%)"),
-        ("inter", "Inter-Client Fairness (%)"),
-        ("intra", "Intra-Client Fairness (%)"),
+        ("inter", "IRCPF-Inter (%)"),
+        ("intra", "IRCPF-Intra (%)"),
     ]
 
     for i, (metric, ylabel) in enumerate(metrics):
@@ -196,11 +196,11 @@ def plot_all():
         labels,
         loc="upper center",
         ncol=3,
-        bbox_to_anchor=(0.5, 0.98)
+        bbox_to_anchor=(0.5, 0.975)
     )
 
     fig.suptitle(
-        "Performance and Fairness vs Cost Ratio",
+        "Accuracy and Fairness vs Cost Ratio",
         fontsize=12,
         y=0.995
     )
