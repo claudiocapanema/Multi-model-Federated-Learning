@@ -68,9 +68,15 @@ def filter_algorithms(df):
     selected = set(SELECTED_ALGORITHMS)
 
     def keep(alg):
-        # 🔥 mantém TODOS os DPFS (independente do beta)
+
+        # mantém TODOS DPFS
         if alg.startswith("dpfs_k"):
             return True
+
+        # 🔥 mantém TODOS baseline (independente do beta)
+        if alg.startswith("baseline_f"):
+            return True
+
         return alg in selected
 
     return df[df["algorithm"].apply(keep)]
@@ -109,8 +115,13 @@ def get_display_name(alg):
     if alg in mapping:
         return mapping[alg]
 
-    # 🔹 BASELINE
+    # 🔹 BASELINE COM BETA
     if alg.startswith("baseline_f"):
+        import re
+        match = re.search(r'b(\d+\.?\d*)', alg)
+        if match:
+            beta = float(match.group(1))
+            return f"MultiFedAvg ($\\beta={beta}$)"
         return "MultiFedAvg"
 
     # 🔹 FEDFAIRMMFL
@@ -119,12 +130,10 @@ def get_display_name(alg):
         pct = int(frac * 100)
         return f"FedFairMMFL ({pct}\\%)"
 
-    # 🔹 PROPOSTA
+    # 🔹 DPFS
     if alg.startswith("dpfs_k"):
         import re
-
         beta = float(re.search(r'b(\d+\.?\d*)', alg).group(1))
-
         return f"DPFS ($\\beta={beta}$)"
 
     return alg
@@ -213,37 +222,36 @@ def get_algorithm_order(df):
 
     def sort_key(a):
 
+        # DPFS
         match = re.search(r'dpfs_k(\d+\.\d+)_b(\d+\.?\d*)', a)
         if match:
             frac = float(match.group(1))
             beta = float(match.group(2))
-
-            # 🔥 força beta=0.5 primeiro
             beta_priority = 0 if beta == 0.5 else 1
-
             return (0, frac, beta_priority, beta)
+
+        # BASELINE COM BETA
+        match = re.search(r'baseline_f(\d+\.\d+)_b(\d+\.?\d*)', a)
         if match:
-            return (0, float(match.group(1)))
+            frac = float(match.group(1))
+            beta = float(match.group(2))
+            return (1, frac, beta)
 
         if a.lower() == "fair_resource_budget":
-            return (1, 0)
+            return (2, 0)
 
         if a.lower() == "oort":
-            return (2, 0)
-        if a.lower() == "fairhetero":
             return (3, 0)
-        if a.lower() == "fedbalancer":
+        if a.lower() == "fairhetero":
             return (4, 0)
-
-        match = re.search(r'baseline_f(\d+\.\d+)', a)
-        if match:
-            return (6, float(match.group(1)))
+        if a.lower() == "fedbalancer":
+            return (5, 0)
 
         match = re.search(r'fedfairmmfl_f(\d+\.\d+)', a)
         if match:
-            return (4, float(match.group(1)))
+            return (6, float(match.group(1)))
 
-        return (6, 0)
+        return (7, 0)
 
     return sorted(algs, key=sort_key)
 
@@ -263,108 +271,70 @@ def load_results():
 
     dfs = []
 
-    for file in os.listdir(RESULTS_DIR):
+    import re
 
-        if not file.endswith(".csv"):
-            continue
+    for root, dirs, files in os.walk(RESULTS_DIR):
 
-        path = os.path.join(RESULTS_DIR, file)
+        for file in files:
 
-        # 🔥 extrai alpha do nome do arquivo
-        alpha = extract_alpha(file)
-
-        if alpha not in ALPHAS:
-            continue
-
-        # BASELINE
-        if file.startswith("baseline_"):
-
-            for frac in BASELINE_FRACS:
-                if f"frac_{frac}" in file:
-
-                    df = pd.read_csv(path)
-                    df["algorithm"] = f"baseline_f{frac}"
-                    df["alpha"] = alpha
-                    dfs.append(df)
-                    break
-
-        # PROPOSTA K
-        elif file.startswith("proposta_k_"):
-
-            matched = False
-
-            for frac in BASELINE_FRACS:
-
-                if f"frac_{frac}" in file and f"alpha_{alpha}" in file:
-
-                    df = pd.read_csv(path)
-
-                    # 🔥 DATASET
-                    if "_cifar_" in file:
-                        df["dataset"] = "cifar"
-                    elif "_gtsrb_" in file:
-                        df["dataset"] = "gtsrb"
-                    else:
-                        raise ValueError(f"Dataset não identificado: {file}")
-
-                    # 🔥 NOVO: extrair beta (alphaEff)
-                    import re
-                    match_beta = re.search(r'alphaEff_(\d+\.?\d*)', file)
-                    beta = float(match_beta.group(1)) if match_beta else 0.5  # default
-
-                    df["beta"] = beta
-                    df["algorithm"] = f"dpfs_k{frac}_b{beta}"
-                    df["alpha"] = alpha
-
-                    dfs.append(df)
-                    matched = True
-                    break
-
-            if not matched:
+            if not file.endswith(".csv"):
                 continue
 
-        # FEDFAIRMMFL
-        elif file.startswith("fedfairmmfl_"):
+            path = os.path.join(root, file)
 
-            for frac in BASELINE_FRACS:
-                if f"frac_{frac}" in file:
+            # =========================================
+            # 🔹 EXTRAÇÃO ROBUSTA (CORRIGIDA)
+            # =========================================
+            try:
+                frac = float(re.search(r'frac_(\d+\.?\d*)', root).group(1))
+                alpha = float(re.search(r'alpha_dirichlet_(\d+\.?\d*)', root).group(1))
+                beta = float(re.search(r'beta_(\d+\.?\d*)', root).group(1))
+            except:
+                continue
 
-                    df = pd.read_csv(path)
-                    df["algorithm"] = f"fedfairmmfl_f{frac}"
-                    df["alpha"] = alpha
-                    dfs.append(df)
-                    break
-
-        # BUDGET
-        elif file.startswith("proposta_budget_"):
-
-            df = pd.read_csv(path)
-            df["algorithm"] = "fair_resource_budget"
-            df["alpha"] = alpha
-            dfs.append(df)
-
-        # OORT
-        elif file.startswith("oort_"):
+            if alpha not in ALPHAS:
+                continue
 
             df = pd.read_csv(path)
-            df["algorithm"] = "oort"
+
+            # =========================================
+            # 🔹 DATASET
+            # =========================================
+            if "cifar" in file:
+                df["dataset"] = "cifar"
+            elif "gtsrb" in file:
+                df["dataset"] = "gtsrb"
+            else:
+                raise ValueError(f"Dataset não identificado: {file}")
+
+            # =========================================
+            # 🔥 PROPOSTA
+            # =========================================
+            if file.startswith("proposta_k_"):
+
+                df["beta"] = beta
+                df["algorithm"] = f"dpfs_k{frac}_b{beta}"
+
+            # =========================================
+            # 🔥 BASELINE
+            # =========================================
+            elif file.startswith("baseline_"):
+
+                df["beta"] = beta
+                df["algorithm"] = f"baseline_f{frac}_b{beta}"
+
+            # =========================================
+            # 🔥 OUTROS
+            # =========================================
+            else:
+
+                alg_name = file.replace(".csv", "")
+                alg_name = alg_name.replace("_cifar", "").replace("_gtsrb", "")
+
+                df["algorithm"] = alg_name
+
             df["alpha"] = alpha
-            dfs.append(df)
 
-        # FAIRHETERO
-        elif file.startswith("fairhetero_"):
-
-            df = pd.read_csv(path)
-            df["algorithm"] = "fairhetero"
-            df["alpha"] = alpha
-            dfs.append(df)
-
-        # FEDBALANCER
-        elif file.startswith("fedbalancer_"):
-
-            df = pd.read_csv(path)
-            df["algorithm"] = "fedbalancer"
-            df["alpha"] = alpha
             dfs.append(df)
 
     if len(dfs) == 0:
@@ -372,7 +342,6 @@ def load_results():
 
     df = pd.concat(dfs, ignore_index=True)
 
-    # 🔥 filtro opcional
     df = filter_algorithms(df)
 
     return df
@@ -940,10 +909,17 @@ def plot_fairness_vs_accuracy(df):
     base_markers = ['o', 's', '^', 'D', 'P', '*', 'X', 'v']
 
     DPFS_BETAS = [0.1, 0.5, 1.0]
+
     DPFS_MARKERS = {
         0.1: 'o',
         0.5: 's',
         1.0: '^'
+    }
+
+    BASELINE_MARKERS = {
+        0.1: 'v',
+        0.5: 'D',
+        1.0: 'X'
     }
 
     DATASETS = ["cifar", "gtsrb"]
@@ -976,6 +952,8 @@ def plot_fairness_vs_accuracy(df):
                 alg: base_markers[i % len(base_markers)]
                 for i, alg in enumerate(all_algs)
             }
+
+            import re
 
             for i, alpha in enumerate(sorted(ALPHAS)):
                 for j, dataset in enumerate(DATASETS):
@@ -1015,7 +993,6 @@ def plot_fairness_vs_accuracy(df):
                         # =========================
                         if alg.startswith("dpfs_k"):
 
-                            import re
                             beta = float(re.search(r'b(\d+\.?\d*)', alg).group(1))
 
                             if beta not in DPFS_BETAS:
@@ -1023,6 +1000,13 @@ def plot_fairness_vs_accuracy(df):
 
                             color = "blue"
                             marker = DPFS_MARKERS[beta]
+
+                        elif alg.startswith("baseline_f"):
+
+                            beta = float(re.search(r'b(\d+\.?\d*)', alg).group(1))
+
+                            color = "red"
+                            marker = BASELINE_MARKERS.get(beta, 'o')
 
                         else:
                             color = color_map[alg]
@@ -1033,7 +1017,7 @@ def plot_fairness_vs_accuracy(df):
                             acc,
                             marker=marker,
                             color=color,
-                            s=90  # 🔥 ligeiramente maior
+                            s=90
                         )
 
                     # =========================
@@ -1059,9 +1043,7 @@ def plot_fairness_vs_accuracy(df):
                             fontsize=16
                         )
 
-                    # ticks maiores
                     ax.tick_params(axis='both', labelsize=12)
-
                     ax.set_xlim(0, 100)
                     ax.set_ylim(0, 100)
                     ax.grid()
@@ -1074,7 +1056,7 @@ def plot_fairness_vs_accuracy(df):
             legend_handles = []
             legend_labels = []
 
-            # DPFS
+            # 🔵 DPFS
             for beta in DPFS_BETAS:
                 handle = mlines.Line2D(
                     [], [],
@@ -1086,11 +1068,23 @@ def plot_fairness_vs_accuracy(df):
                 legend_handles.append(handle)
                 legend_labels.append(f"DPFS ($\\beta={beta}$)")
 
-            # OUTROS
+            # 🔴 BASELINE
+            for beta in [0.1, 0.5, 1.0]:
+                handle = mlines.Line2D(
+                    [], [],
+                    color="red",
+                    marker=BASELINE_MARKERS[beta],
+                    linestyle='None',
+                    markersize=14
+                )
+                legend_handles.append(handle)
+                legend_labels.append(f"MultiFedAvg ($\\beta={beta}$)")
+
+            # ⚪ OUTROS
             seen = set()
             for alg in all_algs:
 
-                if alg.startswith("dpfs_k"):
+                if alg.startswith("dpfs_k") or alg.startswith("baseline_f"):
                     continue
 
                 name = get_display_name(alg)
@@ -1117,7 +1111,7 @@ def plot_fairness_vs_accuracy(df):
                 loc="upper center",
                 bbox_to_anchor=(0.5, 0.94),
                 ncol=4,
-                fontsize=14
+                fontsize=12
             )
 
             metric_display = {
