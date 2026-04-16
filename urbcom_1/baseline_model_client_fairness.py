@@ -114,15 +114,19 @@ MODEL_COST_SETUPS = {
 # SELECT COST SETUP
 # =====================================================
 
-# DIRICHLET_ALPHA = 0.1
-DIRICHLET_ALPHA = 1.0
+# BETA = 0.1
+# BETA = 0.5
+BETA = 1.0
 
-COST_SETUP_NAME = "cost_1x"
-COST_SETUP_NAME = "cost_2x"
+DIRICHLET_ALPHA = 0.1
+# DIRICHLET_ALPHA = 1.0
+
+# COST_SETUP_NAME = "cost_1x"
+# COST_SETUP_NAME = "cost_2x"
 COST_SETUP_NAME = "cost_4x"
-COST_SETUP_NAME = "cost_6x"
-COST_SETUP_NAME = "cost_8x"
-COST_SETUP_NAME = "cost_10x"
+# COST_SETUP_NAME = "cost_6x"
+# COST_SETUP_NAME = "cost_8x"
+# COST_SETUP_NAME = "cost_10x"
 
 MODEL_COST = MODEL_COST_SETUPS[COST_SETUP_NAME]
 
@@ -131,15 +135,6 @@ MODEL_COST = MODEL_COST_SETUPS[COST_SETUP_NAME]
 # =====================================================
 
 training_time_cache = {}
-
-# =====================================================
-# FAIRNESS WEIGHTS (GLOBAL EXPERIMENT CONFIG)
-# =====================================================
-
-LAMBDA_CAPACITY = 0.3
-LAMBDA_INTRA = 0.3
-
-assert LAMBDA_CAPACITY + LAMBDA_INTRA <= 1.0
 
 # =====================================================
 # FAIR RESOURCE BUDGET
@@ -460,12 +455,10 @@ def append_result_to_csv(row_dict, filename):
 
 def clear_previous_results():
     for model_name in ["cifar", "gtsrb"]:
+        directory = f"{RESULTS_DIR}/frac_{FRAC}/alpha_dirichlet_{DIRICHLET_ALPHA}/beta_{BETA}/"
         filename = (
-            f"{RESULTS_DIR}/baseline_{model_name}"
-            f"_frac_{FRAC}"
-            f"_alpha_{DIRICHLET_ALPHA}"
-            f"_lambdaCap_{LAMBDA_CAPACITY}"
-            f"_lambdaIntra_{LAMBDA_INTRA}.csv"
+            f"{directory}"
+            f"baseline_{model_name}.csv"
         )
         if os.path.exists(filename):
             os.remove(filename)
@@ -494,35 +487,49 @@ def compute_caf_inter(
     client_resource_usage,
     training_time_cache,
     model_names,
-    gamma=0.5,
-    eps=1e-8,
-    alpha_eff=0.5
+    beta=BETA,
+    eps=1e-8
 ):
+
+    # -------- pré-computações globais --------
+    total_speed = sum(client_resources[cid]["speed"] for cid in client_resources)
+
+    # soma de dados por modelo
+    total_data_per_model = {
+        m: sum(client_resources[cid][f"data_size_{m}"] for cid in client_resources)
+        for m in model_names
+    }
 
     utility = []
     usage = []
 
     for cid in client_resources:
 
-        w_data = 0.0
+        gamma_k = 0.0
+
+        v_k = client_resources[cid]["speed"]
 
         for m in model_names:
-            n = client_resources[cid][f"data_size_{m}"]
-            speed = client_resources[cid]["speed"]
+
+            n_km = client_resources[cid][f"data_size_{m}"]
+            total_n_m = total_data_per_model[m]
             flops = MODEL_COST[m]["flops_per_sample"]
 
-            if flops < eps:
+            if total_n_m < eps or flops < eps:
                 continue
 
-            # 🔥 NOVA MÉTRICA CORRETA
-            w_data += ((n * speed) / flops) ** alpha_eff
+            data_share = n_km / total_n_m
+            capacity_share = v_k / total_speed
+            cost_term = 1.0 / flops
 
-        if w_data < eps:
+            gamma_k += (data_share * capacity_share * cost_term) ** beta
+
+        if gamma_k < eps:
             continue
 
         use = sum(client_resource_usage[cid][m] for m in model_names)
 
-        utility.append(w_data)
+        utility.append(gamma_k)
         usage.append(use)
 
     if len(utility) == 0:
@@ -548,7 +555,7 @@ def compute_caf_intra(
     training_time_cache,
     model_names,
     eps=1e-8,
-    alpha_eff=0.5
+    beta=BETA
 ):
 
     total_weight = 0.0
@@ -559,18 +566,30 @@ def compute_caf_intra(
         weights = []
         usages = []
 
-        for m in model_names:
-            n = client_resources[cid][f"data_size_{m}"]
-            u = client_resource_usage[cid][m]
+        # total de dados do cliente (entre modelos)
+        total_data_client = sum(
+            client_resources[cid][f"data_size_{m}"]
+            for m in model_names
+        )
 
-            speed = client_resources[cid]["speed"]
+        if total_data_client < eps:
+            continue
+
+        for m in model_names:
+
+            n_km = client_resources[cid][f"data_size_{m}"]
+            u = client_resource_usage[cid][m]
             flops = MODEL_COST[m]["flops_per_sample"]
 
             if flops < eps:
                 continue
 
-            # 🔥 NOVA DEFINIÇÃO
-            weights.append(((n * speed) / flops) ** alpha_eff)
+            data_share = n_km / total_data_client
+            cost_term = 1.0 / flops
+
+            gamma_km = (data_share * cost_term) ** beta
+
+            weights.append(gamma_km)
             usages.append(u)
 
         if len(weights) == 0:
@@ -594,13 +613,8 @@ def compute_caf_intra(
 
         J = num / den if den > 0 else 1.0
 
-        total_data = sum(
-            client_resources[cid][f"data_size_{m}"]
-            for m in model_names
-        )
-
-        weighted_sum += total_data * J
-        total_weight += total_data
+        weighted_sum += total_data_client * J
+        total_weight += total_data_client
 
     return weighted_sum / total_weight if total_weight > 0 else 1.0
 
@@ -837,14 +851,15 @@ def run_experiment():
                 client_resource_usage,
                 training_time_cache,
                 model_names,
-                gamma=0.5
+                beta=BETA
             )
 
             intra_client_fairness = compute_caf_intra(
                 client_resources,
                 client_resource_usage,
                 training_time_cache,
-                model_names
+                model_names,
+                beta=BETA
             )
 
             # =====================================================
@@ -910,13 +925,14 @@ def run_experiment():
                     "intra_client_fairness": logs["intra_client_fairness"][-1],
                 }
 
+                directory = f"{RESULTS_DIR}/frac_{FRAC}/alpha_dirichlet_{DIRICHLET_ALPHA}/beta_{BETA}/"
                 filename = (
-                    f"{RESULTS_DIR}/baseline_{model_name}"
-                    f"_frac_{FRAC}"
-                    f"_alpha_{DIRICHLET_ALPHA}"
-                    f"_lambdaCap_{LAMBDA_CAPACITY}"
-                    f"_lambdaIntra_{LAMBDA_INTRA}.csv"
+                            f"{directory}"
+                            f"baseline_{model_name}.csv"
                 )
+
+                os.makedirs(directory, exist_ok=True)
+
                 append_result_to_csv(row_data, filename)
 
             # =====================================================
