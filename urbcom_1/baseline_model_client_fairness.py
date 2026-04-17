@@ -115,11 +115,11 @@ MODEL_COST_SETUPS = {
 # =====================================================
 
 # BETA = 0.1
-# BETA = 0.5
-BETA = 1.0
+BETA = 0.5
+# BETA = 1.0
 
-DIRICHLET_ALPHA = 0.1
-# DIRICHLET_ALPHA = 1.0
+# DIRICHLET_ALPHA = 0.1
+DIRICHLET_ALPHA = 1.0
 
 # COST_SETUP_NAME = "cost_1x"
 # COST_SETUP_NAME = "cost_2x"
@@ -488,13 +488,17 @@ def compute_caf_inter(
     training_time_cache,
     model_names,
     beta=BETA,
-    eps=1e-8
+    eps=1e-16
 ):
+
+    # -------- referência de custo (normalização) --------
+    flops_ref = min(
+        MODEL_COST[m]["flops_per_sample"] for m in model_names
+    )
 
     # -------- pré-computações globais --------
     total_speed = sum(client_resources[cid]["speed"] for cid in client_resources)
 
-    # soma de dados por modelo
     total_data_per_model = {
         m: sum(client_resources[cid][f"data_size_{m}"] for cid in client_resources)
         for m in model_names
@@ -503,10 +507,10 @@ def compute_caf_inter(
     utility = []
     usage = []
 
+    # -------- cálculo por cliente --------
     for cid in client_resources:
 
         gamma_k = 0.0
-
         v_k = client_resources[cid]["speed"]
 
         for m in model_names:
@@ -515,18 +519,18 @@ def compute_caf_inter(
             total_n_m = total_data_per_model[m]
             flops = MODEL_COST[m]["flops_per_sample"]
 
-            if total_n_m < eps or flops < eps:
+            if total_n_m <= 0 or flops <= 0:
                 continue
 
             data_share = n_km / total_n_m
-            capacity_share = v_k / total_speed
-            cost_term = 1.0 / flops
+            capacity_share = v_k / (total_speed + eps)
+
+            # 🔥 NORMALIZADO (evita valores ~1e-10)
+            cost_term = flops_ref / flops
 
             gamma_k += (data_share * capacity_share * cost_term) ** beta
 
-        if gamma_k < eps:
-            continue
-
+        # 🔥 NÃO descartar cliente
         use = sum(client_resource_usage[cid][m] for m in model_names)
 
         utility.append(gamma_k)
@@ -547,16 +551,21 @@ def compute_caf_inter(
     num = (sum(ratios) ** 2)
     den = len(ratios) * sum(r**2 for r in ratios)
 
-    return num / den if den > 0 else 1.0
+    return num / (den + eps)
 
 def compute_caf_intra(
     client_resources,
     client_resource_usage,
     training_time_cache,
     model_names,
-    eps=1e-8,
-    beta=BETA
+    beta=BETA,
+    eps=1e-16
 ):
+
+    # -------- referência de custo --------
+    flops_ref = min(
+        MODEL_COST[m]["flops_per_sample"] for m in model_names
+    )
 
     total_weight = 0.0
     weighted_sum = 0.0
@@ -566,13 +575,12 @@ def compute_caf_intra(
         weights = []
         usages = []
 
-        # total de dados do cliente (entre modelos)
         total_data_client = sum(
             client_resources[cid][f"data_size_{m}"]
             for m in model_names
         )
 
-        if total_data_client < eps:
+        if total_data_client <= 0:
             continue
 
         for m in model_names:
@@ -581,11 +589,13 @@ def compute_caf_intra(
             u = client_resource_usage[cid][m]
             flops = MODEL_COST[m]["flops_per_sample"]
 
-            if flops < eps:
+            if flops <= 0:
                 continue
 
             data_share = n_km / total_data_client
-            cost_term = 1.0 / flops
+
+            # 🔥 MESMA NORMALIZAÇÃO DO INTER
+            cost_term = flops_ref / flops
 
             gamma_km = (data_share * cost_term) ** beta
 
@@ -595,11 +605,8 @@ def compute_caf_intra(
         if len(weights) == 0:
             continue
 
-        total_w = sum(weights)
-        total_u = sum(usages)
-
-        if total_w < eps or total_u < eps:
-            continue
+        total_w = sum(weights) + eps
+        total_u = sum(usages) + eps
 
         ratios = []
         for w, u in zip(weights, usages):
@@ -608,15 +615,16 @@ def compute_caf_intra(
             ratios.append(act / (exp + eps))
 
         M = len(ratios)
+
         num = (sum(ratios) ** 2)
         den = M * sum(r**2 for r in ratios)
 
-        J = num / den if den > 0 else 1.0
+        J = num / (den + eps)
 
         weighted_sum += total_data_client * J
         total_weight += total_data_client
 
-    return weighted_sum / total_weight if total_weight > 0 else 1.0
+    return weighted_sum / (total_weight + eps)
 
 def run_experiment():
 
