@@ -222,7 +222,34 @@ def plot_all():
 
 def extract_metrics(df):
 
+    # 🔥 evitar SettingWithCopyWarning
+    df = df.copy()
+
+    # =========================
+    # CLEAN ROUND
+    # =========================
+    df["round"] = pd.to_numeric(df["round"], errors="coerce")
+    df = df.dropna(subset=["round"])
+    df["round"] = df["round"].astype(int)
+
+    # =========================
+    # CLEAN METRICS
+    # =========================
+    numeric_cols = [
+        "global_acc",
+        "inter_client_fairness",
+        "intra_client_fairness"
+    ]
+
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # remove linhas inválidas
+    df = df.dropna(subset=numeric_cols)
+
     rows = []
+
+    # df["round"] = df["round"].astype(int)
 
     for alg in df["algorithm"].unique():
 
@@ -252,6 +279,9 @@ all_data = []
 for cost in COST_RATIOS:
 
     df = load_results(cost)
+
+    print(df)
+    # exit()
 
     if df is None:
         print(f"Sem dados: {cost}")

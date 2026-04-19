@@ -60,6 +60,18 @@ SELECTED_ALGORITHMS = [
     # "baseline_f0.5"
 ]
 
+# =====================================================
+# 🔥 MARKERS POR BETA (GLOBAL)
+# =====================================================
+
+BETA_MARKERS = {
+    0.1: 'o',
+    0.5: 's',
+    1.0: '^'
+}
+
+BASE_MARKERS = ['D', 'P', 'X', 'v', '*']  # fallback
+
 def filter_algorithms(df):
 
     if SELECTED_ALGORITHMS is None:
@@ -67,17 +79,23 @@ def filter_algorithms(df):
 
     selected = set(SELECTED_ALGORITHMS)
 
+    import re
+
     def keep(alg):
 
-        # mantém TODOS DPFS
+        # DPFS → sempre mantém
         if alg.startswith("dpfs_k"):
             return True
 
-        # 🔥 mantém TODOS baseline (independente do beta)
+        # BASELINE → sempre mantém
         if alg.startswith("baseline_f"):
             return True
 
-        return alg in selected
+        # 🔥 remove alpha e beta
+        base_alg = re.sub(r'_a\d+\.?\d*', '', alg)
+        base_alg = re.sub(r'_b\d+\.?\d*', '', base_alg)
+
+        return base_alg in selected
 
     return df[df["algorithm"].apply(keep)]
 
@@ -175,8 +193,8 @@ TEXTS = {
         "cifar": "CIFAR",
         "gtsrb": "GTSRB",
         "mean_fairness_col": "Mean Fairness",
-        "inter_client": "(IRCPF-Inter)",
-        "intra_client": "(IRCPF-Intra)",
+        "inter_client": "(EPF-Inter)",
+        "intra_client": "(EPF-Intra)",
         "inter_model": "Inter-Model",
         "total_resource": "Total Resource",
     },
@@ -270,7 +288,6 @@ BASELINE_FRACS = [0.2, 0.3, 0.4, 0.5]
 def load_results():
 
     dfs = []
-
     import re
 
     for root, dirs, files in os.walk(RESULTS_DIR):
@@ -283,66 +300,127 @@ def load_results():
             path = os.path.join(root, file)
 
             # =========================================
-            # 🔹 EXTRAÇÃO ROBUSTA (CORRIGIDA)
+            # EXTRAÇÃO (ROBUSTA)
             # =========================================
-            try:
-                frac = float(re.search(r'frac_(\d+\.?\d*)', root).group(1))
-                alpha = float(re.search(r'alpha_dirichlet_(\d+\.?\d*)', root).group(1))
-                beta = float(re.search(r'beta_(\d+\.?\d*)', root).group(1))
-            except:
+
+            frac = None
+            alpha = None
+            beta = None
+
+            frac_match = re.search(r'frac_(\d+\.?\d*)', root)
+            alpha_match = re.search(r'alpha_dirichlet_(\d+\.?\d*)', root)
+            beta_match = re.search(r'beta_(\d+\.?\d*)', root)
+
+            if frac_match:
+                frac = float(frac_match.group(1))
+
+            if alpha_match:
+                alpha = float(alpha_match.group(1))
+
+            if beta_match:
+                beta = float(beta_match.group(1))
+
+            # fallback filename
+            if frac is None:
+                m = re.search(r'f(\d+\.?\d*)', file)
+                if m:
+                    frac = float(m.group(1))
+
+            if beta is None:
+                m = re.search(r'b(\d+\.?\d*)', file)
+                if m:
+                    beta = float(m.group(1))
+
+            if alpha is None:
+                print(f"⚠️ Ignorado (sem alpha): {path}")
                 continue
 
             if alpha not in ALPHAS:
                 continue
 
-            df = pd.read_csv(path)
+            if frac is None:
+                frac = FRAC
 
             # =========================================
-            # 🔹 DATASET
+            # LEITURA
             # =========================================
-            if "cifar" in file:
+            try:
+                df = pd.read_csv(path)
+            except Exception as e:
+                print(f"❌ Erro lendo {path}: {e}")
+                continue
+
+            # =========================================
+            # DATASET
+            # =========================================
+            fname = file.lower()
+
+            if "cifar" in fname:
                 df["dataset"] = "cifar"
-            elif "gtsrb" in file:
+            elif "gtsrb" in fname:
                 df["dataset"] = "gtsrb"
             else:
-                raise ValueError(f"Dataset não identificado: {file}")
+                print(f"⚠️ Dataset não identificado: {file}")
+                continue
 
             # =========================================
-            # 🔥 PROPOSTA
+            # 🔥 IDENTIFICAÇÃO + ALPHA EMBUTIDO
             # =========================================
-            if file.startswith("proposta_k_"):
 
-                df["beta"] = beta
-                df["algorithm"] = f"dpfs_k{frac}_b{beta}"
+            name = file.replace(".csv", "").lower()
+            name = name.replace("_cifar", "").replace("_gtsrb", "")
 
-            # =========================================
-            # 🔥 BASELINE
-            # =========================================
-            elif file.startswith("baseline_"):
+            # DPFS
+            if name.startswith("proposta_k"):
+                alg = f"dpfs_k{frac}_b{beta}"
 
-                df["beta"] = beta
-                df["algorithm"] = f"baseline_f{frac}_b{beta}"
+            # BASELINE
+            elif name.startswith("baseline"):
+                alg = f"baseline_f{frac}_b{beta}" if beta is not None else f"baseline_f{frac}"
 
-            # =========================================
-            # 🔥 OUTROS
-            # =========================================
+            elif name.startswith("fedbalancer"):
+                alg = f"fedbalancer_b{beta}_a{alpha}"
+
+            elif name.startswith("fairhetero"):
+                alg = f"fairhetero_b{beta}_a{alpha}"
+
+            elif name.startswith("oort"):
+                alg = f"oort_b{beta}_a{alpha}"
+
+            # FEDFAIRMMFL
+            elif name.startswith("fedfairmmfl"):
+                alg = f"fedfairmmfl_b{beta}_a{alpha}"
+
             else:
+                alg = name
+                print(f"⚠️ Algoritmo desconhecido: {name}")
 
-                alg_name = file.replace(".csv", "")
-                alg_name = alg_name.replace("_cifar", "").replace("_gtsrb", "")
-
-                df["algorithm"] = alg_name
-
+            # =========================================
+            # METADADOS
+            # =========================================
+            df["algorithm"] = alg
             df["alpha"] = alpha
+            df["beta"] = beta
+            df["frac"] = frac
 
             dfs.append(df)
 
     if len(dfs) == 0:
-        raise ValueError("Nenhum CSV encontrado.")
+        raise ValueError("❌ Nenhum CSV encontrado.")
 
     df = pd.concat(dfs, ignore_index=True)
 
+    print("\n==============================")
+    print("ALGORITHMS ENCONTRADOS:")
+    print(sorted(df["algorithm"].unique()))
+    print("==============================\n")
+
     df = filter_algorithms(df)
+
+    print("\n==============================")
+    print("APÓS FILTRO:")
+    print(sorted(df["algorithm"].unique()))
+    print("==============================\n")
 
     return df
 
@@ -581,8 +659,8 @@ def plot_accuracy(df):
 def plot_fairness(df):
 
     metric_display = {
-        "inter_client_fairness": "(IRCPF-Inter)",
-        "intra_client_fairness": "(IRCPF-Intra)",
+        "inter_client_fairness": "(EPF-Inter)",
+        "intra_client_fairness": "(EPF-Intra)",
         "inter_model_fairness": "Inter-Model"
     }
 
@@ -620,8 +698,8 @@ def plot_fairness(df):
 def plot_cumulative_fairness(df):
 
     metric_display = {
-        "inter_client_fairness": "(IRCPF-Inter)",
-        "intra_client_fairness": "(IRCPF-Intra)",
+        "inter_client_fairness": "(EPF-Inter)",
+        "intra_client_fairness": "(EPF-Intra)",
         "inter_model_fairness": "Inter-Model"
     }
 
@@ -904,25 +982,35 @@ def compute_pareto_score(point, pareto_front):
 
     return score
 
+def get_base_algorithm(alg):
+
+    if alg.startswith("dpfs_k"):
+        return "dpfs"
+
+    if alg.startswith("baseline_f"):
+        return "baseline"
+
+    if alg.startswith("fedfairmmfl"):
+        return "fedfairmmfl"
+
+    if alg.startswith("fedbalancer"):
+        return "fedbalancer"
+
+    if alg.startswith("fairhetero"):
+        return "fairhetero"
+
+    if alg.startswith("oort"):
+        return "oort"
+
+    return alg
+
 def plot_fairness_vs_accuracy(df):
 
-    base_markers = ['o', 's', '^', 'D', 'P', '*', 'X', 'v']
-
-    DPFS_BETAS = [0.1, 0.5, 1.0]
-
-    DPFS_MARKERS = {
-        0.1: 'o',
-        0.5: 's',
-        1.0: '^'
-    }
-
-    BASELINE_MARKERS = {
-        0.1: 'v',
-        0.5: 'D',
-        1.0: 'X'
-    }
-
     DATASETS = ["cifar", "gtsrb"]
+    LAST_N_ROUNDS = 5  # ajuste aqui (ex: 5, 10, etc.)
+
+    import re
+    import matplotlib.lines as mlines
 
     for metric in FAIRNESS_METRICS:
 
@@ -941,26 +1029,42 @@ def plot_fairness_vs_accuracy(df):
             if len(ALPHAS) == 1:
                 axes = [axes]
 
-            all_algs = list(df["algorithm"].unique())
+            # ordem correta dos algoritmos
+            ordered_algs = get_algorithm_order(df)
+
+            # 🔥 extrai base_algs preservando ordem
+            base_algs = []
+            seen = set()
+
+            for alg in ordered_algs:
+                base = get_base_algorithm(alg)
+                if base not in seen:
+                    base_algs.append(base)
+                    seen.add(base)
 
             color_map = {
-                alg: plt.cm.tab10(i % 10)
-                for i, alg in enumerate(all_algs)
+                base_alg: plt.cm.tab10(i % 10)
+                for i, base_alg in enumerate(base_algs)
             }
 
-            marker_map = {
-                alg: base_markers[i % len(base_markers)]
-                for i, alg in enumerate(all_algs)
+            # =====================================================
+            # 🔹 MARKERS FIXOS POR ALGORITMO
+            # =====================================================
+            base_marker_map = {
+                base_alg: BASE_MARKERS[i % len(BASE_MARKERS)]
+                for i, base_alg in enumerate(base_algs)
             }
 
-            import re
-
+            # =====================================================
+            # 🔹 PLOT
+            # =====================================================
             for i, alpha in enumerate(sorted(ALPHAS)):
                 for j, dataset in enumerate(DATASETS):
 
                     ax = axes[i][j]
 
                     df_alpha = df[df["alpha"] == alpha]
+
                     algs = sorted(df_alpha["algorithm"].unique())
 
                     for alg in algs:
@@ -970,140 +1074,130 @@ def plot_fairness_vs_accuracy(df):
                         if len(subset) == 0:
                             continue
 
-                        final = (
-                            subset
-                            .sort_values("round")
-                            .groupby(["dataset"])
-                            .tail(1)
-                        )
+                        # =====================================================
+                        # 🔥 NOVO: MÉDIA DAS ÚLTIMAS X RODADAS
+                        # =====================================================
 
-                        final_ds = final[final["dataset"] == dataset]
+                        subset_ds = subset[subset["dataset"] == dataset]
+
+                        if len(subset_ds) == 0:
+                            continue
+
+                        # ordenar por rodada
+                        subset_ds = subset_ds.sort_values("round")
+
+                        # pegar rounds únicos
+                        rounds = subset_ds["round"].unique()
+
+                        if len(rounds) == 0:
+                            continue
+
+                        # últimas X rodadas
+                        last_rounds = rounds[-LAST_N_ROUNDS:]
+
+                        final_ds = subset_ds[
+                            subset_ds["round"].isin(last_rounds)
+                        ]
 
                         if len(final_ds) == 0:
                             continue
 
+                        # média (rodadas + execuções)
                         fairness_val = final_ds[metric].mean() * 100
                         acc = final_ds["global_acc"].mean() * 100
 
                         if np.isnan(acc):
                             continue
 
-                        # =========================
-                        # VISUAL
-                        # =========================
-                        if alg.startswith("dpfs_k"):
+                        # -------------------------
+                        # β (se existir)
+                        # -------------------------
+                        match = re.search(r'b(\d+\.?\d*)', alg)
+                        beta = float(match.group(1)) if match else None
 
-                            beta = float(re.search(r'b(\d+\.?\d*)', alg).group(1))
+                        # -------------------------
+                        # COR
+                        # -------------------------
+                        base_alg = get_base_algorithm(alg)
+                        color = color_map[base_alg]
 
-                            if beta not in DPFS_BETAS:
-                                continue
-
-                            color = "blue"
-                            marker = DPFS_MARKERS[beta]
-
-                        elif alg.startswith("baseline_f"):
-
-                            beta = float(re.search(r'b(\d+\.?\d*)', alg).group(1))
-
-                            color = "red"
-                            marker = BASELINE_MARKERS.get(beta, 'o')
-
+                        # -------------------------
+                        # MARKER
+                        # -------------------------
+                        if beta in BETA_MARKERS:
+                            marker = BETA_MARKERS[beta]
                         else:
-                            color = color_map[alg]
-                            marker = marker_map[alg]
+                            marker = base_marker_map[base_alg]
 
                         ax.scatter(
                             fairness_val,
                             acc,
                             marker=marker,
                             color=color,
+                            edgecolors='black',
+                            linewidths=0.5,
                             s=90
                         )
 
-                    # =========================
-                    # TÍTULO DOS SUBPLOTS
-                    # =========================
+                    # -------------------------
+                    # EIXOS
+                    # -------------------------
                     ax.set_title(
                         f"$\\alpha={alpha}$ | {dataset.upper()}",
                         fontsize=14
                     )
 
-                    # =========================
-                    # EIXOS
-                    # =========================
                     if i == len(ALPHAS) - 1:
-                        ax.set_xlabel(
-                            texts["fairness"] + " (%)",
-                            fontsize=16
-                        )
+                        ax.set_xlabel(texts["fairness"] + " (%)", fontsize=14)
 
                     if j == 0:
-                        ax.set_ylabel(
-                            texts["accuracy"] + " (%)",
-                            fontsize=16
-                        )
+                        ax.set_ylabel(texts["accuracy"] + " (%)", fontsize=14)
 
-                    ax.tick_params(axis='both', labelsize=12)
                     ax.set_xlim(0, 100)
                     ax.set_ylim(0, 100)
                     ax.grid()
 
             # =====================================================
-            # LEGENDA GLOBAL
+            # 🔹 LEGENDA
             # =====================================================
-            import matplotlib.lines as mlines
-
             legend_handles = []
             legend_labels = []
 
-            # 🔵 DPFS
-            for beta in DPFS_BETAS:
+            # β → shapes
+            for beta, marker in BETA_MARKERS.items():
                 handle = mlines.Line2D(
                     [], [],
-                    color="blue",
-                    marker=DPFS_MARKERS[beta],
+                    color="black",
+                    marker=marker,
                     linestyle='None',
-                    markersize=14
+                    markersize=10,
+                    markerfacecolor='none',
+                    markeredgewidth=1.5
                 )
                 legend_handles.append(handle)
-                legend_labels.append(f"DPFS ($\\beta={beta}$)")
+                legend_labels.append(f"$\\beta={beta}$")
 
-            # 🔴 BASELINE
-            for beta in [0.1, 0.5, 1.0]:
-                handle = mlines.Line2D(
-                    [], [],
-                    color="red",
-                    marker=BASELINE_MARKERS[beta],
-                    linestyle='None',
-                    markersize=14
-                )
-                legend_handles.append(handle)
-                legend_labels.append(f"MultiFedAvg ($\\beta={beta}$)")
-
-            # ⚪ OUTROS
-            seen = set()
-            for alg in all_algs:
-
-                if alg.startswith("dpfs_k") or alg.startswith("baseline_f"):
-                    continue
-
-                name = get_display_name(alg)
-
-                if name in seen:
-                    continue
-
-                seen.add(name)
+            # algoritmos → cores
+            for base_alg in base_algs:
 
                 handle = mlines.Line2D(
                     [], [],
-                    color=color_map[alg],
-                    marker=marker_map[alg],
+                    color=color_map[base_alg],
+                    marker='o',
                     linestyle='None',
-                    markersize=14
+                    markersize=10
                 )
 
                 legend_handles.append(handle)
-                legend_labels.append(name)
+
+                if base_alg == "dpfs":
+                    legend_labels.append("DPFS")
+                elif base_alg == "baseline":
+                    legend_labels.append("MultiFedAvg")
+                elif base_alg == "fedfairmmfl":
+                    legend_labels.append("FedFairMMFL")
+                else:
+                    legend_labels.append(base_alg.capitalize())
 
             fig.legend(
                 legend_handles,
@@ -1115,19 +1209,16 @@ def plot_fairness_vs_accuracy(df):
             )
 
             metric_display = {
-                "inter_client_fairness": "IRCPF-Inter",
-                "intra_client_fairness": "IRCPF-Intra",
+                "inter_client_fairness": "EPF-Inter",
+                "intra_client_fairness": "EPF-Intra",
                 "inter_model_fairness": "Inter-Model"
             }
 
-            # =====================================================
-            # TÍTULO PRINCIPAL
-            # =====================================================
             plt.suptitle(
                 f"{texts['fairness']} vs {texts['accuracy']} "
-                f"({metric_display.get(metric, format_metric_name(metric))})",
+                f"({metric_display.get(metric, metric)})",
                 y=0.97,
-                fontsize=18
+                fontsize=16
             )
 
             plt.tight_layout(rect=[0, 0, 1, 0.90])
