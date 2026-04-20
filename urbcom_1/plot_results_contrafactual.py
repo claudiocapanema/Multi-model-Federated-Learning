@@ -13,9 +13,11 @@ from pathlib import Path
 
 VERSIONS = [
     "traditional",
-    "remove_random",
+    "remove_random_inter",
     "remove_top_gamma_inter",
-    "remove_top_gamma_intra"
+
+    "remove_random_intra",
+    "remove_top_gamma_intra",
 ]
 
 REMOVAL_FRACTIONS = [0.0, 0.1, 0.2, 0.3]

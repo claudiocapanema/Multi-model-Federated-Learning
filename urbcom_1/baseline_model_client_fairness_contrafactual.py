@@ -122,9 +122,12 @@ BETA = 1.0
 
 VERSIONS = [
     "traditional",
-    "remove_random",
+
+    "remove_random_inter",
     "remove_top_gamma_inter",
-    "remove_top_gamma_intra"
+
+    "remove_random_intra",
+    "remove_top_gamma_intra",
 ]
 
 version = VERSIONS[1]
@@ -260,10 +263,7 @@ def estimate_training_time(cid, model_name):
     # speed já entra aqui → NÃO repetir na fairness
     train_time = total_flops / (1e7 * speed)
 
-    # ruído realista
-    noise = np.random.uniform(0.9, 1.1)
-
-    return train_time * noise
+    return train_time
 
 # =====================================================
 # RESET DO ESTADO GLOBAL (POR FOLD)
@@ -495,99 +495,82 @@ def compute_utilities():
 
     return util_cifar, util_gtsrb
 
+def get_random_clients_from_pool(pool, fraction):
+    n = int(len(pool) * fraction)
+    if n == 0:
+        return set()
+    return set(random.sample(pool, n))
+
 def compute_caf_inter(
     client_resources,
     client_resource_usage,
-    training_time_cache,
+    gamma_inter,
     model_names,
-    beta=BETA,
     eps=1e-16
 ):
 
-    # -------- referência de custo (normalização) --------
-    flops_ref = min(
-        MODEL_COST[m]["flops_per_sample"] for m in model_names
-    )
-
-    # -------- pré-computações globais --------
-    total_speed = sum(client_resources[cid]["speed"] for cid in client_resources)
-
-    total_data_per_model = {
-        m: sum(client_resources[cid][f"data_size_{m}"] for cid in client_resources)
-        for m in model_names
-    }
-
-    utility = []
+    gamma = []
     usage = []
 
-    # -------- cálculo por cliente --------
+    # -----------------------------
+    # coleta γ_k e u_k
+    # -----------------------------
     for cid in client_resources:
 
-        gamma_k = 0.0
-        v_k = client_resources[cid]["speed"]
+        gamma_k = gamma_inter[cid]
 
-        for m in model_names:
+        u_k = sum(client_resource_usage[cid][m] for m in model_names)
 
-            n_km = client_resources[cid][f"data_size_{m}"]
-            total_n_m = total_data_per_model[m]
-            flops = MODEL_COST[m]["flops_per_sample"]
+        gamma.append(gamma_k)
+        usage.append(u_k)
 
-            if total_n_m <= 0 or flops <= 0:
-                continue
-
-            data_share = n_km / total_n_m
-            capacity_share = v_k / (total_speed + eps)
-
-            # 🔥 NORMALIZADO (evita valores ~1e-10)
-            cost_term = flops_ref / flops
-
-            gamma_k += (data_share * capacity_share * cost_term) ** beta
-
-        # 🔥 NÃO descartar cliente
-        use = sum(client_resource_usage[cid][m] for m in model_names)
-
-        utility.append(gamma_k)
-        usage.append(use)
-
-    if len(utility) == 0:
+    if len(gamma) == 0:
         return 1.0
 
-    total_util = sum(utility) + eps
+    total_gamma = sum(gamma) + eps
     total_usage = sum(usage) + eps
 
-    ratios = []
-    for i in range(len(utility)):
-        expected = utility[i] / total_util
-        actual = usage[i] / total_usage
-        ratios.append(actual / (expected + eps))
+    rho = []
 
-    num = (sum(ratios) ** 2)
-    den = len(ratios) * sum(r**2 for r in ratios)
+    # -----------------------------
+    # ρ_k = observed / expected
+    # -----------------------------
+    for g, u in zip(gamma, usage):
 
-    return num / (den + eps)
+        u_hat = g / total_gamma
+        u_tilde = u / total_usage
+
+        rho_k = u_tilde / (u_hat + eps)
+
+        rho.append(rho_k)
+
+    # -----------------------------
+    # Jain Index
+    # -----------------------------
+    num = (sum(rho)) ** 2
+    den = len(rho) * sum(r ** 2 for r in rho) + eps
+
+    fairness = num / den
+
+    return max(0.0, min(1.0, fairness))
 
 def compute_caf_intra(
     client_resources,
     client_resource_usage,
-    training_time_cache,
+    gamma_intra,
     model_names,
-    beta=BETA,
     eps=1e-16
 ):
-
-    # -------- referência de custo --------
-    flops_ref = min(
-        MODEL_COST[m]["flops_per_sample"] for m in model_names
-    )
 
     total_weight = 0.0
     weighted_sum = 0.0
 
     for cid in client_resources:
 
-        weights = []
-        usages = []
+        gamma_km = []
+        usage_km = []
 
+        # peso = total de dados do cliente
         total_data_client = sum(
             client_resources[cid][f"data_size_{m}"]
             for m in model_names
@@ -596,59 +579,66 @@ def compute_caf_intra(
         if total_data_client <= 0:
             continue
 
+        # -----------------------------
+        # coleta γ_km e u_km
+        # -----------------------------
         for m in model_names:
 
-            n_km = client_resources[cid][f"data_size_{m}"]
+            g = gamma_intra[cid][m]
             u = client_resource_usage[cid][m]
-            flops = MODEL_COST[m]["flops_per_sample"]
 
-            if flops <= 0:
-                continue
+            gamma_km.append(g)
+            usage_km.append(u)
 
-            data_share = n_km / total_data_client
+        total_gamma = sum(gamma_km) + eps
+        total_usage = sum(usage_km) + eps
 
-            # 🔥 MESMA NORMALIZAÇÃO DO INTER
-            cost_term = flops_ref / flops
+        rho = []
 
-            gamma_km = (data_share * cost_term) ** beta
+        # -----------------------------
+        # ρ_km
+        # -----------------------------
+        for g, u in zip(gamma_km, usage_km):
 
-            weights.append(gamma_km)
-            usages.append(u)
+            u_hat = g / total_gamma
+            u_tilde = u / total_usage
 
-        if len(weights) == 0:
-            continue
+            rho_km = u_tilde / (u_hat + eps)
 
-        total_w = sum(weights) + eps
-        total_u = sum(usages) + eps
+            rho.append(rho_km)
 
-        ratios = []
-        for w, u in zip(weights, usages):
-            exp = w / total_w
-            act = u / total_u
-            ratios.append(act / (exp + eps))
+        # -----------------------------
+        # Jain por cliente
+        # -----------------------------
+        num = (sum(rho)) ** 2
+        den = len(rho) * sum(r ** 2 for r in rho) + eps
 
-        M = len(ratios)
+        F_k = num / den
+        F_k = max(0.0, min(1.0, F_k))
 
-        num = (sum(ratios) ** 2)
-        den = M * sum(r**2 for r in ratios)
-
-        J = num / (den + eps)
-
-        weighted_sum += total_data_client * J
+        # -----------------------------
+        # média ponderada (paper)
+        # -----------------------------
+        weighted_sum += total_data_client * F_k
         total_weight += total_data_client
 
     return weighted_sum / (total_weight + eps)
 
-def compute_gamma_inter_static():
+def compute_gamma_inter_static(beta=BETA, eps=1e-16):
 
     model_names = list(MODEL_COST.keys())
 
-    flops_ref = min(MODEL_COST[m]["flops_per_sample"] for m in model_names)
+    # ---------------------------------------
+    # Normalizações globais
+    # ---------------------------------------
+    total_speed = sum(client_resources[cid]["speed"] for cid in client_resources) + eps
 
-    total_speed = sum(client_resources[cid]["speed"] for cid in client_resources)
+    inv_flops = {m: 1.0 / MODEL_COST[m]["flops_per_sample"] for m in model_names}
+    total_inv_flops = sum(inv_flops.values()) + eps
 
+    # normalização por modelo (dados)
     total_data_per_model = {
-        m: sum(client_resources[cid][f"data_size_{m}"] for cid in client_resources)
+        m: sum(client_resources[cid][f"data_size_{m}"] for cid in client_resources) + eps
         for m in model_names
     }
 
@@ -656,63 +646,74 @@ def compute_gamma_inter_static():
 
     for cid in client_resources:
 
-        gamma_k = 0.0
         v_k = client_resources[cid]["speed"]
+        v_tilde = v_k / total_speed
+
+        gamma_k = 0.0
 
         for m in model_names:
 
             n_km = client_resources[cid][f"data_size_{m}"]
-            total_n_m = total_data_per_model[m]
-            flops = MODEL_COST[m]["flops_per_sample"]
 
-            if total_n_m <= 0 or flops <= 0:
-                continue
+            # ñ_k^me (normalização por modelo)
+            n_tilde = n_km / total_data_per_model[m]
 
-            data_share = n_km / total_n_m
-            capacity_share = v_k / (total_speed + 1e-16)
+            # c̃^me
+            c_tilde = inv_flops[m] / total_inv_flops
 
-            cost_term = flops_ref / flops
+            term = n_tilde * v_tilde * c_tilde
 
-            gamma_k += (data_share * capacity_share * cost_term) ** BETA
+            if term > 0:
+                gamma_k += (term) ** beta
 
-        gamma_inter[cid] = gamma_k
+        gamma_inter[cid] = max(gamma_k, eps)
 
     return gamma_inter
 
-def compute_gamma_intra_static():
+def compute_gamma_intra_static(beta=BETA, eps=1e-16):
 
     model_names = list(MODEL_COST.keys())
 
-    flops_ref = min(MODEL_COST[m]["flops_per_sample"] for m in model_names)
+    # ---------------------------------------
+    # Normalizações globais
+    # ---------------------------------------
+    total_speed = sum(client_resources[cid]["speed"] for cid in client_resources) + eps
+
+    inv_flops = {m: 1.0 / MODEL_COST[m]["flops_per_sample"] for m in model_names}
+    total_inv_flops = sum(inv_flops.values()) + eps
 
     gamma_intra = {}
 
     for cid in client_resources:
 
-        values = []
+        gamma_intra[cid] = {}
 
-        total_data = sum(
-            client_resources[cid][f"data_size_{m}"]
-            for m in model_names
-        )
+        v_k = client_resources[cid]["speed"]
+        v_tilde = v_k / total_speed
 
-        if total_data == 0:
-            gamma_intra[cid] = 0.0
-            continue
+        # normalização por cliente (dados)
+        total_data_client = sum(
+            client_resources[cid][f"data_size_{m}"] for m in model_names
+        ) + eps
 
         for m in model_names:
 
             n_km = client_resources[cid][f"data_size_{m}"]
-            flops = MODEL_COST[m]["flops_per_sample"]
 
-            data_share = n_km / total_data
-            cost_term = flops_ref / flops
+            # ñ_k^me (normalização intra)
+            n_tilde = n_km / total_data_client
 
-            gamma_km = (data_share * cost_term) ** BETA
+            # c̃^me
+            c_tilde = inv_flops[m] / total_inv_flops
 
-            values.append(gamma_km)
+            term = n_tilde * v_tilde * c_tilde
 
-        gamma_intra[cid] = max(values)
+            if term > 0:
+                gamma_km = (term) ** beta
+            else:
+                gamma_km = eps
+
+            gamma_intra[cid][m] = max(gamma_km, eps)
 
     return gamma_intra
 
@@ -762,6 +763,204 @@ def get_random_clients(fraction=0.2):
         return set()
     return set(random.sample(range(TOTAL_CLIENTS), n))
 
+def get_eligible_clients(version, base_clients, gamma_inter, gamma_intra, removal_fraction):
+
+    if version == "traditional":
+        return base_clients
+
+    elif version == "remove_top_gamma_inter":
+        removed = get_top_gamma_clients(
+            {cid: gamma_inter[cid] for cid in base_clients},
+            removal_fraction
+        )
+        return [cid for cid in base_clients if cid not in removed]
+
+    elif version == "remove_random_inter":
+        removed = get_random_clients_from_pool(base_clients, removal_fraction)
+        return [cid for cid in base_clients if cid not in removed]
+
+    elif version == "remove_top_gamma_intra":
+        removed = get_top_gamma_clients(
+            {cid: max(gamma_intra[cid].values()) for cid in base_clients},
+            removal_fraction
+        )
+        return [cid for cid in base_clients if cid not in removed]
+
+    elif version == "remove_random_intra":
+        removed = get_random_clients_from_pool(base_clients, removal_fraction)
+        return [cid for cid in base_clients if cid not in removed]
+
+    else:
+        return base_clients
+
+def get_blocked_models(version, selected_clients, gamma_intra, removal_fraction, round_seed):
+
+    blocked = {}
+
+    k = int(len(selected_clients) * removal_fraction)
+    if k == 0:
+        return blocked
+
+    # 🔹 RNG global só para escolher quem será afetado
+    rng_global = random.Random(round_seed)
+
+    affected = rng_global.sample(selected_clients, k)
+
+    # =====================================================
+    # REMOVE TOP GAMMA INTRA
+    # =====================================================
+    if version == "remove_top_gamma_intra":
+
+        for cid in affected:
+            gamma_km = gamma_intra[cid]
+
+            # 🔥 tie-break determinístico por cliente (evita padrões globais)
+            items = list(gamma_km.items())
+
+            items.sort(
+                key=lambda x: (
+                    -x[1],                          # maior gamma primeiro
+                    hash((cid, round_seed, x[0]))   # desempate consistente
+                )
+            )
+
+            blocked[cid] = items[0][0]
+
+    # =====================================================
+    # REMOVE RANDOM INTRA
+    # =====================================================
+    elif version == "remove_random_intra":
+
+        for cid in affected:
+
+            # 🔥 RNG independente por cliente (remove correlação)
+            local_rng = random.Random(hash((cid, round_seed)))
+
+            options = list(gamma_intra[cid].keys())
+
+            blocked[cid] = local_rng.choice(options)
+
+    return blocked
+
+def assign_clients_to_models(all_clients, blocked_model, round_seed):
+
+    rng = random.Random(round_seed)
+
+    k = int(FRAC * TOTAL_CLIENTS)
+    half = k // 2
+
+    # -------------------------------------------------
+    # 1. separa clientes por restrição
+    # -------------------------------------------------
+    free_clients = []
+    only_cifar = []
+    only_gtsrb = []
+
+    for cid in all_clients:
+
+        if cid in blocked_model:
+            blocked = blocked_model[cid]
+
+            if blocked == "cifar":
+                only_gtsrb.append(cid)
+
+            elif blocked == "gtsrb":
+                only_cifar.append(cid)
+
+        else:
+            free_clients.append(cid)
+
+    # embaralha tudo (IMPORTANTE)
+    rng.shuffle(free_clients)
+    rng.shuffle(only_cifar)
+    rng.shuffle(only_gtsrb)
+
+    # -------------------------------------------------
+    # 2. alocação forçada (clientes com restrição)
+    # -------------------------------------------------
+    clients_cifar = []
+    clients_gtsrb = []
+
+    # primeiro, encaixa os restritos
+    clients_cifar.extend(only_cifar[:half])
+    clients_gtsrb.extend(only_gtsrb[:half])
+
+    # -------------------------------------------------
+    # 3. completa com livres
+    # -------------------------------------------------
+    needed_cifar = half - len(clients_cifar)
+    needed_gtsrb = half - len(clients_gtsrb)
+
+    if needed_cifar > 0:
+        clients_cifar.extend(free_clients[:needed_cifar])
+        free_clients = free_clients[needed_cifar:]
+
+    if needed_gtsrb > 0:
+        clients_gtsrb.extend(free_clients[:needed_gtsrb])
+        free_clients = free_clients[needed_gtsrb:]
+
+    # -------------------------------------------------
+    # 4. ajuste final se k for ímpar
+    # -------------------------------------------------
+    if len(clients_cifar) + len(clients_gtsrb) < k and len(free_clients) > 0:
+        clients_cifar.append(free_clients.pop())
+
+    # -------------------------------------------------
+    # 5. sanity check forte
+    # -------------------------------------------------
+    assert len(clients_cifar) + len(clients_gtsrb) == k, \
+        f"Erro: esperado {k}, obtido {len(clients_cifar) + len(clients_gtsrb)}"
+
+    return clients_cifar, clients_gtsrb
+
+def get_blocked_model_top_gamma(gamma_intra_static, clients):
+
+    blocked = {}
+
+    for cid in clients:
+        gamma_km = gamma_intra_static[cid]
+        blocked[cid] = max(gamma_km, key=gamma_km.get)
+
+    return blocked
+
+def deterministic_choice(cid, round_seed, options):
+    local_rng = random.Random(hash((cid, round_seed)))
+    return local_rng.choice(options)
+
+def get_removed_clients(version, all_clients, gamma_inter, removal_fraction, round_seed):
+
+    removed = set()
+
+    k = int(len(all_clients) * removal_fraction)
+    if k == 0:
+        return removed
+
+    rng = random.Random(round_seed)
+
+    # =====================================================
+    # REMOVE RANDOM INTER
+    # =====================================================
+    if version == "remove_random_inter":
+
+        removed = set(rng.sample(all_clients, k))
+
+    # =====================================================
+    # REMOVE TOP GAMMA INTER
+    # =====================================================
+    elif version == "remove_top_gamma_inter":
+
+        gamma_pool = {cid: gamma_inter[cid] for cid in all_clients}
+
+        # ordena determinístico (tie-break incluído)
+        sorted_clients = sorted(
+            gamma_pool.items(),
+            key=lambda x: (-x[1], hash((x[0], round_seed)))
+        )
+
+        removed = set([cid for cid, _ in sorted_clients[:k]])
+
+    return removed
+
 def run_experiment():
 
     # =====================================================
@@ -798,12 +997,7 @@ def run_experiment():
             # =====================================================
             # 🔥 BASE SELECTION (CONTRAFATUAL CORRETO)
             # =====================================================
-            base_selection = generate_base_selection(
-                seed=fold_seed,
-                total_clients=TOTAL_CLIENTS,
-                rounds=ROUNDS,
-                frac=FRAC
-            )
+            all_clients = list(range(TOTAL_CLIENTS))
 
             # =====================================================
             # CRIAÇÃO DOS DATALOADERS POR CLIENTE
@@ -852,6 +1046,54 @@ def run_experiment():
 
             gamma_inter_static = compute_gamma_inter_static()
             gamma_intra_static = compute_gamma_intra_static()
+
+            # =====================================================
+            # 🔥 STATIC CONTRAFACTUAL SETUP (INTER + INTRA)
+            # =====================================================
+
+            rng_static = random.Random(fold_seed)
+
+            all_clients = list(range(TOTAL_CLIENTS))
+            k = int(len(all_clients) * removal_fraction)
+
+            # ---------------------------
+            # INTER (clientes removidos)
+            # ---------------------------
+            removed_clients_static = set()
+
+            if version == "remove_random_inter":
+
+                if k > 0:
+                    removed_clients_static = set(rng_static.sample(all_clients, k))
+
+            elif version == "remove_top_gamma_inter":
+
+                sorted_clients = sorted(
+                    gamma_inter_static.items(),
+                    key=lambda x: -x[1]
+                )
+
+                removed_clients_static = set([cid for cid, _ in sorted_clients[:k]])
+
+            # ---------------------------
+            # INTRA (clientes afetados)
+            # ---------------------------
+            affected_clients_static = set()
+            blocked_model_static = {}
+
+            if version in ["remove_random_intra", "remove_top_gamma_intra"]:
+
+                if k > 0:
+                    affected_clients_static = set(rng_static.sample(all_clients, k))
+
+                for cid in affected_clients_static:
+
+                    if version == "remove_random_intra":
+                        blocked_model_static[cid] = rng_static.choice(list(MODEL_COST.keys()))
+
+                    elif version == "remove_top_gamma_intra":
+                        gamma_km = gamma_intra_static[cid]
+                        blocked_model_static[cid] = max(gamma_km, key=gamma_km.get)
 
             # =====================================================
             # TRACK DE EFICIÊNCIA POR MODELO (CORRETO)
@@ -907,86 +1149,48 @@ def run_experiment():
                 # Balanced Resource + Fairness entre clientes
                 # =====================================================
 
-                clients_cifar = []
-                clients_gtsrb = []
+                removed_clients = set()
+                affected_clients = set()
+                blocked_model = {}
 
-                # controle de budget por rodada
-                resource_usage = {
-                    "cifar": 0.0,
-                    "gtsrb": 0.0
+                rng = random.Random(round_seed)
+
+                # ---------------------------
+                # INTER (fixo)
+                # ---------------------------
+                removed_clients = {
+                    cid for cid in removed_clients_static
                 }
 
-                # =====================================================
-                # CONTRAFACTUAL — DEFINIR CLIENTES REMOVIDOS
-                # =====================================================
-
-                # =====================================================
-                # CONTRAFACTUAL — DEFINIR CLIENTES REMOVIDOS
-                # =====================================================
-
-                if version == "remove_top_gamma_inter":
-
-                    removed_clients = get_top_gamma_clients(
-                        gamma_inter_static,
-                        fraction=removal_fraction
-                    )
-
-
-                elif version == "remove_top_gamma_intra":
-
-                    removed_clients = get_top_gamma_clients(
-
-                        gamma_intra_static,
-
-                        fraction=removal_fraction
-
-                    )
-
-                elif version == "remove_random":
-
-                    removed_clients = random_removed_static
-
-                else:  # traditional
-                    removed_clients = set()
-
-                # =====================================================
-                # 🔥 CONTRAFACTUAL CORRETO — MESMA SELEÇÃO BASE
-                # =====================================================
-
-                base_clients = base_selection[rnd]
-
-                # intervenção: apenas remove
                 selected_clients = [
-                    cid for cid in base_clients
+                    cid for cid in all_clients
                     if cid not in removed_clients
                 ]
 
-                # =====================================================
-                # 🔥 CONTROLE DE TAMANHO (Sugestão 6)
-                # =====================================================
+                # ---------------------------
+                # INTRA (fixo)
+                # ---------------------------
+                blocked_model = {
+                    cid: blocked_model_static[cid]
+                    for cid in selected_clients
+                    if cid in blocked_model_static
+                }
 
-                needed = len(base_clients)
+                # -------------------------------------------------
+                # ALOCAÇÃO FINAL
+                # -------------------------------------------------
+                clients_cifar, clients_gtsrb = assign_clients_to_models(
+                    selected_clients,
+                    blocked_model,
+                    round_seed
+                )
 
-                # 🔴 versão causal PURA (RECOMENDADO)
-                # não compensa — deixa faltar clientes
-                # (mantém intervenção limpa)
-                # -> não faz nada
+                all_assigned = set(clients_cifar) | set(clients_gtsrb)
 
-                # 🟡 versão alternativa (se quiser mesmo tamanho):
-                # completar com clientes fora do base (NÃO recomendado para causalidade pura)
-                # remaining = [cid for cid in range(TOTAL_CLIENTS) if cid not in base_clients and cid not in removed_clients]
-                # selected_clients += remaining[: max(0, needed - len(selected_clients))]
+                missing = set(all_clients) - all_assigned
 
-                # =====================================================
-                # 🔥 SPLIT DETERMINÍSTICO
-                # =====================================================
-
-                clients_sorted = sorted(selected_clients)
-
-                half = len(clients_sorted) // 2
-
-                clients_cifar = clients_sorted[:half]
-                clients_gtsrb = clients_sorted[half:]
+                if len(missing) > 0:
+                    print("🚨 CLIENTES PERDIDOS:", missing)
 
                 # controle de recurso (mantido só para logging)
                 resource_usage = {
@@ -1074,17 +1278,15 @@ def run_experiment():
                 inter_client_fairness = compute_caf_inter(
                     client_resources,
                     client_resource_usage,
-                    training_time_cache,
-                    model_names,
-                    beta=BETA
+                    gamma_inter_static,  # ✅ CORRETO
+                    model_names
                 )
 
                 intra_client_fairness = compute_caf_intra(
                     client_resources,
                     client_resource_usage,
-                    training_time_cache,
-                    model_names,
-                    beta=BETA
+                    gamma_intra_static,  # ✅ CORRETO
+                    model_names
                 )
 
                 # =====================================================
