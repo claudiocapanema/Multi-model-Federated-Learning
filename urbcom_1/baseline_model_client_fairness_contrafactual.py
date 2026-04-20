@@ -114,7 +114,11 @@ MODEL_COST_SETUPS = {
 # CONTRAFACTUAL FRACTIONS (SENSITIVITY ANALYSIS)
 # =====================================================
 
-REMOVAL_FRACTIONS = [0.0, 0.1, 0.2, 0.3]
+REMOVAL_FRACTIONS = [0.1, 0.2, 0.3]
+# REMOVAL_FRACTIONS = [0.0]
+# REMOVAL_FRACTIONS = [0.1]
+# REMOVAL_FRACTIONS = [0.2]
+# REMOVAL_FRACTIONS = [0.3]
 
 # BETA = 0.1
 # BETA = 0.5
@@ -130,10 +134,25 @@ VERSIONS = [
     "remove_top_gamma_intra",
 ]
 
-version = VERSIONS[1]
+# =====================================================
+# ABLATION MODES (NOVO)
+# =====================================================
+
+# ABLATION_MODE = "data_only"
+# ABLATION_MODE = "speed_only"
+# ABLATION_MODE = "cost_only"
+ABLATION_MODE = "full"
+
+version = VERSIONS[4]
 
 # DIRICHLET_ALPHA = 0.1
 DIRICHLET_ALPHA = 1.0
+
+if ABLATION_MODE == "data_only":
+    DIRICHLET_ALPHA = 0.1  # alta heterogeneidade
+
+elif ABLATION_MODE in ["speed_only", "cost_only"]:
+    DIRICHLET_ALPHA = 10.0  # quase IID
 
 # COST_SETUP_NAME = "cost_1x"
 # COST_SETUP_NAME = "cost_2x"
@@ -186,7 +205,7 @@ COST_RATIO, COST_RATIO_STR_FILE, COST_RATIO_STR_BR = compute_cost_ratio()
 # DIRETÓRIO DE RESULTADOS (COM RATIO)
 # =====================================================
 
-RESULTS_DIR = f"results/gtsrb_{COST_RATIO_STR_FILE}_cifar/"
+RESULTS_DIR = f"results/{ABLATION_MODE}/gtsrb_{COST_RATIO_STR_FILE}_cifar/"
 Path(RESULTS_DIR).mkdir(parents=True, exist_ok=True)
 
 # =====================================================
@@ -297,8 +316,10 @@ def reset_experiment_state(train_loaders):
 
     client_resources = {
         cid: {
-            "speed": float(np.clip(np.random.lognormal(-0.3, 0.6), 0.2, 2.0)),
-
+            "speed": (
+                1.0 if ABLATION_MODE in ["data_only", "cost_only"]
+                else float(np.clip(np.random.lognormal(-0.3, 0.6), 0.2, 2.0))
+            ),
             "data_size_cifar": len(train_loaders[cid]["cifar"].dataset),
             "data_size_gtsrb": len(train_loaders[cid]["gtsrb"].dataset),
         }
@@ -468,10 +489,18 @@ def append_result_to_csv(row_dict, filename):
 
 def clear_previous_results(removal_fraction):
     for model_name in ["cifar", "gtsrb"]:
-        directory = f"{RESULTS_DIR}/frac_{FRAC}/alpha_dirichlet_{DIRICHLET_ALPHA}/beta_{BETA}/"
+        directory = (
+            f"{RESULTS_DIR}/"
+            f"frac_{FRAC}/"
+            f"alpha_{DIRICHLET_ALPHA}/"
+            f"beta_{BETA}/"
+            f"{version}/"
+            f"removal_{removal_fraction}/"
+            f"ablation_mode_{ABLATION_MODE}/"
+        )
         filename = (
             f"{directory}"
-            f"baseline_contrafactual_{version}_frac{removal_fraction}_{model_name}.csv"
+            f"baseline_contrafactual_{model_name}.csv"
         )
         if os.path.exists(filename):
             os.remove(filename)
@@ -509,50 +538,43 @@ def compute_caf_inter(
     eps=1e-16
 ):
 
-    gamma = []
     usage = []
+    gamma = []
 
     # -----------------------------
-    # coleta γ_k e u_k
+    # coleta u_k e γ_k
     # -----------------------------
     for cid in client_resources:
 
-        gamma_k = gamma_inter[cid]
-
         u_k = sum(client_resource_usage[cid][m] for m in model_names)
+        g_k = gamma_inter[cid]
 
-        gamma.append(gamma_k)
         usage.append(u_k)
+        gamma.append(g_k)
 
-    if len(gamma) == 0:
+    usage = np.array(usage, dtype=np.float64)
+    gamma = np.array(gamma, dtype=np.float64)
+
+    if usage.sum() <= 0:
         return 1.0
 
-    total_gamma = sum(gamma) + eps
-    total_usage = sum(usage) + eps
-
-    rho = []
+    # -----------------------------
+    # distribuições
+    # -----------------------------
+    u_tilde = usage / (usage.sum() + eps)
+    g_hat = gamma / (gamma.sum() + eps)
 
     # -----------------------------
-    # ρ_k = observed / expected
+    # KL divergence
     # -----------------------------
-    for g, u in zip(gamma, usage):
-
-        u_hat = g / total_gamma
-        u_tilde = u / total_usage
-
-        rho_k = u_tilde / (u_hat + eps)
-
-        rho.append(rho_k)
+    kl = np.sum(u_tilde * np.log((u_tilde + eps) / (g_hat + eps)))
 
     # -----------------------------
-    # Jain Index
+    # transforma em fairness
     # -----------------------------
-    num = (sum(rho)) ** 2
-    den = len(rho) * sum(r ** 2 for r in rho) + eps
+    fairness = np.exp(-kl)
 
-    fairness = num / den
-
-    return max(0.0, min(1.0, fairness))
+    return float(max(0.0, min(1.0, fairness)))
 
 def compute_caf_intra(
     client_resources,
@@ -567,8 +589,8 @@ def compute_caf_intra(
 
     for cid in client_resources:
 
-        gamma_km = []
-        usage_km = []
+        usage = []
+        gamma = []
 
         # peso = total de dados do cliente
         total_data_client = sum(
@@ -580,49 +602,34 @@ def compute_caf_intra(
             continue
 
         # -----------------------------
-        # coleta γ_km e u_km
+        # coleta u_km e γ_km
         # -----------------------------
         for m in model_names:
-
-            g = gamma_intra[cid][m]
             u = client_resource_usage[cid][m]
+            g = gamma_intra[cid][m]
 
-            gamma_km.append(g)
-            usage_km.append(u)
+            usage.append(u)
+            gamma.append(g)
 
-        total_gamma = sum(gamma_km) + eps
-        total_usage = sum(usage_km) + eps
+        usage = np.array(usage, dtype=np.float64)
+        gamma = np.array(gamma, dtype=np.float64)
 
-        rho = []
+        if usage.sum() <= 0:
+            F_k = 0.0  # cliente não participou → penalização máxima
+        else:
+            u_tilde = usage / (usage.sum() + eps)
+            g_hat = gamma / (gamma.sum() + eps)
 
-        # -----------------------------
-        # ρ_km
-        # -----------------------------
-        for g, u in zip(gamma_km, usage_km):
-
-            u_hat = g / total_gamma
-            u_tilde = u / total_usage
-
-            rho_km = u_tilde / (u_hat + eps)
-
-            rho.append(rho_km)
+            kl = np.sum(u_tilde * np.log((u_tilde + eps) / (g_hat + eps)))
+            F_k = np.exp(-kl)
 
         # -----------------------------
-        # Jain por cliente
-        # -----------------------------
-        num = (sum(rho)) ** 2
-        den = len(rho) * sum(r ** 2 for r in rho) + eps
-
-        F_k = num / den
-        F_k = max(0.0, min(1.0, F_k))
-
-        # -----------------------------
-        # média ponderada (paper)
+        # média ponderada
         # -----------------------------
         weighted_sum += total_data_client * F_k
         total_weight += total_data_client
 
-    return weighted_sum / (total_weight + eps)
+    return float(weighted_sum / (total_weight + eps))
 
 def compute_gamma_inter_static(beta=BETA, eps=1e-16):
 
@@ -761,86 +768,6 @@ def get_random_clients(fraction=0.2):
     n = int(TOTAL_CLIENTS * fraction)
     if n == 0:
         return set()
-    return set(random.sample(range(TOTAL_CLIENTS), n))
-
-def get_eligible_clients(version, base_clients, gamma_inter, gamma_intra, removal_fraction):
-
-    if version == "traditional":
-        return base_clients
-
-    elif version == "remove_top_gamma_inter":
-        removed = get_top_gamma_clients(
-            {cid: gamma_inter[cid] for cid in base_clients},
-            removal_fraction
-        )
-        return [cid for cid in base_clients if cid not in removed]
-
-    elif version == "remove_random_inter":
-        removed = get_random_clients_from_pool(base_clients, removal_fraction)
-        return [cid for cid in base_clients if cid not in removed]
-
-    elif version == "remove_top_gamma_intra":
-        removed = get_top_gamma_clients(
-            {cid: max(gamma_intra[cid].values()) for cid in base_clients},
-            removal_fraction
-        )
-        return [cid for cid in base_clients if cid not in removed]
-
-    elif version == "remove_random_intra":
-        removed = get_random_clients_from_pool(base_clients, removal_fraction)
-        return [cid for cid in base_clients if cid not in removed]
-
-    else:
-        return base_clients
-
-def get_blocked_models(version, selected_clients, gamma_intra, removal_fraction, round_seed):
-
-    blocked = {}
-
-    k = int(len(selected_clients) * removal_fraction)
-    if k == 0:
-        return blocked
-
-    # 🔹 RNG global só para escolher quem será afetado
-    rng_global = random.Random(round_seed)
-
-    affected = rng_global.sample(selected_clients, k)
-
-    # =====================================================
-    # REMOVE TOP GAMMA INTRA
-    # =====================================================
-    if version == "remove_top_gamma_intra":
-
-        for cid in affected:
-            gamma_km = gamma_intra[cid]
-
-            # 🔥 tie-break determinístico por cliente (evita padrões globais)
-            items = list(gamma_km.items())
-
-            items.sort(
-                key=lambda x: (
-                    -x[1],                          # maior gamma primeiro
-                    hash((cid, round_seed, x[0]))   # desempate consistente
-                )
-            )
-
-            blocked[cid] = items[0][0]
-
-    # =====================================================
-    # REMOVE RANDOM INTRA
-    # =====================================================
-    elif version == "remove_random_intra":
-
-        for cid in affected:
-
-            # 🔥 RNG independente por cliente (remove correlação)
-            local_rng = random.Random(hash((cid, round_seed)))
-
-            options = list(gamma_intra[cid].keys())
-
-            blocked[cid] = local_rng.choice(options)
-
-    return blocked
 
 def assign_clients_to_models(all_clients, blocked_model, round_seed):
 
@@ -1132,7 +1059,7 @@ def run_experiment():
                     "gtsrb": []
                 }
 
-                print(f"\n🔄 FOLD {fold} | RODADA {rnd} | REMOVAL FRACTION {removal_fraction} | VERSION {version}")
+                print(f"\n🔄 FOLD {fold} | RODADA {rnd} | REMOVAL FRACTION {removal_fraction} | VERSION {version} | Ablation {ABLATION_MODE}")
 
                 # =====================================================
                 # ATUALIZA TRAINING TIME CACHE (1x por rodada)
@@ -1421,10 +1348,18 @@ def run_experiment():
                         "efficiency_global_mean": efficiency_global_mean,
                     }
 
-                    directory = f"{RESULTS_DIR}/frac_{FRAC}/alpha_dirichlet_{DIRICHLET_ALPHA}/beta_{BETA}/"
+                    directory = (
+                        f"{RESULTS_DIR}/"
+                        f"frac_{FRAC}/"
+                        f"alpha_{DIRICHLET_ALPHA}/"
+                        f"beta_{BETA}/"
+                        f"{version}/"
+                        f"removal_{removal_fraction}/"
+                        f"ablation_mode_{ABLATION_MODE}/"
+                    )
                     filename = (
                         f"{directory}"
-                        f"baseline_contrafactual_{version}_frac{removal_fraction}_{model_name}.csv"
+                        f"baseline_contrafactual_{model_name}.csv"
                     )
 
                     os.makedirs(directory, exist_ok=True)
