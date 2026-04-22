@@ -118,8 +118,8 @@ MODEL_COST_SETUPS = {
 # BETA = 0.5
 BETA = 1.0
 
-# DIRICHLET_ALPHA = 0.1
-DIRICHLET_ALPHA = 1.0
+DIRICHLET_ALPHA = 0.1
+# DIRICHLET_ALPHA = 1.0
 
 # COST_SETUP_NAME = "cost_1x"
 # COST_SETUP_NAME = "cost_2x"
@@ -757,12 +757,16 @@ def run_experiment():
             random.shuffle(all_clients)
 
             # =====================================================
-            # 🔥 FAIRNESS-AWARE SELECTION (INTER + INTRA)
+            # 🔥 JOINT FAIRNESS-AWARE SELECTION (INTER + INTRA)
             # =====================================================
 
             model_names = list(global_models.keys())
+            num_models = len(model_names)
+            num_per_model = K_CLIENTS // num_models
 
-            # -------- normalização atual --------
+            # -----------------------------
+            # 🔹 NORMALIZAÇÃO GLOBAL
+            # -----------------------------
             total_usage = sum(
                 sum(client_resource_usage[cid][m] for m in model_names)
                 for cid in range(NUM_CLIENTS)
@@ -771,7 +775,7 @@ def run_experiment():
             if total_usage == 0:
                 total_usage = 1.0
 
-            # u_k atual
+            # u_k (observado)
             u_k = {
                 cid: sum(client_resource_usage[cid][m] for m in model_names) / total_usage
                 for cid in range(NUM_CLIENTS)
@@ -786,39 +790,17 @@ def run_experiment():
                 for cid in range(NUM_CLIENTS)
             }
 
-            # -------- déficit inter --------
-            deficit_inter = {
-                cid: g_hat[cid] - u_k[cid]
-                for cid in range(NUM_CLIENTS)
-            }
+            # -----------------------------
+            # 🔹 COMPUTAR SCORE JOINT (k, m)
+            # -----------------------------
+            pair_scores = []
 
-            # -------- seleciona top-K por déficit --------
-            selected_clients = sorted(
-                deficit_inter.keys(),
-                key=lambda cid: deficit_inter[cid],
-                reverse=True
-            )[:K_CLIENTS]
+            for cid in range(NUM_CLIENTS):
 
-            clients_cifar = []
-            clients_gtsrb = []
+                # -------- inter deficit --------
+                delta_inter = g_hat[cid] - u_k[cid]
 
-            # =====================================================
-            # 🔥 DECISÃO DE MODELO (INTRA)
-            # =====================================================
-            # =====================================================
-            # 🔥 FAIRNESS + BALANCEAMENTO POR MODELO
-            # =====================================================
-
-            num_per_model = K_CLIENTS // 2
-
-            clients_cifar = []
-            clients_gtsrb = []
-
-            # -------- calcular déficits intra para todos --------
-            client_model_scores = []
-
-            for cid in selected_clients:
-
+                # -------- intra --------
                 usage_k = np.array([
                     client_resource_usage[cid][m]
                     for m in model_names
@@ -836,53 +818,87 @@ def run_experiment():
 
                 g_km = gamma_km / (gamma_km.sum() + 1e-16)
 
-                deficit_intra = g_km - u_km
+                delta_intra = g_km - u_km
 
-                # salva score por modelo
-                client_model_scores.append({
-                    "cid": cid,
-                    "cifar_score": deficit_intra[model_names.index("cifar")],
-                    "gtsrb_score": deficit_intra[model_names.index("gtsrb")]
-                })
+                # -------- score por modelo --------
+                for i, m in enumerate(model_names):
+                    score = delta_inter + delta_intra[i]
 
-            # =====================================================
-            # 🔥 ALOCAÇÃO BALANCEADA
-            # =====================================================
+                    pair_scores.append({
+                        "cid": cid,
+                        "model": m,
+                        "score": score
+                    })
 
-            # ordena separadamente
-            cifar_sorted = sorted(client_model_scores, key=lambda x: x["cifar_score"], reverse=True)
-            gtsrb_sorted = sorted(client_model_scores, key=lambda x: x["gtsrb_score"], reverse=True)
+            # -----------------------------
+            # 🔹 SORT GLOBAL (k, m)
+            # -----------------------------
+            pair_scores = sorted(pair_scores, key=lambda x: x["score"], reverse=True)
 
-            assigned = set()
+            # -----------------------------
+            # 🔹 SELEÇÃO COM CAPACIDADE
+            # -----------------------------
+            assigned_clients = set()
+            model_count = {m: 0 for m in model_names}
 
-            # -------- preencher CIFAR --------
-            for item in cifar_sorted:
-                if len(clients_cifar) >= num_per_model:
-                    break
+            clients_cifar = []
+            clients_gtsrb = []
+
+            for item in pair_scores:
+
                 cid = item["cid"]
-                if cid not in assigned:
-                    clients_cifar.append(cid)
-                    assigned.add(cid)
+                m = item["model"]
 
-            # -------- preencher GTSRB --------
-            for item in gtsrb_sorted:
-                if len(clients_gtsrb) >= num_per_model:
+                # restrição: 1 modelo por cliente
+                if cid in assigned_clients:
+                    continue
+
+                # restrição: capacidade do modelo
+                if model_count[m] >= num_per_model:
+                    continue
+
+                # aceita
+                assigned_clients.add(cid)
+                model_count[m] += 1
+
+                if m == "cifar":
+                    clients_cifar.append(cid)
+                else:
+                    clients_gtsrb.append(cid)
+
+                # parada
+                if len(assigned_clients) == K_CLIENTS:
                     break
-                cid = item["cid"]
-                if cid not in assigned:
-                    clients_gtsrb.append(cid)
-                    assigned.add(cid)
 
-            # =====================================================
-            # 🔥 FALLBACK (caso algo fique faltando)
-            # =====================================================
-            remaining = [cid for cid in selected_clients if cid not in assigned]
+            # -----------------------------
+            # 🔹 FALLBACK (segurança)
+            # -----------------------------
+            remaining_clients = [cid for cid in range(NUM_CLIENTS) if cid not in assigned_clients]
 
-            for cid in remaining:
-                if len(clients_cifar) < num_per_model:
-                    clients_cifar.append(cid)
-                elif len(clients_gtsrb) < num_per_model:
-                    clients_gtsrb.append(cid)
+            for cid in remaining_clients:
+
+                for m in model_names:
+                    if model_count[m] < num_per_model and cid not in assigned_clients:
+
+                        assigned_clients.add(cid)
+                        model_count[m] += 1
+
+                        if m == "cifar":
+                            clients_cifar.append(cid)
+                        else:
+                            clients_gtsrb.append(cid)
+
+                if len(assigned_clients) == K_CLIENTS:
+                    break
+
+            # -----------------------------
+            # 🔹 ATUALIZA USO
+            # -----------------------------
+            for cid in clients_cifar:
+                client_resource_usage[cid]["cifar"] += 1.0
+
+            for cid in clients_gtsrb:
+                client_resource_usage[cid]["gtsrb"] += 1.0
 
             # =====================================================
             # 🔥 ATUALIZA USO (IMPORTANTE)
