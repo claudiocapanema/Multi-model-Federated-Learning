@@ -115,8 +115,8 @@ MODEL_COST_SETUPS = {
 # =====================================================
 
 # BETA = 0.1
-BETA = 0.5
-# BETA = 1.0
+# BETA = 0.5
+BETA = 1.0
 
 # DIRICHLET_ALPHA = 0.1
 DIRICHLET_ALPHA = 1.0
@@ -485,96 +485,58 @@ def compute_utilities():
 def compute_caf_inter(
     client_resources,
     client_resource_usage,
-    training_time_cache,
+    gamma_inter,
     model_names,
-    beta=BETA,
     eps=1e-16
 ):
 
-    # -------- referência de custo (normalização) --------
-    flops_ref = min(
-        MODEL_COST[m]["flops_per_sample"] for m in model_names
-    )
-
-    # -------- pré-computações globais --------
-    total_speed = sum(client_resources[cid]["speed"] for cid in client_resources)
-
-    total_data_per_model = {
-        m: sum(client_resources[cid][f"data_size_{m}"] for cid in client_resources)
-        for m in model_names
-    }
-
-    utility = []
     usage = []
+    gamma = []
 
-    # -------- cálculo por cliente --------
     for cid in client_resources:
+        u_k = sum(client_resource_usage[cid][m] for m in model_names)
+        g_k = gamma_inter[cid]
 
-        gamma_k = 0.0
-        v_k = client_resources[cid]["speed"]
+        usage.append(u_k)
+        gamma.append(g_k)
 
-        for m in model_names:
+    usage = np.array(usage, dtype=np.float64)
+    gamma = np.array(gamma, dtype=np.float64)
 
-            n_km = client_resources[cid][f"data_size_{m}"]
-            total_n_m = total_data_per_model[m]
-            flops = MODEL_COST[m]["flops_per_sample"]
-
-            if total_n_m <= 0 or flops <= 0:
-                continue
-
-            data_share = n_km / total_n_m
-            capacity_share = v_k / (total_speed + eps)
-
-            # 🔥 NORMALIZADO (evita valores ~1e-10)
-            cost_term = flops_ref / flops
-
-            gamma_k += (data_share * capacity_share * cost_term) ** beta
-
-        # 🔥 NÃO descartar cliente
-        use = sum(client_resource_usage[cid][m] for m in model_names)
-
-        utility.append(gamma_k)
-        usage.append(use)
-
-    if len(utility) == 0:
+    if usage.sum() <= 0:
         return 1.0
 
-    total_util = sum(utility) + eps
-    total_usage = sum(usage) + eps
+    u_tilde = usage / (usage.sum() + eps)
+    g_hat = gamma / (gamma.sum() + eps)
 
-    ratios = []
-    for i in range(len(utility)):
-        expected = utility[i] / total_util
-        actual = usage[i] / total_usage
-        ratios.append(actual / (expected + eps))
+    # 🔥 normalized relative error
+    denom = np.maximum(u_tilde, g_hat) + eps
+    rel_error = np.abs(u_tilde - g_hat) / denom
 
-    num = (sum(ratios) ** 2)
-    den = len(ratios) * sum(r**2 for r in ratios)
+    # 🔥 weighted aggregation
+    deviation = np.sum(g_hat * rel_error)
 
-    return num / (den + eps)
+    fairness = 1.0 - deviation
+
+    return float(max(0.0, min(1.0, fairness)))
 
 def compute_caf_intra(
     client_resources,
     client_resource_usage,
-    training_time_cache,
+    gamma_intra,
     model_names,
-    beta=BETA,
     eps=1e-16
 ):
-
-    # -------- referência de custo --------
-    flops_ref = min(
-        MODEL_COST[m]["flops_per_sample"] for m in model_names
-    )
 
     total_weight = 0.0
     weighted_sum = 0.0
 
     for cid in client_resources:
 
-        weights = []
-        usages = []
+        usage = []
+        gamma = []
 
+        # 🔥 peso do cliente (mantido)
         total_data_client = sum(
             client_resources[cid][f"data_size_{m}"]
             for m in model_names
@@ -583,48 +545,82 @@ def compute_caf_intra(
         if total_data_client <= 0:
             continue
 
+        # -----------------------------
+        # coleta u_km e γ_km
+        # -----------------------------
         for m in model_names:
-
-            n_km = client_resources[cid][f"data_size_{m}"]
             u = client_resource_usage[cid][m]
-            flops = MODEL_COST[m]["flops_per_sample"]
+            g = gamma_intra[cid][m]
 
-            if flops <= 0:
-                continue
+            usage.append(u)
+            gamma.append(g)
 
-            data_share = n_km / total_data_client
+        usage = np.array(usage, dtype=np.float64)
+        gamma = np.array(gamma, dtype=np.float64)
 
-            # 🔥 MESMA NORMALIZAÇÃO DO INTER
-            cost_term = flops_ref / flops
+        if usage.sum() <= 0:
+            F_k = 0.0  # cliente não participou → penalização máxima
+        else:
+            u_tilde = usage / (usage.sum() + eps)
+            g_hat = gamma / (gamma.sum() + eps)
 
-            gamma_km = (data_share * cost_term) ** beta
+            # 🔥 erro relativo normalizado
+            denom = np.maximum(u_tilde, g_hat) + eps
+            rel_error = np.abs(u_tilde - g_hat) / denom
 
-            weights.append(gamma_km)
-            usages.append(u)
+            # 🔥 agregação ponderada por γ intra
+            deviation = np.sum(g_hat * rel_error)
 
-        if len(weights) == 0:
-            continue
+            F_k = 1.0 - deviation
 
-        total_w = sum(weights) + eps
-        total_u = sum(usages) + eps
-
-        ratios = []
-        for w, u in zip(weights, usages):
-            exp = w / total_w
-            act = u / total_u
-            ratios.append(act / (exp + eps))
-
-        M = len(ratios)
-
-        num = (sum(ratios) ** 2)
-        den = M * sum(r**2 for r in ratios)
-
-        J = num / (den + eps)
-
-        weighted_sum += total_data_client * J
+        # -----------------------------
+        # média ponderada global
+        # -----------------------------
+        weighted_sum += total_data_client * F_k
         total_weight += total_data_client
 
-    return weighted_sum / (total_weight + eps)
+    return float(weighted_sum / (total_weight + eps))
+
+def compute_gamma_inter_static(beta=BETA, eps=1e-16):
+
+    model_names = list(MODEL_COST.keys())
+    gamma_inter = {}
+
+    for cid in client_resources:
+
+        speed = client_resources[cid]["speed"]
+        gamma_k = 0.0
+
+        for m in model_names:
+            data_size = client_resources[cid][f"data_size_{m}"]
+            flops = MODEL_COST[m]["flops_per_sample"]
+
+            base = (speed * data_size) / (flops + eps)
+            gamma_k += base ** beta
+
+        gamma_inter[cid] = max(gamma_k, eps)
+
+    return gamma_inter
+
+def compute_gamma_intra_static(beta=BETA, eps=1e-16):
+
+    model_names = list(MODEL_COST.keys())
+    gamma_intra = {}
+
+    for cid in client_resources:
+
+        gamma_intra[cid] = {}
+
+        for m in model_names:
+            data_size = client_resources[cid][f"data_size_{m}"]
+            flops = MODEL_COST[m]["flops_per_sample"]
+
+            base = data_size / (flops + eps)
+            gamma_km = base ** beta
+
+            gamma_intra[cid][m] = max(gamma_km, eps)
+
+    return gamma_intra
 
 def run_experiment():
 
@@ -693,6 +689,23 @@ def run_experiment():
 
         reset_experiment_state(train_loaders)
 
+        gamma_inter_static = compute_gamma_inter_static()
+        gamma_intra_static = compute_gamma_intra_static()
+
+        g = np.array(list(gamma_inter_static.values()))
+
+        print("\n=== GAMMA INTER STATS ===")
+        print(f"min: {g.min():.6f}")
+        print(f"max: {g.max():.6f}")
+        print(f"mean: {g.mean():.6f}")
+        print(f"std: {g.std():.6f}")
+        print(f"max/min ratio: {g.max() / g.min():.2f}")
+        print(f"cv (std/mean): {g.std() / g.mean():.2f}")
+
+        print("\n=== GAMMA INTRA (client 0 example) ===")
+        for m, g in gamma_intra_static[0].items():
+            print(f"{m}: {g:.6f}")
+
         # =====================================================
         # LOOP PRINCIPAL DE RODADAS FEDERADAS
         # =====================================================
@@ -731,15 +744,6 @@ def run_experiment():
             # Balanced Resource + Fairness entre clientes
             # =====================================================
 
-            clients_cifar = []
-            clients_gtsrb = []
-
-            # controle de budget por rodada
-            resource_usage = {
-                "cifar": 0.0,
-                "gtsrb": 0.0
-            }
-
             # embaralha clientes (ordem aleatória)
             all_clients = list(range(NUM_CLIENTS))
             random.shuffle(all_clients)
@@ -771,22 +775,19 @@ def run_experiment():
                 else:
                     clients_gtsrb.append(cid)
 
-            # controle de recurso (mantido só para logging)
-            resource_usage = {
-                "cifar": 0.0,
-                "gtsrb": 0.0
-            }
+                    # controle de recurso (mantido só para logging)
+                    resource_usage = {
+                        "cifar": 0.0,
+                        "gtsrb": 0.0
+                    }
 
-            # atualiza usage (IMPORTANTE para manter fairness tracking funcionando)
-            for cid in clients_cifar:
-                train_time = training_time_cache[cid]["cifar"]
-                resource_usage["cifar"] += train_time
-                client_resource_usage[cid]["cifar"] += train_time
+                    for cid in clients_cifar:
+                        resource_usage["cifar"] += 1.0
+                        client_resource_usage[cid]["cifar"] += 1.0
 
-            for cid in clients_gtsrb:
-                train_time = training_time_cache[cid]["gtsrb"]
-                resource_usage["gtsrb"] += train_time
-                client_resource_usage[cid]["gtsrb"] += train_time
+                    for cid in clients_gtsrb:
+                        resource_usage["gtsrb"] += 1.0
+                        client_resource_usage[cid]["gtsrb"] += 1.0
 
             # =====================================================
             # 2) TREINAMENTO LOCAL — CIFAR
@@ -857,17 +858,15 @@ def run_experiment():
             inter_client_fairness = compute_caf_inter(
                 client_resources,
                 client_resource_usage,
-                training_time_cache,
-                model_names,
-                beta=BETA
+                gamma_inter_static,  # ✅ CORRETO
+                model_names
             )
 
             intra_client_fairness = compute_caf_intra(
                 client_resources,
                 client_resource_usage,
-                training_time_cache,
-                model_names,
-                beta=BETA
+                gamma_intra_static,  # ✅ CORRETO
+                model_names
             )
 
             # =====================================================
@@ -889,6 +888,40 @@ def run_experiment():
             logs["inter_model_fairness"].append(inter_model_fairness)
             logs["inter_client_fairness"].append(inter_client_fairness)
             logs["intra_client_fairness"].append(intra_client_fairness)
+
+            # =========================
+            # 🔥 PLOT ALIGNMENT (POR RODADA)
+            # =========================
+
+            g = np.array(list(gamma_inter_static.values()))
+
+            usage = np.array([
+                sum(client_resource_usage[cid][m] for m in ["cifar", "gtsrb"])
+                for cid in gamma_inter_static
+            ])
+
+            if usage.sum() > 0:
+                g_hat = g / g.sum()
+                u_hat = usage / usage.sum()
+
+                import matplotlib.pyplot as plt
+
+                plt.figure(figsize=(4, 4))
+                plt.scatter(g_hat, u_hat, alpha=0.7)
+
+                # linha ideal
+                plt.plot([0, g_hat.max()], [0, g_hat.max()], linestyle="--")
+
+                plt.xlabel("gamma_hat")
+                plt.ylabel("usage_hat")
+                plt.title(f"Alignment Round {rnd}")
+
+                # 🔥 salvar (não usar show)
+                save_dir = f"{RESULTS_DIR}/alignment_plots/"
+                os.makedirs(save_dir, exist_ok=True)
+
+                plt.savefig(f"{save_dir}/round_{rnd}.png", dpi=150)
+                plt.close()
             # =====================================================
             # 7) AVALIAÇÃO GLOBAL
             # =====================================================

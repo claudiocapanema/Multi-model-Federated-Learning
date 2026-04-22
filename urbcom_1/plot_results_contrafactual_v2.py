@@ -1,287 +1,404 @@
+# =====================================================
+# IMPORTS
+# =====================================================
+
 import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-# =====================================================
-# VISUAL ENCODING (UPGRADE)
-# =====================================================
-
-VERSION_COLOR = {
-    "traditional": "black",
-    "remove_random_inter": "blue",
-    "remove_top_gamma_inter": "green",
-    "remove_random_intra": "orange",
-    "remove_top_gamma_intra": "red",
-}
-
-def get_linestyle_by_fraction(frac):
-    if frac == 0.0:
-        return "-"
-    elif frac == 0.1:
-        return "--"
-    elif frac == 0.2:
-        return "-."
-    elif frac == 0.3:
-        return ":"
-    else:
-        return "-"
 
 # =====================================================
 # CONFIG
 # =====================================================
 
 BASE_DIR = "results/"
+MODE = "full"
 
-MODES = ["data_only", "speed_only", "cost_only", "full"]
+SOLUTION_NAME = ["baseline_contrafactual_", "baseline_contrafactual_removed_flops", "baseline_contrafactual_uk_participacao", "baseline_contrafactual_uk_participacao_referencia_eficiency"][3]
 
 METRICS = {
     "inter": "inter_client_fairness",
     "intra": "intra_client_fairness"
 }
 
-# cores por removal_fraction
-COLOR_MAP = {
-    0.0: "black",
-    0.1: "blue",
-    0.2: "orange",
-    0.3: "red",
+VERSION_COLOR = {
+    "remove_random_inter": "blue",
+    "remove_top_gamma_inter": "green",
+    "remove_random_intra": "orange",
+    "remove_top_gamma_intra": "red",
 }
 
-dataset = "cifar"
+MODE_TITLE = {
+    "data_only": "Data Heterogeneity",
+    "speed_only": "System Heterogeneity",
+    "cost_only": "Model Cost Heterogeneity",
+    "full": "" # Joint Heterogeneity"
+}
 
-# estilo por versão
-def get_linestyle(version):
-    if "random" in version:
-        return "--"
-    elif "top_gamma" in version:
-        return "-"
-    else:
-        return ":"
+VERSION_LABEL = {
+    "remove_random_inter": "Random Removal (Inter)",
+    "remove_top_gamma_inter": "Efficiency-Based Removal (Inter)",
+    "remove_random_intra": "Random Removal (Intra)",
+    "remove_top_gamma_intra": "Efficiency-Based Removal (Intra)",
+}
 
-# =====================================================
-# LOAD DATA (NOVO - COMPATÍVEL COM SUA ESTRUTURA)
-# =====================================================
+VERSION_LABEL_LATEX = {
+    "remove_random_inter": "Random inter",
+    "remove_top_gamma_inter": r"Top $\gamma$ inter",
+    "remove_random_intra": "Random intra",
+    "remove_top_gamma_intra": r"Top $\gamma$ intra",
+}
 
-def load_mode_data(mode):
+VALID_FRACS = [0.1, 0.3]
 
-    mode_dir = os.path.join(BASE_DIR, mode)
-    dfs = []
+MODES = ["data_only", "speed_only", "cost_only", "full"]
 
-    print(f"\n🔍 Carregando modo: {mode}")
 
-    for root, _, files in os.walk(mode_dir):
-        for f in files:
+def get_baseline_version(version):
+    if "inter" in version:
+        return "remove_random_inter"
+    elif "intra" in version:
+        return "remove_random_intra"
+    return None
 
-            if not f.endswith(".csv"):
-                continue
 
-            path = os.path.join(root, f)
+def get_linestyle(frac):
+    return {
+        0.1: "--",
+        0.2: "-.",
+        0.3: ":"
+    }.get(frac, "-")
 
-            try:
-                df = pd.read_csv(path)
-
-                # 🔥 CORREÇÃO CRÍTICA
-                if "dataset" in df.columns:
-                    df = df[df["dataset"] == dataset]  # ou "gtsrb"
-
-                # garantir colunas
-                if "version" not in df.columns or "removal_fraction" not in df.columns:
-                    continue
-
-                df["removal_fraction"] = df["removal_fraction"].astype(float)
-                df["mode"] = mode
-
-                dfs.append(df)
-
-            except Exception as e:
-                print(f"⚠️ Erro ao ler {path}: {e}")
-
-    if len(dfs) == 0:
-        print(f"❌ Nenhum dado encontrado para {mode}")
-        return None
-
-    df_all = pd.concat(dfs, ignore_index=True)
-
-    # DEBUG IMPORTANTE
-    print("✔ versões encontradas:", df_all["version"].unique())
-    print("✔ fractions encontradas:", sorted(df_all["removal_fraction"].unique()))
-
-    return df_all
 
 # =====================================================
-# LOAD ALL
+# LOAD DATA (ROBUSTO)
 # =====================================================
 
-data = {}
+def load_all_modes():
 
-for mode in MODES:
-    df = load_mode_data(mode)
-    if df is not None:
-        data[mode] = df
+    data = {}
 
-# =====================================================
-# AGGREGATION (mean + std)
-# =====================================================
+    for mode in MODES:
 
-def aggregate(df, metric):
+        mode_dir = os.path.join(BASE_DIR, mode)
 
-    grouped = (
-        df
-        .groupby(["round", "removal_fraction", "version"])[metric]
-        .agg(["mean", "std"])
-        .reset_index()
-    )
-
-    return grouped
-
-# =====================================================
-# PLOT
-# =====================================================
-
-fig, axes = plt.subplots(
-    2, 4,
-    figsize=(24, 10),
-    sharex=True,
-    sharey="row"
-)
-
-for col, mode in enumerate(MODES):
-
-    if mode not in data:
-        for row in range(2):
-            axes[row, col].set_title(f"{mode}\n(no data)")
-        continue
-
-    df_mode = data[mode]
-
-    for row, (metric_name, metric_col) in enumerate(METRICS.items()):
-
-        ax = axes[row, col]
-
-        df_agg = aggregate(df_mode, metric_col)
-
-        if df_agg.empty:
-            ax.set_title(f"{mode}\n(empty)")
+        if not os.path.exists(mode_dir):
+            print(f"⚠️ missing: {mode}")
             continue
 
-        # -----------------------------------
-        # loop: (fraction, version)
-        # -----------------------------------
-        for (frac, version), df_sub in df_agg.groupby(["removal_fraction", "version"]):
+        dfs = []
 
-            df_sub = df_sub.sort_values("round")
+        for root, _, files in os.walk(mode_dir):
 
-            x = df_sub["round"].values
-            y = df_sub["mean"].values
-            std = df_sub["std"].fillna(0).values
+            for file in files:
 
-            # suavização
-            y_smooth = pd.Series(y).rolling(5, min_periods=1).mean().values
+                if not file.startswith(SOLUTION_NAME):
+                    continue
 
-            color = VERSION_COLOR.get(version, "gray")
-            linestyle = get_linestyle_by_fraction(frac)
+                path = os.path.join(root, file)
 
-            label = None  # 🔥 NÃO usamos mais label aqui
+                try:
+                    df = pd.read_csv(path)
 
-            ax.plot(
-                x,
-                y_smooth,
-                label=label,
-                color=color,
-                linestyle=linestyle,
-                linewidth=2
-            )
+                    if df.empty:
+                        continue
 
-            # error band
-            ax.fill_between(
-                x,
-                y_smooth - std,
-                y_smooth + std,
-                color=color,
-                alpha=0.1
-            )
+                    if "dataset" in df.columns:
+                        df = df[df["dataset"].isin(["cifar", "gtsrb"])]
 
-        # títulos
-        if row == 0:
-            ax.set_title(f"{mode}", fontsize=12)
+                    if df.empty:
+                        continue
 
-        if col == 0:
-            ax.set_ylabel(metric_name, fontsize=11)
+                    # version fallback
+                    if "version" not in df.columns:
+                        for v in VERSION_COLOR.keys():
+                            if v in root:
+                                df["version"] = v
 
-        if row == 1:
-            ax.set_xlabel("Round")
+                    # removal fallback
+                    if "removal_fraction" not in df.columns:
+                        for p in root.split(os.sep):
+                            if p.startswith("removal_"):
+                                df["removal_fraction"] = float(p.split("_")[1])
 
-        ax.grid(True)
+                    df["mode"] = mode
+                    dfs.append(df)
 
-from matplotlib.lines import Line2D
+                except:
+                    continue
+
+        if len(dfs) > 0:
+            data[mode] = pd.concat(dfs, ignore_index=True)
+            print(f"✔ loaded: {mode}")
+
+    return data
 
 # =====================================================
-# LEGENDAS SEPARADAS
+# COMPUTE RATIOS (CENTRAL)
 # =====================================================
 
-# -------- Legenda de VERSION (cores) --------
-version_handles = [
-    Line2D([0], [0], color=color, lw=3, label=version)
-    for version, color in VERSION_COLOR.items()
-]
+def compute_ratios(df):
 
-# -------- Legenda de FRACTION (linestyle) --------
-fraction_values = sorted({0.0, 0.1, 0.2, 0.3})
+    results = []
 
-fraction_handles = [
-    Line2D(
-        [0], [0],
-        color="black",
-        linestyle=get_linestyle_by_fraction(f),
-        lw=2,
-        label=f"f = {f}"
+    for frac in sorted([f for f in df["removal_fraction"].unique() if f in VALID_FRACS]):
+
+        df_frac = df[df["removal_fraction"] == frac]
+
+        for version in df_frac["version"].unique():
+
+            if "random" in version:
+                continue
+
+            baseline = get_baseline_version(version)
+
+            df_base = df_frac[df_frac["version"] == baseline]
+            df_v = df_frac[df_frac["version"] == version]
+
+            if df_base.empty or df_v.empty:
+                continue
+
+            base_last = df_base[df_base["round"] == df_base["round"].max()]
+            v_last = df_v[df_v["round"] == df_v["round"].max()]
+
+            delta_inter = abs(
+                base_last["inter_client_fairness"].mean() -
+                v_last["inter_client_fairness"].mean()
+            )
+
+            delta_intra = abs(
+                base_last["intra_client_fairness"].mean() -
+                v_last["intra_client_fairness"].mean()
+            )
+
+            ratio = delta_inter / (delta_intra + 1e-12)
+
+            results.append({
+                "removal_fraction": frac,
+                "version": version,
+                "baseline": baseline,
+                "delta_inter": delta_inter,
+                "delta_intra": delta_intra,
+                "ratio": ratio
+            })
+
+    return pd.DataFrame(results)
+
+def plot_all_modes(data):
+
+    # 🔥 filtra só modos que realmente têm dados
+    available_modes = [m for m in MODES if m in data]
+
+    n_cols = len(available_modes)
+
+    fig, axes = plt.subplots(2, n_cols, figsize=(5 * n_cols, 6), sharex=True)
+
+    if n_cols == 1:
+        axes = np.array([[axes[0]], [axes[1]]])
+
+    for col, mode in enumerate(available_modes):
+
+        df = data[mode]
+
+        for row, (name, col_metric) in enumerate(METRICS.items()):
+
+            ax = axes[row, col]
+
+            grouped = (
+                df.groupby(["round", "removal_fraction", "version"])[col_metric]
+                .mean()
+                .reset_index()
+            )
+
+            for (frac, version), sub in grouped.groupby(["removal_fraction", "version"]):
+
+                sub = sub.sort_values("round")
+
+                y = sub[col_metric].rolling(5, min_periods=1).mean()
+
+                ax.plot(
+                    sub["round"],
+                    y,
+                    color=VERSION_COLOR.get(version, "gray"),
+                    linestyle=get_linestyle(frac),
+                    linewidth=2
+                )
+
+            # títulos
+            if row == 0:
+                ax.set_title(MODE_TITLE.get(mode, mode), fontsize=12)
+
+            # y labels melhores
+            if col == 0:
+                if name == "inter":
+                    ax.set_ylabel("EPF-Inter", fontsize=11)
+                else:
+                    ax.set_ylabel("EPF-Intra", fontsize=11)
+
+            ax.grid(True, alpha=0.3)
+
+    from matplotlib.lines import Line2D
+
+    # =============================
+    # HANDLES
+    # =============================
+
+    solution_handles = [
+        Line2D([0], [0], color=color, lw=3,
+               label=VERSION_LABEL.get(version, version))
+        for version, color in VERSION_COLOR.items()
+    ]
+
+    fraction_handles = [
+        Line2D([0], [0], color="black", lw=2,
+               linestyle=get_linestyle(f), label=f"f={f}")
+        for f in [0.1, 0.2, 0.3]
+    ]
+
+    # separadores visuais (truque importante)
+    separator = [Line2D([0], [0], color="none", label="")]
+
+    # =============================
+    # LEGENDA ÚNICA ORGANIZADA
+    # =============================
+
+    fig.legend(
+        handles=solution_handles + separator + fraction_handles,
+        loc="upper center",
+        ncol=2,
+        bbox_to_anchor=(0.5, 1.1),
+        fontsize=9,
+        title="Intervention (color) and Removal Fraction (line style)"
     )
-    for f in fraction_values
-]
 
-# -------- posicionamento --------
-legend1 = fig.legend(
-    handles=version_handles,
-    loc="upper center",
-    bbox_to_anchor=(0.5, 1.02),
-    ncol=5,
-    fontsize=10,
-    title="Version"
-)
+    plt.tight_layout(rect=[0, 0, 1, 0.90])
 
-legend2 = fig.legend(
-    handles=fraction_handles,
-    loc="upper center",
-    bbox_to_anchor=(0.5, 0.96),
-    ncol=4,
-    fontsize=10,
-    title="Removal Fraction"
-)
+    # 🔥 espaço real para legenda
+    plt.tight_layout(rect=[0, 0, 1, 0.93])
 
-fig.add_artist(legend1)
+    os.makedirs(f"results/{SOLUTION_NAME}/", exist_ok=True)
+    plt.savefig(
+        f"results/{SOLUTION_NAME}/full_multimode_plot.png",
+        dpi=300,
+        bbox_inches="tight"
+    )
 
-plt.suptitle("Fairness vs Round (GLOBAL)", fontsize=16)
+def latex_main_table(df):
 
-plt.tight_layout(rect=[0, 0, 1, 0.95])
+    lines = [r"""
+\begin{table}[h]
+\centering
+\caption{Sensitivity and specificity of EPF metrics (mode = full)}
+\label{tab:epf_main}
+\begin{tabular}{lccccc}
+\hline
+Intervention & Baseline & $f$ & $\Delta$ Inter & $\Delta$ Intra & Effect \\
+\hline
+"""]
+
+    for _, r in df.iterrows():
+        name = VERSION_LABEL_LATEX.get(r["version"], r["version"])
+        base = VERSION_LABEL_LATEX.get(r["baseline"], r["baseline"])
+
+        lines.append(
+            f"{name} & {base} & {r['removal_fraction']} & "
+            f"{r['delta_inter']:.3f} & "
+            f"{r['delta_intra']:.3f} & "
+            f"{classify(r)} \\\\"
+        )
+
+    lines.append(r"""
+\hline
+\end{tabular}
+\end{table}
+""")
+
+    return "\n".join(lines)
+
+def latex_monotonic_table(df):
+
+    lines = [r"""
+\begin{table}[h]
+\centering
+\caption{Monotonic behavior under increasing removal (mode = full)}
+\label{tab:epf_monotonic}
+\begin{tabular}{lccc}
+\hline
+Intervention & $\Delta_{0.1}$ & $\Delta_{0.3}$ & Trend \\
+\hline
+"""]
+
+    for v in df["version"].unique():
+
+        sub = df[df["version"] == v]
+
+        d01 = sub[sub["removal_fraction"] == 0.1]["delta_inter"]
+        d03 = sub[sub["removal_fraction"] == 0.3]["delta_inter"]
+
+        if d01.empty or d03.empty:
+            continue
+
+        d01 = d01.values[0]
+        d03 = d03.values[0]
+
+        if d03 > d01:
+            trend = "Increasing"
+        elif d03 < d01:
+            trend = "Decreasing"
+        else:
+            trend = "Flat"
+
+        lines.append(
+            f"{VERSION_LABEL_LATEX.get(v, v)} & {d01:.3f} & {d03:.3f} & {trend} \\\\"
+        )
+
+    lines.append(r"""
+\hline
+\end{tabular}
+\end{table}
+""")
+
+    return "\n".join(lines)
+
+def classify(row):
+    r = row["ratio"]
+
+    if r > 2:
+        return "Inter-dominant"
+    elif r < 0.5:
+        return "Intra-dominant"
+    else:
+        return "Coupled"
+
 
 # =====================================================
-# SAVE
+# PIPELINE
 # =====================================================
 
-OUTPUT_DIR_PDF = "results/contrafactual/pdf"
-OUTPUT_DIR_PNG = "results/contrafactual/png"
+data = load_all_modes()
 
-os.makedirs(OUTPUT_DIR_PDF, exist_ok=True)
-os.makedirs(OUTPUT_DIR_PNG, exist_ok=True)
+# plot (todos os modos)
+plot_all_modes(data)
 
-pdf_path = os.path.join(OUTPUT_DIR_PDF, "fairness_ablation.pdf")
-png_path = os.path.join(OUTPUT_DIR_PNG, "fairness_ablation.png")
+# tabelas (somente FULL)
+if "full" not in data:
+    raise ValueError("Modo 'full' não encontrado nos dados")
 
-plt.savefig(pdf_path, dpi=300, bbox_inches="tight")
-plt.savefig(png_path, dpi=300, bbox_inches="tight")
+df_full = data["full"]
 
-print(f"✅ PDF salvo em: {pdf_path}")
-print(f"✅ PNG salvo em: {png_path}")
+df_ratios = compute_ratios(df_full)
 
-# plt.show()
+main_table = latex_main_table(df_ratios)
+mono_table = latex_monotonic_table(df_ratios)
+
+os.makedirs(f"results/{SOLUTION_NAME}/", exist_ok=True)
+
+with open(f"results/{SOLUTION_NAME}/table_main.tex", "w") as f:
+    f.write(main_table)
+
+with open(f"results/{SOLUTION_NAME}/table_monotonic.tex", "w") as f:
+    f.write(mono_table)
+
+print(main_table)
+print(mono_table)
