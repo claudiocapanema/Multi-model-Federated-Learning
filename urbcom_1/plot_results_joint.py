@@ -66,7 +66,6 @@ SELECTED_ALGORITHMS = [
 
 BETA_MARKERS = {
     0.1: 'o',
-    0.5: 's',
     1.0: '^'
 }
 
@@ -409,6 +408,9 @@ def load_results():
         raise ValueError("❌ Nenhum CSV encontrado.")
 
     df = pd.concat(dfs, ignore_index=True)
+
+    # 🔥 REMOVER beta = 0.5
+    df = df[df["beta"] != 0.5]
 
     print("\n==============================")
     print("ALGORITHMS ENCONTRADOS:")

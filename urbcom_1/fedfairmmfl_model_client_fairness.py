@@ -110,12 +110,15 @@ MODEL_COST_SETUPS = {
 # SELECT COST SETUP
 # =====================================================
 
+# BETA = 0.5
+BETA = 1.0
+
 # DIRICHLET_ALPHA = 0.1
 DIRICHLET_ALPHA = 1.0
 
 COST_SETUP_NAME = "cost_1x"
 COST_SETUP_NAME = "cost_2x"
-COST_SETUP_NAME = "cost_4x"
+# COST_SETUP_NAME = "cost_4x"
 COST_SETUP_NAME = "cost_6x"
 COST_SETUP_NAME = "cost_8x"
 COST_SETUP_NAME = "cost_10x"
@@ -457,13 +460,12 @@ def append_result_to_csv(row_dict, filename):
 
 def clear_previous_results():
     for model_name in ["cifar", "gtsrb"]:
+        directory = f"{RESULTS_DIR}/frac_{FRAC}/alpha_dirichlet_{DIRICHLET_ALPHA}/beta_{BETA}/"
         filename = (
-            f"{RESULTS_DIR}/fedfairmmfl_{model_name}"
-            f"_frac_{FRAC}"
-            f"_alpha_{DIRICHLET_ALPHA}"
-            f"_lambdaCap_{LAMBDA_CAPACITY}"
-            f"_lambdaIntra_{LAMBDA_INTRA}.csv"
+            f"{directory}"
+            f"fedfairmmfl_{model_name}.csv"
         )
+
         if os.path.exists(filename):
             os.remove(filename)
 
@@ -524,63 +526,47 @@ def compute_utilities():
 def compute_caf_inter(
     client_resources,
     client_resource_usage,
-    training_time_cache,
+    gamma_inter,
     model_names,
-    gamma=0.5,
-    eps=1e-8,
-    alpha_eff=0.5
+    eps=1e-16
 ):
 
-    utility = []
     usage = []
+    gamma = []
 
     for cid in client_resources:
+        u_k = sum(client_resource_usage[cid][m] for m in model_names)
+        g_k = gamma_inter[cid]
 
-        w_data = 0.0
+        usage.append(u_k)
+        gamma.append(g_k)
 
-        for m in model_names:
-            n = client_resources[cid][f"data_size_{m}"]
-            speed = client_resources[cid]["speed"]
-            flops = MODEL_COST[m]["flops_per_sample"]
+    usage = np.array(usage, dtype=np.float64)
+    gamma = np.array(gamma, dtype=np.float64)
 
-            if flops < eps:
-                continue
-
-            # 🔥 NOVA MÉTRICA CORRETA
-            w_data += ((n * speed) / flops) ** alpha_eff
-
-        if w_data < eps:
-            continue
-
-        use = sum(client_resource_usage[cid][m] for m in model_names)
-
-        utility.append(w_data)
-        usage.append(use)
-
-    if len(utility) == 0:
+    if usage.sum() <= 0:
         return 1.0
 
-    total_util = sum(utility) + eps
-    total_usage = sum(usage) + eps
+    u_tilde = usage / (usage.sum() + eps)
+    g_hat = gamma / (gamma.sum() + eps)
 
-    ratios = []
-    for i in range(len(utility)):
-        expected = utility[i] / total_util
-        actual = usage[i] / total_usage
-        ratios.append(actual / (expected + eps))
+    # 🔥 normalized relative error
+    denom = np.maximum(u_tilde, g_hat) + eps
+    rel_error = np.abs(u_tilde - g_hat) / denom
 
-    num = (sum(ratios) ** 2)
-    den = len(ratios) * sum(r**2 for r in ratios)
+    # 🔥 weighted aggregation
+    deviation = np.sum(g_hat * rel_error)
 
-    return num / den if den > 0 else 1.0
+    fairness = 1.0 - deviation
+
+    return float(max(0.0, min(1.0, fairness)))
 
 def compute_caf_intra(
     client_resources,
     client_resource_usage,
-    training_time_cache,
+    gamma_intra,
     model_names,
-    eps=1e-8,
-    alpha_eff=0.5
+    eps=1e-16
 ):
 
     total_weight = 0.0
@@ -588,53 +574,94 @@ def compute_caf_intra(
 
     for cid in client_resources:
 
-        weights = []
-        usages = []
+        usage = []
+        gamma = []
 
-        for m in model_names:
-            n = client_resources[cid][f"data_size_{m}"]
-            u = client_resource_usage[cid][m]
-
-            speed = client_resources[cid]["speed"]
-            flops = MODEL_COST[m]["flops_per_sample"]
-
-            if flops < eps:
-                continue
-
-            # 🔥 NOVA DEFINIÇÃO
-            weights.append(((n * speed) / flops) ** alpha_eff)
-            usages.append(u)
-
-        if len(weights) == 0:
-            continue
-
-        total_w = sum(weights)
-        total_u = sum(usages)
-
-        if total_w < eps or total_u < eps:
-            continue
-
-        ratios = []
-        for w, u in zip(weights, usages):
-            exp = w / total_w
-            act = u / total_u
-            ratios.append(act / (exp + eps))
-
-        M = len(ratios)
-        num = (sum(ratios) ** 2)
-        den = M * sum(r**2 for r in ratios)
-
-        J = num / den if den > 0 else 1.0
-
-        total_data = sum(
+        # 🔥 peso do cliente (mantido)
+        total_data_client = sum(
             client_resources[cid][f"data_size_{m}"]
             for m in model_names
         )
 
-        weighted_sum += total_data * J
-        total_weight += total_data
+        if total_data_client <= 0:
+            continue
 
-    return weighted_sum / total_weight if total_weight > 0 else 1.0
+        # -----------------------------
+        # coleta u_km e γ_km
+        # -----------------------------
+        for m in model_names:
+            u = client_resource_usage[cid][m]
+            g = gamma_intra[cid][m]
+
+            usage.append(u)
+            gamma.append(g)
+
+        usage = np.array(usage, dtype=np.float64)
+        gamma = np.array(gamma, dtype=np.float64)
+
+        if usage.sum() <= 0:
+            F_k = 0.0  # cliente não participou → penalização máxima
+        else:
+            u_tilde = usage / (usage.sum() + eps)
+            g_hat = gamma / (gamma.sum() + eps)
+
+            # 🔥 erro relativo normalizado
+            denom = np.maximum(u_tilde, g_hat) + eps
+            rel_error = np.abs(u_tilde - g_hat) / denom
+
+            # 🔥 agregação ponderada por γ intra
+            deviation = np.sum(g_hat * rel_error)
+
+            F_k = 1.0 - deviation
+
+        # -----------------------------
+        # média ponderada global
+        # -----------------------------
+        weighted_sum += total_data_client * F_k
+        total_weight += total_data_client
+
+    return float(weighted_sum / (total_weight + eps))
+
+def compute_gamma_inter_static(beta=BETA, eps=1e-16):
+
+    model_names = list(MODEL_COST.keys())
+    gamma_inter = {}
+
+    for cid in client_resources:
+
+        speed = client_resources[cid]["speed"]
+        gamma_k = 0.0
+
+        for m in model_names:
+            data_size = client_resources[cid][f"data_size_{m}"]
+            flops = MODEL_COST[m]["flops_per_sample"]
+
+            base = (speed * data_size) / (flops + eps)
+            gamma_k += base ** beta
+
+        gamma_inter[cid] = max(gamma_k, eps)
+
+    return gamma_inter
+
+def compute_gamma_intra_static(beta=BETA, eps=1e-16):
+
+    model_names = list(MODEL_COST.keys())
+    gamma_intra = {}
+
+    for cid in client_resources:
+
+        gamma_intra[cid] = {}
+
+        for m in model_names:
+            data_size = client_resources[cid][f"data_size_{m}"]
+            flops = MODEL_COST[m]["flops_per_sample"]
+
+            base = data_size / (flops + eps)
+            gamma_km = base ** beta
+
+            gamma_intra[cid][m] = max(gamma_km, eps)
+
+    return gamma_intra
 
 # -------- FUNÇÃO MIN-MAX --------
 def minmax(arr):
@@ -711,6 +738,9 @@ def run_experiment():
             test_loaders[cid]["gtsrb"] = test_loader
 
         reset_experiment_state(train_loaders)
+
+        gamma_inter_static = compute_gamma_inter_static()
+        gamma_intra_static = compute_gamma_intra_static()
 
         # =====================================================
         # LOOP PRINCIPAL DE RODADAS FEDERADAS
@@ -812,28 +842,19 @@ def run_experiment():
                 else:
                     clients_gtsrb.append(cid)
 
-            # -------- Controle de recurso (mantido) --------
-            resource_usage = {
-                "cifar": 0.0,
-                "gtsrb": 0.0
-            }
-
             # controle de recurso (mantido só para logging)
             resource_usage = {
                 "cifar": 0.0,
                 "gtsrb": 0.0
             }
 
-            # atualiza usage (IMPORTANTE para manter fairness tracking funcionando)
             for cid in clients_cifar:
-                train_time = training_time_cache[cid]["cifar"]
-                resource_usage["cifar"] += train_time
-                client_resource_usage[cid]["cifar"] += train_time
+                resource_usage["cifar"] += 1.0
+                client_resource_usage[cid]["cifar"] += 1.0
 
             for cid in clients_gtsrb:
-                train_time = training_time_cache[cid]["gtsrb"]
-                resource_usage["gtsrb"] += train_time
-                client_resource_usage[cid]["gtsrb"] += train_time
+                resource_usage["gtsrb"] += 1.0
+                client_resource_usage[cid]["gtsrb"] += 1.0
 
             # =====================================================
             # 2) TREINAMENTO LOCAL — CIFAR
@@ -904,15 +925,14 @@ def run_experiment():
             inter_client_fairness = compute_caf_inter(
                 client_resources,
                 client_resource_usage,
-                training_time_cache,
-                model_names,
-                gamma=0.5
+                gamma_inter_static,  # ✅ CORRETO
+                model_names
             )
 
             intra_client_fairness = compute_caf_intra(
                 client_resources,
                 client_resource_usage,
-                training_time_cache,
+                gamma_intra_static,  # ✅ CORRETO
                 model_names
             )
 
@@ -979,13 +999,13 @@ def run_experiment():
                     "intra_client_fairness": logs["intra_client_fairness"][-1],
                 }
 
+                directory = f"{RESULTS_DIR}/frac_{FRAC}/alpha_dirichlet_{DIRICHLET_ALPHA}/beta_{BETA}/"
                 filename = (
-                    f"{RESULTS_DIR}/fedfairmmfl_{model_name}"
-                    f"_frac_{FRAC}"
-                    f"_alpha_{DIRICHLET_ALPHA}"
-                    f"_lambdaCap_{LAMBDA_CAPACITY}"
-                    f"_lambdaIntra_{LAMBDA_INTRA}.csv"
+                    f"{directory}"
+                    f"fedfairmmfl_{model_name}.csv"
                 )
+
+                os.makedirs(directory, exist_ok=True)
                 append_result_to_csv(row_data, filename)
 
             # =====================================================

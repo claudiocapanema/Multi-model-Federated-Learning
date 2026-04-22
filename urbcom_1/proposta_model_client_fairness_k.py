@@ -118,15 +118,15 @@ MODEL_COST_SETUPS = {
 # BETA = 0.5
 BETA = 1.0
 
-DIRICHLET_ALPHA = 0.1
-# DIRICHLET_ALPHA = 1.0
+# DIRICHLET_ALPHA = 0.1
+DIRICHLET_ALPHA = 1.0
 
-# COST_SETUP_NAME = "cost_1x"
-# COST_SETUP_NAME = "cost_2x"
-COST_SETUP_NAME = "cost_4x"
-# COST_SETUP_NAME = "cost_6x"
-# COST_SETUP_NAME = "cost_8x"
-# COST_SETUP_NAME = "cost_10x"
+COST_SETUP_NAME = "cost_1x"
+COST_SETUP_NAME = "cost_2x"
+# COST_SETUP_NAME = "cost_4x"
+COST_SETUP_NAME = "cost_6x"
+COST_SETUP_NAME = "cost_8x"
+COST_SETUP_NAME = "cost_10x"
 
 MODEL_COST = MODEL_COST_SETUPS[COST_SETUP_NAME]
 
@@ -744,12 +744,6 @@ def run_experiment():
             random.shuffle(all_clients)
 
             # =====================================================
-            # LOOP DE DECISÃO POR CLIENTE (NOVO — MAX FAIRNESS)
-            # =====================================================
-            total_cifar_usage = sum(client_resource_usage[c]["cifar"] for c in range(NUM_CLIENTS))
-            total_gtsrb_usage = sum(client_resource_usage[c]["gtsrb"] for c in range(NUM_CLIENTS))
-
-            # =====================================================
             # MULTIFEDAVG CLIENT SELECTION (BASELINE)
             # =====================================================
 
@@ -891,16 +885,6 @@ def run_experiment():
                 if len(assigned_clients) == K_CLIENTS:
                     break
 
-            # -----------------------------
-            # 🔹 ATUALIZA USO
-            # -----------------------------
-            for cid in clients_cifar:
-                client_resource_usage[cid]["cifar"] += 1.0
-
-            for cid in clients_gtsrb:
-                client_resource_usage[cid]["gtsrb"] += 1.0
-
-            # =====================================================
             # 🔥 ATUALIZA USO (IMPORTANTE)
             # =====================================================
             for cid in clients_cifar:
