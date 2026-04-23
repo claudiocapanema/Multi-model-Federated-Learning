@@ -44,18 +44,18 @@ SELECTED_ALGORITHMS = None
 
 SELECTED_ALGORITHMS = [
     # "fair_resource_k0.2",
-    "dpfs_k0.3_b0.5",  # padrão
+    # "dpfs_k0.3_b0.5",  # padrão
     # "fair_resource_k0.4",
     # "fair_resource_k0.5",
     "oort",
     "fairhetero",
     "fedbalancer",
     # "fedfairmmfl_f0.2",
-    "fedfairmmfl_f0.3",
+    "fedfairmmfl",
     # "fedfairmmfl_f0.4",
     # "fedfairmmfl_f0.5",   # 🔥 ADICIONAR
     # "baseline_f0.2",
-    "baseline_f0.3",
+    "multifedavg",
     # "baseline_f0.4",
     # "baseline_f0.5"
 ]
@@ -70,6 +70,37 @@ BETA_MARKERS = {
 }
 
 BASE_MARKERS = ['D', 'P', 'X', 'v', '*']  # fallback
+
+def enforce_selected_algorithms(df):
+
+    if SELECTED_ALGORITHMS is None:
+        return df
+
+    selected = set(SELECTED_ALGORITHMS)
+
+    def get_base(alg):
+
+        if alg.startswith("baseline"):
+            return "multifedavg"
+
+        if alg.startswith("fedfairmmfl"):
+            return "fedfairmmfl"   # 🔥 CORRIGIDO
+
+        if alg.startswith("oort"):
+            return "oort"
+
+        if alg.startswith("fairhetero"):
+            return "fairhetero"
+
+        if alg.startswith("fedbalancer"):
+            return "fedbalancer"
+
+        if alg.startswith("dpfs"):
+            return "dpfs"
+
+        return alg
+
+    return df[df["algorithm"].apply(lambda a: get_base(a) in selected)]
 
 def filter_algorithms(df):
 
@@ -116,42 +147,42 @@ def format_metric_name(metric):
 
     return name
 
+def mean_std(series):
+    return series.mean(), series.std()
+
+def format_pm(mean, std, scale=100):
+
+    mean *= scale
+    std *= scale
+
+    mean_str = f"{mean:.2f}".replace(".", ",")
+    std_str = f"{std:.2f}".replace(".", ",")
+
+    return f"{mean_str} $\\pm$ {std_str}"
+
 # =====================================================
 # 🔥 DISPLAY NAMES (PARA PLOTS E TABELAS)
 # =====================================================
 
 def get_display_name(alg):
 
-    mapping = {
-        "oort": "Oort",
-        "fairhetero": "FairHetero",
-        "fedbalancer": "FedBalancer",
-        "fair_resource_budget": "Fair Resource"
-    }
-
-    if alg in mapping:
-        return mapping[alg]
-
-    # 🔹 BASELINE COM BETA
-    if alg.startswith("baseline_f"):
-        import re
-        match = re.search(r'b(\d+\.?\d*)', alg)
-        if match:
-            beta = float(match.group(1))
-            return f"MultiFedAvg ($\\beta={beta}$)"
+    if alg == "multifedavg":
         return "MultiFedAvg"
 
-    # 🔹 FEDFAIRMMFL
-    if alg.startswith("fedfairmmfl_f"):
-        frac = float(alg.split("fedfairmmfl_f")[-1])
-        pct = int(frac * 100)
-        return f"FedFairMMFL ({pct}\\%)"
+    if alg == "fedbalancer":
+        return "FedBalancer"
 
-    # 🔹 DPFS
-    if alg.startswith("dpfs_k"):
-        import re
-        beta = float(re.search(r'b(\d+\.?\d*)', alg).group(1))
-        return f"DPFS ($\\beta={beta}$)"
+    if alg == "fairhetero":
+        return "FairHetero"
+
+    if alg == "oort":
+        return "Oort"
+
+    if alg == "fedfairmmfl":
+        return "FedFairMMFL"   # 🔥 IMPORTANTE
+
+    if alg == "dpfs":
+        return "DPFS"
 
     return alg
 
@@ -233,6 +264,8 @@ TEXTS = {
 
 def get_algorithm_order(df):
 
+
+
     algs = list(df["algorithm"].unique())
 
     import re
@@ -298,10 +331,9 @@ def load_results():
 
             path = os.path.join(root, file)
 
-            # =========================================
-            # EXTRAÇÃO (ROBUSTA)
-            # =========================================
-
+            # ================================
+            # EXTRAÇÃO
+            # ================================
             frac = None
             alpha = None
             beta = None
@@ -331,7 +363,6 @@ def load_results():
                     beta = float(m.group(1))
 
             if alpha is None:
-                print(f"⚠️ Ignorado (sem alpha): {path}")
                 continue
 
             if alpha not in ALPHAS:
@@ -340,18 +371,18 @@ def load_results():
             if frac is None:
                 frac = FRAC
 
-            # =========================================
+            # ================================
             # LEITURA
-            # =========================================
+            # ================================
             try:
                 df = pd.read_csv(path)
             except Exception as e:
-                print(f"❌ Erro lendo {path}: {e}")
+                print(f"Erro lendo {path}: {e}")
                 continue
 
-            # =========================================
+            # ================================
             # DATASET
-            # =========================================
+            # ================================
             fname = file.lower()
 
             if "cifar" in fname:
@@ -359,44 +390,39 @@ def load_results():
             elif "gtsrb" in fname:
                 df["dataset"] = "gtsrb"
             else:
-                print(f"⚠️ Dataset não identificado: {file}")
                 continue
 
-            # =========================================
-            # 🔥 IDENTIFICAÇÃO + ALPHA EMBUTIDO
-            # =========================================
-
+            # ================================
+            # 🔥 ALGORITMO LIMPO (SEM BETA)
+            # ================================
             name = file.replace(".csv", "").lower()
             name = name.replace("_cifar", "").replace("_gtsrb", "")
 
-            # DPFS
             if name.startswith("proposta_k"):
-                alg = f"dpfs_k{frac}_b{beta}"
+                alg = "dpfs"
 
-            # BASELINE
             elif name.startswith("baseline"):
-                alg = f"baseline_f{frac}_b{beta}" if beta is not None else f"baseline_f{frac}"
+                alg = "baseline"
 
             elif name.startswith("fedbalancer"):
-                alg = f"fedbalancer_b{beta}_a{alpha}"
+                alg = "fedbalancer"
 
             elif name.startswith("fairhetero"):
-                alg = f"fairhetero_b{beta}_a{alpha}"
+                alg = "fairhetero"
 
             elif name.startswith("oort"):
-                alg = f"oort_b{beta}_a{alpha}"
+                alg = "oort"
 
-            # FEDFAIRMMFL
             elif name.startswith("fedfairmmfl"):
-                alg = f"fedfairmmfl_b{beta}_a{alpha}"
+                alg = "fedfairmmfl"
 
             else:
-                alg = name
-                print(f"⚠️ Algoritmo desconhecido: {name}")
+                print(f"Alg desconhecido: {name}")
+                continue
 
-            # =========================================
+            # ================================
             # METADADOS
-            # =========================================
+            # ================================
             df["algorithm"] = alg
             df["alpha"] = alpha
             df["beta"] = beta
@@ -405,24 +431,12 @@ def load_results():
             dfs.append(df)
 
     if len(dfs) == 0:
-        raise ValueError("❌ Nenhum CSV encontrado.")
+        raise ValueError("Nenhum CSV encontrado.")
 
     df = pd.concat(dfs, ignore_index=True)
 
-    # 🔥 REMOVER beta = 0.5
-    df = df[df["beta"] != 0.5]
-
-    print("\n==============================")
-    print("ALGORITHMS ENCONTRADOS:")
+    print("\nALGORITHMS ENCONTRADOS:")
     print(sorted(df["algorithm"].unique()))
-    print("==============================\n")
-
-    df = filter_algorithms(df)
-
-    print("\n==============================")
-    print("APÓS FILTRO:")
-    print(sorted(df["algorithm"].unique()))
-    print("==============================\n")
 
     return df
 
@@ -986,25 +1000,31 @@ def compute_pareto_score(point, pareto_front):
 
 def get_base_algorithm(alg):
 
-    if alg.startswith("dpfs_k"):
-        return "dpfs"
+    import re
 
-    if alg.startswith("baseline_f"):
-        return "baseline"
+    # remove alpha e beta
+    base = re.sub(r'_a\d+\.?\d*', '', alg)
+    base = re.sub(r'_b\d+\.?\d*', '', base)
 
-    if alg.startswith("fedfairmmfl"):
+    if base.startswith("baseline"):
+        return "multifedavg"
+
+    if base.startswith("fedfairmmfl"):
         return "fedfairmmfl"
 
-    if alg.startswith("fedbalancer"):
-        return "fedbalancer"
-
-    if alg.startswith("fairhetero"):
-        return "fairhetero"
-
-    if alg.startswith("oort"):
+    if base.startswith("oort"):
         return "oort"
 
-    return alg
+    if base.startswith("fairhetero"):
+        return "fairhetero"
+
+    if base.startswith("fedbalancer"):
+        return "fedbalancer"
+
+    if base.startswith("dpfs"):
+        return "dpfs"
+
+    return base
 
 def plot_fairness_vs_accuracy(df):
 
@@ -1348,89 +1368,90 @@ def build_accuracy_table(df):
 
 def build_final_accuracy_table(df):
 
-    for lang in LANGUAGES:
+    df = enforce_selected_algorithms(df)
 
-        texts = TEXTS[lang]
+    # 🔥 FILTRO CRÍTICO
+    df = df[df["beta"] == 1.0]
+
+    lines = []
+    lines.append("\\begin{table}[h]")
+    lines.append("\\centering")
+    lines.append("\\small")
+    lines.append("\\renewcommand{\\arraystretch}{1.2}")
+    lines.append("\\setlength{\\tabcolsep}{6pt}")
+    lines.append("\\begin{tabular}{l|c|cc}")
+    lines.append("\\toprule")
+    lines.append("Algoritmo & Acurácia Média (\\%) & CIFAR & GTSRB \\\\")
+    lines.append("\\midrule")
+
+    for alpha in sorted(df["alpha"].unique()):
+
+        df_alpha = df[df["alpha"] == alpha]
+
+        lines.append(f"\\multicolumn{{4}}{{c}}{{$\\alpha = {str(alpha).replace('.', ',')}$}} \\\\")
+        lines.append("\\midrule")
+
         results = []
 
-        for alg in get_algorithm_order(df):
+        for alg in df_alpha["algorithm"].unique():
 
-            subset = df[df["algorithm"] == alg]
+            subset = df_alpha[df_alpha["algorithm"] == alg]
 
-            if len(subset) == 0:
+            subset = subset.sort_values("round")
+
+            if "fold" in subset.columns and subset["fold"].nunique() > 1:
+                final = subset.groupby(["fold", "dataset"]).tail(1)
+            else:
+                final = (
+                    subset
+                    .sort_values("round")
+                    .groupby(["fold", "dataset"])
+                    .tail(1)
+                )
+
+            cifar = final[final["dataset"] == "cifar"]["global_acc"]
+            gtsrb = final[final["dataset"] == "gtsrb"]["global_acc"]
+
+            if len(cifar) == 0 or len(gtsrb) == 0:
                 continue
-
-            # 🔥 pega apenas última rodada por execução/dataset
-            final = (
-                subset
-                .sort_values("round")
-                .groupby(["dataset"])
-                .tail(1)
-            )
-
-            cifar = final[final["dataset"] == "cifar"]["global_acc"].mean()
-            gtsrb = final[final["dataset"] == "gtsrb"]["global_acc"].mean()
-
-            if np.isnan(cifar) or np.isnan(gtsrb):
-                continue
-
-            mean_total = (cifar + gtsrb) / 2
 
             results.append({
                 "alg": alg,
                 "cifar": cifar,
                 "gtsrb": gtsrb,
-                "total": mean_total
+                "total": (cifar.values + gtsrb.values) / 2
             })
 
-        df_res = pd.DataFrame(results)
-
-        if df_res.empty:
-            print(f"⚠️ Nenhum dado final de accuracy ({lang})")
+        if len(results) == 0:
             continue
 
-        # 🔥 melhor = maior
-        best_total = df_res["total"].idxmax()
-        best_cifar = df_res["cifar"].idxmax()
-        best_gtsrb = df_res["gtsrb"].idxmax()
+        best_total = max(np.mean(r["total"]) for r in results)
 
-        # LATEX
-        lines = []
-        lines.append("\\begin{table}[t]")
-        lines.append("\\centering")
-        lines.append("\\begin{tabular}{lccc}")
-        lines.append("\\toprule")
+        for r in results:
 
-        lines.append(
-            f"{texts['algorithm']} & {texts['mean_acc']} & {texts['cifar']} & {texts['gtsrb']} \\\\"
-        )
+            name = get_display_name(get_base_algorithm(r["alg"]))
 
-        lines.append("\\midrule")
+            m_total, s_total = mean_std(pd.Series(r["total"]))
+            m_cifar, s_cifar = mean_std(r["cifar"])
+            m_gtsrb, s_gtsrb = mean_std(r["gtsrb"])
 
-        for i, row in df_res.iterrows():
+            total = format_pm(m_total, s_total)
+            cifar = format_pm(m_cifar, s_cifar)
+            gtsrb = format_pm(m_gtsrb, s_gtsrb)
 
-            def fmt(val, bold):
-                val *= 100
-                text = f"{val:.2f}"
-                return f"\\textbf{{{text}}}" if bold else text
+            if abs(m_total - best_total) < 1e-6:
+                total = f"\\textbf{{{total}}}"
 
-            total = fmt(row["total"], i == best_total)
-            cifar = fmt(row["cifar"], i == best_cifar)
-            gtsrb = fmt(row["gtsrb"], i == best_gtsrb)
+            lines.append(f"{name} & {total} & {cifar} & {gtsrb} \\\\")
 
-            alg_name = get_display_name(row["alg"])
-            lines.append(f"{alg_name} & {total} & {cifar} & {gtsrb} \\\\")
+    lines.append("\\bottomrule")
+    lines.append("\\end{tabular}")
+    lines.append("\\caption{Comparação de acurácia (\\%) para diferentes valores de $\\alpha$.}")
+    lines.append("\\label{tab:accuracy}")
+    lines.append("\\end{table}")
 
-        lines.append("\\bottomrule")
-        lines.append("\\end{tabular}")
-        lines.append("\\caption{Final accuracy (last round).}")
-        lines.append("\\end{table}")
-
-        path = f"{RESULTS_DIR_WRITE}/final_accuracy_table_{lang}.tex"
-        with open(path, "w") as f:
-            f.write("\n".join(lines))
-
-        print(f"✅ Final Accuracy table ({lang}) salva em: {path}")
+    with open(f"{RESULTS_DIR_WRITE}/final_accuracy_table.tex", "w") as f:
+        f.write("\n".join(lines))
 
 # =====================================================
 # 🔥 TABELA DE FAIRNESS
@@ -1549,95 +1570,84 @@ def build_fairness_table_multi_alpha(df):
 
 def build_final_fairness_table(df):
 
-    for lang in LANGUAGES:
+    df = enforce_selected_algorithms(df)
 
-        texts = TEXTS[lang]
+    # 🔥 FILTRO
+    df = df[df["beta"] == 1.0]
+
+    lines = []
+    lines.append("\\begin{table}[h]")
+    lines.append("\\centering")
+    lines.append("\\small")
+    lines.append("\\renewcommand{\\arraystretch}{1.2}")
+    lines.append("\\setlength{\\tabcolsep}{6pt}")
+    lines.append("\\begin{tabular}{l|c|cc}")
+    lines.append("\\toprule")
+    lines.append("Algoritmo & \eng{Fairness} Médio & F$_\\text{inter}$ & F$_\\text{intra}$ \\\\")
+    lines.append("\\midrule")
+
+    for alpha in sorted(df["alpha"].unique()):
+
+        df_alpha = df[df["alpha"] == alpha]
+
+        lines.append(f"\\multicolumn{{4}}{{c}}{{$\\alpha = {str(alpha).replace('.', ',')}$}} \\\\")
+        lines.append("\\midrule")
+
         results = []
 
-        for alg in get_algorithm_order(df):
+        for alg in df_alpha["algorithm"].unique():
 
-            subset = df[df["algorithm"] == alg]
+            subset = df_alpha[df_alpha["algorithm"] == alg]
 
-            if len(subset) == 0:
-                continue
+            subset = subset.sort_values("round")
 
-            final = (
-                subset
-                .sort_values("round")
-                .groupby(["dataset"])
-                .tail(1)
-            )
+            if "fold" in subset.columns and subset["fold"].nunique() > 1:
+                final = subset.groupby(["fold", "dataset"]).tail(1)
+            else:
+                final = (
+                    subset
+                    .sort_values("round")
+                    .groupby(["fold", "dataset"])
+                    .tail(1)
+                )
 
-            inter_client = final["inter_client_fairness"].mean()
-            intra_client = final["intra_client_fairness"].mean()
-
-            mean_total = np.mean([
-                inter_client,
-                intra_client
-            ])
+            inter = final["inter_client_fairness"]
+            intra = final["intra_client_fairness"]
 
             results.append({
                 "alg": alg,
-                "total": mean_total,
-                "inter_client": inter_client,
-                "intra_client": intra_client,
+                "inter": inter,
+                "intra": intra,
+                "total": (inter.values + intra.values) / 2
             })
 
-        df_res = pd.DataFrame(results)
+        best_total = max(np.mean(r["total"]) for r in results)
 
-        if df_res.empty:
-            print(f"⚠️ Nenhum dado final de fairness ({lang})")
-            continue
+        for r in results:
 
-        best_total = df_res["total"].idxmax()
-        best_inter_client = df_res["inter_client"].idxmax()
-        best_intra_client = df_res["intra_client"].idxmax()
+            name = get_display_name(get_base_algorithm(r["alg"]))
 
-        lines = []
-        lines.append("\\begin{table}[t]")
-        lines.append("\\centering")
-        lines.append("\\begin{tabular}{lccc}")
-        lines.append("\\toprule")
+            m_total, s_total = mean_std(pd.Series(r["total"]))
+            m_inter, s_inter = mean_std(r["inter"])
+            m_intra, s_intra = mean_std(r["intra"])
 
-        lines.append(
-            f"{texts['algorithm']} & {texts['mean_fairness_col']} & {texts['inter_client']} & {texts['intra_client']} \\\\"
-        )
+            total = format_pm(m_total, s_total, scale=1)
+            inter = format_pm(m_inter, s_inter, scale=1)
+            intra = format_pm(m_intra, s_intra, scale=1)
 
-        lines.append("\\midrule")
+            if abs(m_total - best_total) < 1e-6:
+                total = f"\\textbf{{{total}}}"
 
-        for i, row in df_res.iterrows():
+            lines.append(f"{name} & {total} & {inter} & {intra} \\\\")
 
-            def fmt(val, bold):
-                text = f"{val:.2f}"
-                return f"\\textbf{{{text}}}" if bold else text
+    lines.append("\\bottomrule")
+    lines.append("\\end{tabular}")
+    lines.append("\\caption{Comparação de fairness para diferentes valores de $\\alpha$.}")
+    lines.append("\\label{tab:fairness}")
+    lines.append("\\end{table}")
 
-            total = fmt(row["total"], i == best_total)
-            inter_c = fmt(row["inter_client"], i == best_inter_client)
-            intra_c = fmt(row["intra_client"], i == best_intra_client)
-
-            alg_name = get_display_name(row["alg"])
-            lines.append(f"{alg_name} & {total} & {inter_c} & {intra_c} \\\\")
-
-        lines.append("\\bottomrule")
-        lines.append("\\end{tabular}")
-
-        # 🔥 caption com alpha
-        lines.append(
-            f"\\caption{{Final fairness (last round, without inter-model fairness). $\\alpha={ALPHAS}$.}}"
-        )
-
-        # 🔥 label
-        lines.append("\\label{tab:final_fairness}")
-
-        lines.append("\\end{table}")
-
-        latex = "\n".join(lines)
-
-        path = f"{RESULTS_DIR_WRITE}/final_fairness_table_{lang}.tex"
-        with open(path, "w") as f:
-            f.write(latex)
-
-        print(f"✅ Final Fairness table ({lang}) salva em: {path}")
+    with open(f"{RESULTS_DIR_WRITE}/final_fairness_table.tex", "w") as f:
+        f.write("\n".join(lines))
 
 # =====================================================
 # 🔥 TABELA DE RESOURCE (SOMATÓRIO)
@@ -1748,6 +1758,12 @@ def main():
     build_accuracy_table_multi_alpha(df)
     build_fairness_table_multi_alpha(df)
     build_resource_table(df)
+
+    print("\n[DEBUG FINAL TABLE]")
+    for alpha in sorted(df["alpha"].unique()):
+        print(f"\nAlpha = {alpha}")
+        df_alpha = df[df["alpha"] == alpha]
+        print(sorted(set(get_base_algorithm(a) for a in df_alpha["algorithm"].unique())))
 
     build_final_accuracy_table(df)
     build_final_fairness_table(df)

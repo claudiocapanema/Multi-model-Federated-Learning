@@ -37,10 +37,7 @@ os.makedirs(PDF_DIR, exist_ok=True)
 SELECTED_ALGORITHMS = None
 
 SELECTED_ALGORITHMS = [
-    # "fair_resource_k0.2",
-    "fair_resource_k0.3",
-    # "fair_resource_k0.4",
-    # "fair_resource_k0.5",
+    # "fair_resource_k0.3",
     "oort",
     "fairhetero",
     "fedbalancer",
