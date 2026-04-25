@@ -30,7 +30,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # =====================================================
 
 BASE_SEED = 42
-NUM_FOLDS = 5
+NUM_FOLDS = 1
 NUM_CLIENTS = 40
 ROUNDS = 100
 FRAC = 0.3
@@ -123,10 +123,10 @@ DIRICHLET_ALPHA = 0.1
 
 # COST_SETUP_NAME = "cost_1x"
 # COST_SETUP_NAME = "cost_2x"
-COST_SETUP_NAME = "cost_4x"
+# COST_SETUP_NAME = "cost_4x"
 # COST_SETUP_NAME = "cost_6x"
 # COST_SETUP_NAME = "cost_8x"
-# COST_SETUP_NAME = "cost_10x"
+COST_SETUP_NAME = "cost_10x"
 
 
 MODEL_COST = MODEL_COST_SETUPS[COST_SETUP_NAME]

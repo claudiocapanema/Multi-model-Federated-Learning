@@ -65,7 +65,7 @@ SELECTED_ALGORITHMS = [
 # =====================================================
 
 BETA_MARKERS = {
-    0.1: 'o',
+    0.1: 's',
     1.0: '^'
 }
 
@@ -332,12 +332,13 @@ def load_results():
             path = os.path.join(root, file)
 
             # ================================
-            # EXTRAÇÃO
+            # EXTRAÇÃO DE METADADOS
             # ================================
             frac = None
             alpha = None
             beta = None
 
+            # 🔹 tenta extrair do path
             frac_match = re.search(r'frac_(\d+\.?\d*)', root)
             alpha_match = re.search(r'alpha_dirichlet_(\d+\.?\d*)', root)
             beta_match = re.search(r'beta_(\d+\.?\d*)', root)
@@ -351,17 +352,27 @@ def load_results():
             if beta_match:
                 beta = float(beta_match.group(1))
 
-            # fallback filename
+            # 🔹 fallback filename
+            name = file.replace(".csv", "").lower()
+
             if frac is None:
-                m = re.search(r'f(\d+\.?\d*)', file)
+                m = re.search(r'f(\d+\.?\d*)', name)
                 if m:
                     frac = float(m.group(1))
 
             if beta is None:
-                m = re.search(r'b(\d+\.?\d*)', file)
+                m = re.search(r'b(\d+\.?\d*)', name)
                 if m:
                     beta = float(m.group(1))
 
+            if alpha is None:
+                m = re.search(r'a(\d+\.?\d*)', name)
+                if m:
+                    alpha = float(m.group(1))
+
+            # ================================
+            # 🔥 FIX CRÍTICO — DEFAULTS
+            # ================================
             if alpha is None:
                 continue
 
@@ -371,14 +382,27 @@ def load_results():
             if frac is None:
                 frac = FRAC
 
+            # 🔥 PRINCIPAL CORREÇÃO
+            if beta is None:
+                beta = 1.0
+
             # ================================
-            # LEITURA
+            # LEITURA CSV
             # ================================
             try:
                 df = pd.read_csv(path)
             except Exception as e:
                 print(f"Erro lendo {path}: {e}")
                 continue
+
+            # ================================
+            # 🔥 GARANTE COLUNA BETA
+            # ================================
+            if "beta" in df.columns:
+                try:
+                    beta = float(df["beta"].dropna().iloc[0])
+                except:
+                    pass
 
             # ================================
             # DATASET
@@ -393,31 +417,30 @@ def load_results():
                 continue
 
             # ================================
-            # 🔥 ALGORITMO LIMPO (SEM BETA)
+            # ALGORITMO NORMALIZADO
             # ================================
-            name = file.replace(".csv", "").lower()
-            name = name.replace("_cifar", "").replace("_gtsrb", "")
+            clean = name.replace("_cifar", "").replace("_gtsrb", "")
 
-            if name.startswith("proposta_k"):
+            if clean.startswith("proposta_k"):
                 alg = "dpfs"
 
-            elif name.startswith("baseline"):
+            elif clean.startswith("baseline"):
                 alg = "baseline"
 
-            elif name.startswith("fedbalancer"):
+            elif clean.startswith("fedbalancer"):
                 alg = "fedbalancer"
 
-            elif name.startswith("fairhetero"):
+            elif clean.startswith("fairhetero"):
                 alg = "fairhetero"
 
-            elif name.startswith("oort"):
+            elif clean.startswith("oort"):
                 alg = "oort"
 
-            elif name.startswith("fedfairmmfl"):
+            elif clean.startswith("fedfairmmfl"):
                 alg = "fedfairmmfl"
 
             else:
-                print(f"Alg desconhecido: {name}")
+                print(f"Alg desconhecido: {clean}")
                 continue
 
             # ================================
@@ -435,8 +458,17 @@ def load_results():
 
     df = pd.concat(dfs, ignore_index=True)
 
-    print("\nALGORITHMS ENCONTRADOS:")
+    # ================================
+    # 🔥 DEBUG IMPORTANTE
+    # ================================
+    print("\n[DEBUG] ALGORITHMS ENCONTRADOS:")
     print(sorted(df["algorithm"].unique()))
+
+    print("\n[DEBUG] DISTRIBUIÇÃO DE BETA:")
+    print(df.groupby(["algorithm", "beta"]).size())
+
+    print("\n[DEBUG] ALPHA:")
+    print(sorted(df["alpha"].unique()))
 
     return df
 
@@ -1029,10 +1061,24 @@ def get_base_algorithm(alg):
 def plot_fairness_vs_accuracy(df):
 
     DATASETS = ["cifar", "gtsrb"]
-    LAST_N_ROUNDS = 5  # ajuste aqui (ex: 5, 10, etc.)
+    LAST_N_ROUNDS = 5
 
-    import re
     import matplotlib.lines as mlines
+
+    # =====================================================
+    # 🔥 NORMALIZAÇÃO FORTE DE BETA
+    # =====================================================
+    df["beta"] = pd.to_numeric(df["beta"], errors="coerce")
+
+    # corrige float
+    df.loc[np.isclose(df["beta"], 0.1), "beta"] = 0.1
+    df.loc[np.isclose(df["beta"], 1.0), "beta"] = 1.0
+
+    # 🔥 REMOVE QUALQUER BETA INVÁLIDO (CRÍTICO)
+    df = df[df["beta"].isin([0.1, 1.0])]
+
+    print("\n[DEBUG FINAL BETA DISTRIBUTION]")
+    print(df.groupby(["algorithm", "beta"]).size())
 
     for metric in FAIRNESS_METRICS:
 
@@ -1051,10 +1097,11 @@ def plot_fairness_vs_accuracy(df):
             if len(ALPHAS) == 1:
                 axes = [axes]
 
-            # ordem correta dos algoritmos
             ordered_algs = get_algorithm_order(df)
 
-            # 🔥 extrai base_algs preservando ordem
+            # =========================
+            # CORES
+            # =========================
             base_algs = []
             seen = set()
 
@@ -1064,16 +1111,13 @@ def plot_fairness_vs_accuracy(df):
                     base_algs.append(base)
                     seen.add(base)
 
+            # 🔥 FORÇA DPFS A SER O PRIMEIRO
+            if "dpfs" in base_algs:
+                base_algs.remove("dpfs")
+                base_algs = ["dpfs"] + base_algs
+
             color_map = {
                 base_alg: plt.cm.tab10(i % 10)
-                for i, base_alg in enumerate(base_algs)
-            }
-
-            # =====================================================
-            # 🔹 MARKERS FIXOS POR ALGORITMO
-            # =====================================================
-            base_marker_map = {
-                base_alg: BASE_MARKERS[i % len(BASE_MARKERS)]
                 for i, base_alg in enumerate(base_algs)
             }
 
@@ -1087,69 +1131,38 @@ def plot_fairness_vs_accuracy(df):
 
                     df_alpha = df[df["alpha"] == alpha]
 
-                    algs = sorted(df_alpha["algorithm"].unique())
-
-                    for alg in algs:
-
-                        subset = df_alpha[df_alpha["algorithm"] == alg]
-
-                        if len(subset) == 0:
-                            continue
-
-                        # =====================================================
-                        # 🔥 NOVO: MÉDIA DAS ÚLTIMAS X RODADAS
-                        # =====================================================
+                    for (alg, beta), subset in df_alpha.groupby(["algorithm", "beta"]):
 
                         subset_ds = subset[subset["dataset"] == dataset]
 
                         if len(subset_ds) == 0:
                             continue
 
-                        # ordenar por rodada
                         subset_ds = subset_ds.sort_values("round")
 
-                        # pegar rounds únicos
                         rounds = subset_ds["round"].unique()
-
                         if len(rounds) == 0:
                             continue
 
-                        # últimas X rodadas
                         last_rounds = rounds[-LAST_N_ROUNDS:]
-
-                        final_ds = subset_ds[
-                            subset_ds["round"].isin(last_rounds)
-                        ]
+                        final_ds = subset_ds[subset_ds["round"].isin(last_rounds)]
 
                         if len(final_ds) == 0:
                             continue
 
-                        # média (rodadas + execuções)
                         fairness_val = final_ds[metric].mean() * 100
                         acc = final_ds["global_acc"].mean() * 100
 
-                        if np.isnan(acc):
+                        if np.isnan(acc) or np.isnan(fairness_val):
                             continue
 
-                        # -------------------------
-                        # β (se existir)
-                        # -------------------------
-                        match = re.search(r'b(\d+\.?\d*)', alg)
-                        beta = float(match.group(1)) if match else None
+                        # =========================
+                        # MARKER (AGORA SEGURO)
+                        # =========================
+                        marker = BETA_MARKERS[beta]
 
-                        # -------------------------
-                        # COR
-                        # -------------------------
                         base_alg = get_base_algorithm(alg)
                         color = color_map[base_alg]
-
-                        # -------------------------
-                        # MARKER
-                        # -------------------------
-                        if beta in BETA_MARKERS:
-                            marker = BETA_MARKERS[beta]
-                        else:
-                            marker = base_marker_map[base_alg]
 
                         ax.scatter(
                             fairness_val,
@@ -1185,7 +1198,6 @@ def plot_fairness_vs_accuracy(df):
             legend_handles = []
             legend_labels = []
 
-            # β → shapes
             for beta, marker in BETA_MARKERS.items():
                 handle = mlines.Line2D(
                     [], [],
@@ -1199,7 +1211,6 @@ def plot_fairness_vs_accuracy(df):
                 legend_handles.append(handle)
                 legend_labels.append(f"$\\beta={beta}$")
 
-            # algoritmos → cores
             for base_alg in base_algs:
 
                 handle = mlines.Line2D(
@@ -1369,8 +1380,6 @@ def build_accuracy_table(df):
 def build_final_accuracy_table(df):
 
     df = enforce_selected_algorithms(df)
-
-    # 🔥 FILTRO CRÍTICO
     df = df[df["beta"] == 1.0]
 
     lines = []
@@ -1396,18 +1405,9 @@ def build_final_accuracy_table(df):
         for alg in df_alpha["algorithm"].unique():
 
             subset = df_alpha[df_alpha["algorithm"] == alg]
-
             subset = subset.sort_values("round")
 
-            if "fold" in subset.columns and subset["fold"].nunique() > 1:
-                final = subset.groupby(["fold", "dataset"]).tail(1)
-            else:
-                final = (
-                    subset
-                    .sort_values("round")
-                    .groupby(["fold", "dataset"])
-                    .tail(1)
-                )
+            final = subset.groupby(["fold", "dataset"]).tail(1)
 
             cifar = final[final["dataset"] == "cifar"]["global_acc"]
             gtsrb = final[final["dataset"] == "gtsrb"]["global_acc"]
@@ -1415,38 +1415,72 @@ def build_final_accuracy_table(df):
             if len(cifar) == 0 or len(gtsrb) == 0:
                 continue
 
+            mean_cifar, ci_cifar = compute_ci(cifar)
+            mean_gtsrb, ci_gtsrb = compute_ci(gtsrb)
+
+            mean_total = (mean_cifar + mean_gtsrb) / 2
+            ci_total = np.sqrt((ci_cifar**2 + ci_gtsrb**2)) / 2
+
             results.append({
                 "alg": alg,
-                "cifar": cifar,
-                "gtsrb": gtsrb,
-                "total": (cifar.values + gtsrb.values) / 2
+                "cifar_mean": mean_cifar,
+                "cifar_ci": ci_cifar,
+                "gtsrb_mean": mean_gtsrb,
+                "gtsrb_ci": ci_gtsrb,
+                "total_mean": mean_total,
+                "total_ci": ci_total,
             })
 
         if len(results) == 0:
             continue
 
-        best_total = max(np.mean(r["total"]) for r in results)
+        df_res = pd.DataFrame(results)
 
-        for r in results:
+        # 🔥 FUNÇÃO DE OVERLAP (ESSENCIAL)
+        def mark_best(col_mean, col_ci):
 
-            name = get_display_name(get_base_algorithm(r["alg"]))
+            best_idx = df_res[col_mean].idxmax()
+            best_mean = df_res.loc[best_idx, col_mean]
+            best_ci = df_res.loc[best_idx, col_ci]
 
-            m_total, s_total = mean_std(pd.Series(r["total"]))
-            m_cifar, s_cifar = mean_std(r["cifar"])
-            m_gtsrb, s_gtsrb = mean_std(r["gtsrb"])
+            selected = []
 
-            total = format_pm(m_total, s_total)
-            cifar = format_pm(m_cifar, s_cifar)
-            gtsrb = format_pm(m_gtsrb, s_gtsrb)
+            best_lower = best_mean - best_ci
+            best_upper = best_mean + best_ci
 
-            if abs(m_total - best_total) < 1e-6:
-                total = f"\\textbf{{{total}}}"
+            for i, row in df_res.iterrows():
+
+                lower = row[col_mean] - row[col_ci]
+                upper = row[col_mean] + row[col_ci]
+
+                overlap = not (upper < best_lower or lower > best_upper)
+
+                if overlap:
+                    selected.append(i)
+
+            return selected
+
+        best_total = mark_best("total_mean", "total_ci")
+        best_cifar = mark_best("cifar_mean", "cifar_ci")
+        best_gtsrb = mark_best("gtsrb_mean", "gtsrb_ci")
+
+        for i, row in df_res.iterrows():
+
+            def fmt(mean, ci, bold):
+                text = f"{mean*100:.2f} $\\pm$ {ci*100:.2f}"
+                return f"\\textbf{{{text}}}" if bold else text
+
+            total = fmt(row["total_mean"], row["total_ci"], i in best_total)
+            cifar = fmt(row["cifar_mean"], row["cifar_ci"], i in best_cifar)
+            gtsrb = fmt(row["gtsrb_mean"], row["gtsrb_ci"], i in best_gtsrb)
+
+            name = get_display_name(get_base_algorithm(row["alg"]))
 
             lines.append(f"{name} & {total} & {cifar} & {gtsrb} \\\\")
 
     lines.append("\\bottomrule")
     lines.append("\\end{tabular}")
-    lines.append("\\caption{Comparação de acurácia (\\%) para diferentes valores de $\\alpha$.}")
+    lines.append("\\caption{Comparação de acurácia (\\%) com IC (95\\%) e destaque por sobreposição.}")
     lines.append("\\label{tab:accuracy}")
     lines.append("\\end{table}")
 
@@ -1571,8 +1605,6 @@ def build_fairness_table_multi_alpha(df):
 def build_final_fairness_table(df):
 
     df = enforce_selected_algorithms(df)
-
-    # 🔥 FILTRO
     df = df[df["beta"] == 1.0]
 
     lines = []
@@ -1583,7 +1615,7 @@ def build_final_fairness_table(df):
     lines.append("\\setlength{\\tabcolsep}{6pt}")
     lines.append("\\begin{tabular}{l|c|cc}")
     lines.append("\\toprule")
-    lines.append("Algoritmo & \eng{Fairness} Médio & F$_\\text{inter}$ & F$_\\text{intra}$ \\\\")
+    lines.append("Algoritmo & Fairness Médio & F$_\\text{inter}$ & F$_\\text{intra}$ \\\\")
     lines.append("\\midrule")
 
     for alpha in sorted(df["alpha"].unique()):
@@ -1598,51 +1630,79 @@ def build_final_fairness_table(df):
         for alg in df_alpha["algorithm"].unique():
 
             subset = df_alpha[df_alpha["algorithm"] == alg]
-
             subset = subset.sort_values("round")
 
-            if "fold" in subset.columns and subset["fold"].nunique() > 1:
-                final = subset.groupby(["fold", "dataset"]).tail(1)
-            else:
-                final = (
-                    subset
-                    .sort_values("round")
-                    .groupby(["fold", "dataset"])
-                    .tail(1)
-                )
+            final = subset.groupby(["fold", "dataset"]).tail(1)
 
             inter = final["inter_client_fairness"]
             intra = final["intra_client_fairness"]
 
+            mean_inter, ci_inter = compute_ci(inter)
+            mean_intra, ci_intra = compute_ci(intra)
+
+            mean_total = np.mean([mean_inter, mean_intra])
+            ci_total = np.mean([ci_inter, ci_intra])
+
             results.append({
                 "alg": alg,
-                "inter": inter,
-                "intra": intra,
-                "total": (inter.values + intra.values) / 2
+                "inter_mean": mean_inter,
+                "inter_ci": ci_inter,
+                "intra_mean": mean_intra,
+                "intra_ci": ci_intra,
+                "total_mean": mean_total,
+                "total_ci": ci_total,
             })
 
-        best_total = max(np.mean(r["total"]) for r in results)
+        if len(results) == 0:
+            continue
 
-        for r in results:
+        df_res = pd.DataFrame(results)
 
-            name = get_display_name(get_base_algorithm(r["alg"]))
+        # 🔥 OVERLAP (MESMA LÓGICA)
+        def mark_best(col_mean, col_ci):
 
-            m_total, s_total = mean_std(pd.Series(r["total"]))
-            m_inter, s_inter = mean_std(r["inter"])
-            m_intra, s_intra = mean_std(r["intra"])
+            best_idx = df_res[col_mean].idxmax()
+            best_mean = df_res.loc[best_idx, col_mean]
+            best_ci = df_res.loc[best_idx, col_ci]
 
-            total = format_pm(m_total, s_total, scale=1)
-            inter = format_pm(m_inter, s_inter, scale=1)
-            intra = format_pm(m_intra, s_intra, scale=1)
+            selected = []
 
-            if abs(m_total - best_total) < 1e-6:
-                total = f"\\textbf{{{total}}}"
+            best_lower = best_mean - best_ci
+            best_upper = best_mean + best_ci
+
+            for i, row in df_res.iterrows():
+
+                lower = row[col_mean] - row[col_ci]
+                upper = row[col_mean] + row[col_ci]
+
+                overlap = not (upper < best_lower or lower > best_upper)
+
+                if overlap:
+                    selected.append(i)
+
+            return selected
+
+        best_total = mark_best("total_mean", "total_ci")
+        best_inter = mark_best("inter_mean", "inter_ci")
+        best_intra = mark_best("intra_mean", "intra_ci")
+
+        for i, row in df_res.iterrows():
+
+            def fmt(mean, ci, bold):
+                text = f"{mean:.2f} $\\pm$ {ci:.2f}"
+                return f"\\textbf{{{text}}}" if bold else text
+
+            total = fmt(row["total_mean"], row["total_ci"], i in best_total)
+            inter = fmt(row["inter_mean"], row["inter_ci"], i in best_inter)
+            intra = fmt(row["intra_mean"], row["intra_ci"], i in best_intra)
+
+            name = get_display_name(get_base_algorithm(row["alg"]))
 
             lines.append(f"{name} & {total} & {inter} & {intra} \\\\")
 
     lines.append("\\bottomrule")
     lines.append("\\end{tabular}")
-    lines.append("\\caption{Comparação de fairness para diferentes valores de $\\alpha$.}")
+    lines.append("\\caption{Comparação de fairness com IC (95\\%) e destaque por sobreposição.}")
     lines.append("\\label{tab:fairness}")
     lines.append("\\end{table}")
 

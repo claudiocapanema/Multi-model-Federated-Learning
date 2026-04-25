@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 # CONFIG
 # =====================================================
 
-ALPHA = 1.0
-# ALPHA = 0.1
+# ALPHA = 1.0
+ALPHA = 0.1
 
 COST_RATIOS = ["1.0x", "2.0x", "4.0x", "6.0x", "8.0x", "10.0x"]
 
@@ -62,7 +62,10 @@ def get_algorithm_order(df):
 
 def load_results(cost_ratio):
 
-    path = os.path.join(RESULTS_BASE_DIR, f"gtsrb_{cost_ratio}_cifar")
+    path = os.path.join(
+        RESULTS_BASE_DIR,
+        f"gtsrb_{cost_ratio}_cifar/frac_0.3/alpha_dirichlet_0.1/beta_1.0/"
+    )
 
     if not os.path.exists(path):
         return None
@@ -75,73 +78,50 @@ def load_results(cost_ratio):
             continue
 
         full = os.path.join(path, file)
+        print(full)
 
-        if file.startswith("baseline_") and f"alpha_{ALPHA}" in file:
-            for frac in BASELINE_FRACS:
-                if f"frac_{frac}" in file:
-                    df = pd.read_csv(full)
-                    df["algorithm"] = f"baseline_f{frac}"
-                    dfs.append(df)
+        df = pd.read_csv(full)
 
+        # =========================
+        # 🔥 IDENTIFICA ALGORITMO
+        # =========================
+        if file.startswith("fairhetero_"):
+            df["algorithm"] = "fairhetero"
 
-        elif file.startswith("proposta_k_"):
+        elif file.startswith("fedfairmmfl_"):
+            df["algorithm"] = "fedfairmmfl_f0.3"
 
-            # 🔥 FILTROS EXATOS (IMPORTANTÍSSIMO)
+        elif file.startswith("baseline_"):
+            df["algorithm"] = "baseline_f0.3"
 
-            if f"frac_{0.3}" not in file:
-                continue
+        elif file.startswith("oort_"):
+            df["algorithm"] = "oort"
 
-            if f"alpha_{ALPHA}" not in file:
-                continue
+        elif file.startswith("fedbalancer_"):
+            df["algorithm"] = "fedbalancer"
 
-            if f"alphaEff_" not in file:
-                continue
+        elif file.startswith("proposta_"):
+            df["algorithm"] = "fair_resource_k0.3"
 
-            if f"lambdaCap_" not in file:
-                continue
+        else:
+            print(f"⚠️ Ignorando arquivo: {file}")
+            continue
 
-            if f"lambdaIntra_" not in file:
-                continue
+        # =========================
+        # 🔥 GARANTE DATASET CORRETO
+        # =========================
+        if "dataset" not in df.columns:
 
-            df = pd.read_csv(full)
-
-            # 🔥 extrai dataset do nome (cifar / gtsrb)
-
-            if "_cifar_" in file:
-
+            if "_cifar" in file:
                 df["dataset"] = "cifar"
 
-            elif "_gtsrb_" in file:
-
+            elif "_gtsrb" in file:
                 df["dataset"] = "gtsrb"
 
             else:
+                raise ValueError(f"Dataset não identificado: {file}")
 
-                raise ValueError(f"Dataset não identificado no arquivo: {file}")
-
-            df["algorithm"] = "fair_resource_k0.3"
-
-            dfs.append(df)
-
-        elif file.startswith("fedfairmmfl_") and f"alpha_{ALPHA}" in file:
-            df = pd.read_csv(full)
-            df["algorithm"] = "fedfairmmfl_f0.3"
-            dfs.append(df)
-
-        elif file.startswith("oort_") and f"alpha_{ALPHA}" in file:
-            df = pd.read_csv(full)
-            df["algorithm"] = "oort"
-            dfs.append(df)
-
-        elif file.startswith("fairhetero_") and f"alpha_{ALPHA}" in file:
-            df = pd.read_csv(full)
-            df["algorithm"] = "fairhetero"
-            dfs.append(df)
-
-        elif file.startswith("fedbalancer_") and f"alpha_{ALPHA}" in file:
-            df = pd.read_csv(full)
-            df["algorithm"] = "fedbalancer"
-            dfs.append(df)
+        dfs.append(df)
 
     if len(dfs) == 0:
         return None
@@ -328,6 +308,8 @@ def plot(metric, ylabel):
     plt.savefig(os.path.join(OUTPUT_DIR, f"{metric}.png"))
     plt.savefig(os.path.join(OUTPUT_DIR, f"{metric}.pdf"))
     plt.close()
+
+    print(OUTPUT_DIR)
 
 # =====================================================
 # GERAR OS 3 GRÁFICOS

@@ -29,7 +29,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # =====================================================
 
 BASE_SEED = 42
-NUM_FOLDS = 5
+NUM_FOLDS = 1
 NUM_CLIENTS = 40
 ROUNDS = 100
 FRAC = 0.3
@@ -119,10 +119,10 @@ DIRICHLET_ALPHA = 0.1
 
 # COST_SETUP_NAME = "cost_1x"
 # COST_SETUP_NAME = "cost_2x"
-COST_SETUP_NAME = "cost_4x"
+# COST_SETUP_NAME = "cost_4x"
 # COST_SETUP_NAME = "cost_6x"
 # COST_SETUP_NAME = "cost_8x"
-# COST_SETUP_NAME = "cost_10x"
+COST_SETUP_NAME = "cost_10x"
 
 
 MODEL_COST = MODEL_COST_SETUPS[COST_SETUP_NAME]
@@ -143,34 +143,36 @@ LAMBDA_INTRA = 0.3
 assert LAMBDA_CAPACITY + LAMBDA_INTRA <= 1.0
 
 # =====================================================
-# OORT STATES
+# OORT STATES (FINAL LIMPO)
 # =====================================================
 
-client_last_round = {
-    cid: {"cifar": 1, "gtsrb": 1}
+client_stats = {
+    cid: {
+        "cifar": {
+            "loss": 1.0,
+            "num_samples": 1,
+            "duration": 1.0,
+            "count": 0
+        },
+        "gtsrb": {
+            "loss": 1.0,
+            "num_samples": 1,
+            "duration": 1.0,
+            "count": 0
+        }
+    }
     for cid in range(NUM_CLIENTS)
 }
 
-client_duration = {
-    cid: {"cifar": 1.0, "gtsrb": 1.0}
-    for cid in range(NUM_CLIENTS)
-}
-client_utility = {cid: 0.0 for cid in range(NUM_CLIENTS)}
+explored_pairs = set()
 
-explored_clients = set()
-
-# Pacer
 oort_T = 1.0
 oort_delta = 0.2
 oort_window = 5
-
-# histórico de utilidade por rodada
 oort_round_utilities = []
 
-# parâmetros
 EPSILON = 0.2
 ALPHA_OORT = 1.0
-CUTOFF_PERCENTILE = 0.95
 
 # =====================================================
 # FAIR RESOURCE BUDGET
@@ -180,6 +182,126 @@ LIGHT_MODEL = min(
     MODEL_COST,
     key=lambda m: MODEL_COST[m]["flops_per_sample"]
 )
+
+def compute_statistical_utility(loss, num_samples):
+    """
+    Aproximação fiel ao Oort:
+    U(i) ~ |B_i| * sqrt(mean(loss^2))
+    """
+    loss = max(loss, 1e-6)
+    return num_samples * np.sqrt(loss**2)
+
+
+def compute_oort_utility(cid, model_name, rnd):
+
+    stats = client_stats[cid][model_name]
+
+    loss = max(stats["loss"], 1e-6)
+    num_samples = stats["num_samples"]
+
+    U = num_samples * loss
+
+    if stats["duration"] > oort_T:
+        U *= (oort_T / stats["duration"]) ** ALPHA_OORT
+
+    return U
+
+def compute_exploration_bonus(cid, model_name, rnd):
+
+    stats = client_stats[cid][model_name]
+
+    return np.sqrt(
+        0.1 * np.log(rnd + 1) / (stats["count"] + 1)
+    )
+
+def update_pacer():
+    global oort_T
+
+    if len(oort_round_utilities) < 2 * oort_window:
+        return
+
+    prev = np.sum(oort_round_utilities[-2*oort_window:-oort_window])
+    curr = np.sum(oort_round_utilities[-oort_window:])
+
+    if curr < prev:
+        oort_T += oort_delta
+
+def oort_multi_model_selection(all_clients, models, K, rnd):
+
+    selected = []
+    used = set()
+    round_utility = 0.0
+
+    K_per_model = K // len(models)
+
+    for m in models:
+
+        candidates = []
+
+        for cid in all_clients:
+
+            if cid in used:
+                continue
+
+            U = compute_oort_utility(cid, m, rnd)
+            B = compute_exploration_bonus(cid, m, rnd)
+
+            candidates.append((cid, U + B, U))
+
+        candidates.sort(key=lambda x: x[1], reverse=True)
+
+        exploit_K = max(1, int((1 - EPSILON) * K_per_model))
+        exploit = candidates[:exploit_K]
+
+        remaining = [
+            c for c in candidates[exploit_K:]
+            if (c[0], m) not in explored_pairs
+        ]
+
+        explore_K = K_per_model - len(exploit)
+
+        explore = []
+
+        if explore_K > 0:
+
+            # -------- caso normal --------
+            if len(remaining) > 0:
+                actual_K = min(explore_K, len(remaining))
+
+                idx = np.random.choice(
+                    len(remaining),
+                    actual_K,
+                    replace=False
+                )
+
+                explore = [remaining[i] for i in idx]
+
+            # -------- fallback (se ainda faltar) --------
+            if len(explore) < explore_K:
+                needed = explore_K - len(explore)
+
+                fallback = candidates[exploit_K:]
+
+                if len(fallback) > 0:
+                    extra_idx = np.random.choice(
+                        len(fallback),
+                        min(needed, len(fallback)),
+                        replace=False
+                    )
+
+                    explore += [fallback[i] for i in extra_idx]
+
+        chosen = exploit + explore
+
+        for cid, score, U in chosen:
+            selected.append((cid, m))
+            used.add(cid)
+            explored_pairs.add((cid, m))
+            round_utility += U
+
+    oort_round_utilities.append(round_utility)
+
+    return selected
 
 # =====================================================
 # COST RATIO (AUTOMÁTICO)
@@ -288,155 +410,22 @@ def estimate_training_time(cid, model_name):
 
     return train_time * noise
 
-def compute_oort_utility(cid, rnd):
+def update_oort_feedback(selected_pairs, rnd):
 
-    # -------- STATISTICAL UTILITY --------
-    U = client_utility[cid]
+    for cid, m in selected_pairs:
 
-    # -------- UNCERTAINTY BONUS --------
-    last = client_last_round[cid]
-    bonus = np.sqrt(0.1 * np.log(rnd + 1) / (last + 1))
+        stats = client_stats[cid][m]
 
-    U = U + bonus
+        stats["loss"] = client_loss[cid][m]
 
-    # -------- SYSTEM UTILITY --------
-    duration = client_duration[cid]
+        if m == "cifar":
+            stats["num_samples"] = client_resources[cid]["data_size_cifar"]
+        else:
+            stats["num_samples"] = client_resources[cid]["data_size_gtsrb"]
 
-    if duration > oort_T:
-        U = U * (oort_T / duration) ** ALPHA_OORT
+        stats["duration"] = training_time_cache[cid][m]
 
-    return U
-
-def update_pacer(oort_round_utilities, oort_T, delta, window):
-
-    if len(oort_round_utilities) < 2 * window:
-        return oort_T
-
-    prev = sum(oort_round_utilities[-2*window:-window])
-    curr = sum(oort_round_utilities[-window:])
-
-    if prev > curr:
-        oort_T += delta
-
-    return oort_T
-
-def oort_multi_model_selection(
-    all_clients,
-    models,   # ["cifar", "gtsrb"]
-    K,
-    rnd,
-    epsilon,
-    oort_T,
-    alpha,
-    client_loss,
-    client_resources,
-    client_last_round,
-    client_duration,
-    explored_pairs   # (cid, model)
-):
-
-    candidates = []
-
-    # =====================================================
-    # 1) COMPUTE UTILITY POR (CLIENT, MODEL)
-    # =====================================================
-    for cid in all_clients:
-        for m in models:
-
-            if m == "cifar":
-                loss = client_loss[cid]["cifar"]
-                data = client_resources[cid]["data_size_cifar"]
-            else:
-                loss = client_loss[cid]["gtsrb"]
-                data = client_resources[cid]["data_size_gtsrb"]
-
-            loss = loss if np.isfinite(loss) else 1.0
-            U = data * abs(loss)
-
-            # -------- uncertainty --------
-            last = client_last_round[cid][m]
-            bonus = np.sqrt(0.1 * np.log(rnd + 1) / (last + 1))
-            U += bonus
-
-            # -------- system --------
-            duration = client_duration[cid][m]
-            if duration > oort_T:
-                U *= (oort_T / duration) ** alpha
-
-            candidates.append((cid, m, U))
-
-    # =====================================================
-    # 2) EXPLOITATION
-    # =====================================================
-    candidates = sorted(candidates, key=lambda x: x[2], reverse=True)
-
-    exploit_K = int((1 - epsilon) * K)
-    exploit_K = max(1, exploit_K)
-
-    cutoff_value = candidates[min(exploit_K-1, len(candidates)-1)][2]
-    threshold = 0.95 * cutoff_value
-
-    W = [c for c in candidates if c[2] >= threshold]
-
-    # sampling proporcional
-    probs = np.array([c[2] for c in W])
-    probs = probs / probs.sum()
-
-    exploit_selected = list(np.random.choice(
-        len(W),
-        size=min(len(W), exploit_K),
-        replace=False,
-        p=probs
-    ))
-
-    exploit_pairs = [W[i] for i in exploit_selected]
-
-    # =====================================================
-    # 3) EXPLORATION
-    # =====================================================
-    unexplored = [
-        (cid, m)
-        for cid in all_clients
-        for m in models
-        if (cid, m) not in explored_pairs
-    ]
-
-    explore_K = K - len(exploit_pairs)
-
-    explore_pairs = []
-
-    if len(unexplored) > 0 and explore_K > 0:
-
-        speeds = np.array([
-            1.0 / (client_duration[cid][m] + 1e-6)
-            for cid, m in unexplored
-        ])
-
-        probs = speeds / speeds.sum()
-
-        idx = np.random.choice(
-            len(unexplored),
-            size=min(len(unexplored), explore_K),
-            replace=False,
-            p=probs
-        )
-
-        explore_pairs = [
-            (cid, m, 0.0)  # utility dummy
-            for cid, m in [unexplored[i] for i in idx]
-        ]
-
-    all_pairs = exploit_pairs + explore_pairs  # ainda tem (cid, m, u)
-
-    used = set()
-    final = []
-
-    for cid, m, u in all_pairs:
-        if cid not in used:
-            final.append((cid, m))
-            used.add(cid)
-
-    return final[:K]
+        stats["count"] += 1
 
 # =====================================================
 # RESET DO ESTADO GLOBAL (POR FOLD)
@@ -835,137 +824,6 @@ def compute_gamma_intra_static(beta=BETA, eps=1e-16):
 
     return gamma_intra
 
-def compute_oort_utility_model(cid, model_name, rnd):
-
-    # -------- STATISTICAL UTILITY --------
-    if model_name == "cifar":
-        loss = client_loss[cid]["cifar"]
-        data = client_resources[cid]["data_size_cifar"]
-    else:
-        loss = client_loss[cid]["gtsrb"]
-        data = client_resources[cid]["data_size_gtsrb"]
-
-    loss = loss if np.isfinite(loss) else 1.0
-    U = data * abs(loss)
-
-    # -------- UNCERTAINTY BONUS (POR MODELO) --------
-    last = client_last_round[cid][model_name]
-    bonus = np.sqrt(0.1 * np.log(rnd + 1) / (last + 1))
-    U += bonus
-
-    # -------- SYSTEM COST (POR MODELO) --------
-    duration = client_duration[cid][model_name]
-
-    if duration > oort_T:
-        U = U * (oort_T / duration) ** ALPHA_OORT
-
-    return U
-
-def oort_select_participants(
-    all_clients,
-    K,
-    rnd,
-    epsilon,
-    oort_T,
-    alpha,
-    client_utility,
-    client_last_round,
-    client_duration,
-    explored_clients
-):
-
-    utilities = {}
-
-    # =====================================================
-    # 1) UPDATE + COMPUTE UTILITY (explored clients only)
-    # =====================================================
-    for cid in explored_clients:
-
-        U = client_utility[cid]
-
-        # -------- uncertainty bonus --------
-        last = client_last_round[cid]
-        bonus = np.sqrt(0.1 * np.log(rnd + 1) / (last + 1))
-        U += bonus
-
-        # -------- system penalty --------
-        duration = client_duration[cid]
-        if duration > oort_T:
-            U *= (oort_T / duration) ** alpha
-
-        utilities[cid] = U
-
-    # =====================================================
-    # 2) EXPLOITATION
-    # =====================================================
-
-    # ordena por utility
-    sorted_clients = sorted(utilities, key=utilities.get, reverse=True)
-
-    exploit_K = int((1 - epsilon) * K)
-    exploit_K = max(1, exploit_K)
-
-    if len(sorted_clients) > 0:
-
-        # cutoff (c%)
-        cutoff_value = utilities[sorted_clients[min(exploit_K - 1, len(sorted_clients)-1)]]
-        threshold = 0.95 * cutoff_value
-
-        # pool W
-        W = [cid for cid in sorted_clients if utilities[cid] >= threshold]
-
-        # -------- sampling probabilístico --------
-        probs = np.array([utilities[cid] for cid in W])
-        probs = probs / probs.sum()
-
-        exploit_selected = list(np.random.choice(
-            W,
-            size=min(len(W), exploit_K),
-            replace=False,
-            p=probs
-        ))
-
-    else:
-        exploit_selected = []
-
-    # =====================================================
-    # 3) EXPLORATION (UNEXPLORED CLIENTS)
-    # =====================================================
-    unexplored = list(set(all_clients) - explored_clients)
-
-    explore_K = K - len(exploit_selected)
-
-    if len(unexplored) > 0 and explore_K > 0:
-
-        # -------- por speed (paper sugere isso) --------
-        speeds = np.array([
-            1.0 / (client_duration[cid] + 1e-6)
-            for cid in unexplored
-        ])
-
-        probs = speeds / speeds.sum()
-
-        explore_selected = list(np.random.choice(
-            unexplored,
-            size=min(len(unexplored), explore_K),
-            replace=False,
-            p=probs
-        ))
-
-    else:
-        explore_selected = []
-
-    # =====================================================
-    # 4) FINAL
-    # =====================================================
-    selected = exploit_selected + explore_selected
-
-    # update explored
-    for cid in selected:
-        explored_clients.add(cid)
-
-    return selected
-
 def run_experiment():
 
     global oort_T
@@ -1038,8 +896,6 @@ def run_experiment():
         gamma_inter_static = compute_gamma_inter_static()
         gamma_intra_static = compute_gamma_intra_static()
 
-        explored_pairs = set()
-
         # =====================================================
         # LOOP PRINCIPAL DE RODADAS FEDERADAS
         # =====================================================
@@ -1074,46 +930,15 @@ def run_experiment():
             real_training_counter = {m: 0 for m in global_models}
 
             # =====================================================
-            # 1) SELEÇÃO DE CLIENTES (CORE DO MÉTO DO)
-            # Balanced Resource + Fairness entre clientes
-            # =====================================================
-
-            clients_cifar = []
-            clients_gtsrb = []
-
-            # controle de budget por rodada
-            resource_usage = {
-                "cifar": 0.0,
-                "gtsrb": 0.0
-            }
-
-            # =====================================================
-            # OORT MULTI-MODEL SELECTION
-            # =====================================================
-
-            # =====================================================
             # OORT MULTI-MODEL SELECTION (CORRIGIDO)
             # =====================================================
 
-            # -------- construir candidatos --------
             selected_pairs = oort_multi_model_selection(
                 all_clients=list(range(NUM_CLIENTS)),
                 models=["cifar", "gtsrb"],
                 K=K_CLIENTS,
-                rnd=rnd,
-                epsilon=EPSILON,
-                oort_T=oort_T,
-                alpha=ALPHA_OORT,
-                client_loss=client_loss,
-                client_resources=client_resources,
-                client_last_round=client_last_round,
-                client_duration=client_duration,
-                explored_pairs=explored_pairs
+                rnd=rnd
             )
-
-            # 🔥 atualizar exploration memory
-            for cid, m in selected_pairs:
-                explored_pairs.add((cid, m))
 
             # -------- separa por modelo (ESSENCIAL) --------
             clients_cifar = []
@@ -1143,7 +968,6 @@ def run_experiment():
             # 2) TREINAMENTO LOCAL — CIFAR
             # =====================================================
             for cid in clients_cifar:
-
                 train_time = training_time_cache[cid]["cifar"]
                 local_model = copy.deepcopy(global_models["cifar"])
 
@@ -1160,31 +984,10 @@ def run_experiment():
                 model_updates["cifar"].append((state_dict, n_samples))
                 real_training_counter["cifar"] += 1
 
-                # -------- UPDATE OORT FEEDBACK --------
-                client_last_round[cid]["cifar"] = rnd
-                client_duration[cid]["cifar"] = train_time
-
-                # -------- UTILITY POR MODELO --------
-
-                loss_cifar = client_loss[cid]["cifar"]
-                loss_gtsrb = client_loss[cid]["gtsrb"]
-
-                loss_cifar = loss_cifar if np.isfinite(loss_cifar) else 1.0
-                loss_gtsrb = loss_gtsrb if np.isfinite(loss_gtsrb) else 1.0
-
-                data_cifar = client_resources[cid]["data_size_cifar"]
-                data_gtsrb = client_resources[cid]["data_size_gtsrb"]
-
-                utility_cifar = data_cifar * abs(loss_cifar)
-                utility_gtsrb = data_gtsrb * abs(loss_gtsrb)
-
-                explored_clients.add(cid)
-
             # =====================================================
             # 3) TREINAMENTO LOCAL — GTSRB
             # =====================================================
             for cid in clients_gtsrb:
-
                 train_time = training_time_cache[cid]["gtsrb"]
                 local_model = copy.deepcopy(global_models["gtsrb"])
 
@@ -1201,33 +1004,8 @@ def run_experiment():
                 model_updates["gtsrb"].append((state_dict, n_samples))
                 real_training_counter["gtsrb"] += 1
 
-                # -------- UPDATE OORT FEEDBACK --------
-                client_last_round[cid]["gtsrb"] = rnd
-                client_duration[cid]["gtsrb"] = train_time
-
-                # utility estatística (loss-based, paper)
-                data_size = (
-                        client_resources[cid]["data_size_cifar"] +
-                        client_resources[cid]["data_size_gtsrb"]
-                )
-
-                # -------- UTILITY POR MODELO --------
-
-                loss_cifar = client_loss[cid]["cifar"]
-                loss_gtsrb = client_loss[cid]["gtsrb"]
-
-                loss_cifar = loss_cifar if np.isfinite(loss_cifar) else 1.0
-                loss_gtsrb = loss_gtsrb if np.isfinite(loss_gtsrb) else 1.0
-
-                data_cifar = client_resources[cid]["data_size_cifar"]
-                data_gtsrb = client_resources[cid]["data_size_gtsrb"]
-
-                utility_cifar = data_cifar * abs(loss_cifar)
-                utility_gtsrb = data_gtsrb * abs(loss_gtsrb)
-
-                client_utility[cid] = utility_cifar + utility_gtsrb
-
-                explored_clients.add(cid)
+            update_oort_feedback(selected_pairs, rnd)
+            update_pacer()
 
             # =====================================================
             # 4) AGREGAÇÃO FEDAVG
@@ -1273,17 +1051,7 @@ def run_experiment():
                 model_names
             )
 
-            round_util = sum(
-                compute_oort_utility_model(cid, m, rnd)
-                for cid, m in selected_pairs
-            )
-            oort_round_utilities.append(round_util)
-            oort_T = update_pacer(
-                oort_round_utilities,
-                oort_T,
-                oort_delta,
-                oort_window
-            )
+            update_pacer()
 
             # =====================================================
             # 6) LOGS DE RECURSOS E FAIRNESS
