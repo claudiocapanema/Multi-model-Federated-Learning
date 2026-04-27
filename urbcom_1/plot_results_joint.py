@@ -1242,8 +1242,8 @@ def plot_fairness_vs_accuracy(df):
             )
 
             metric_display = {
-                "inter_client_fairness": "EPF-Inter",
-                "intra_client_fairness": "EPF-Intra",
+                "inter_client_fairness": "CPF-Inter",
+                "intra_client_fairness": "CPF-Intra",
                 "inter_model_fairness": "Inter-Model"
             }
 
