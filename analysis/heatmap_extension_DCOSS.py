@@ -56,8 +56,8 @@ def read_data(read_solutions, read_dataset_order):
 
     solution_strategy_version = {
         "MultiFedAvg+MFP_v2": {"Strategy": "MultiFedAvg", "Version": "MFP", "Table": "$MultiFedAvg+MFP_{v2}$"},
-        "MultiFedAvg+MFP_v2_dh": {"Strategy": "MultiFedAvg", "Version": "MFP_dh", "Table": "$MultiFedAvg+MFP_{v2dh}$"},
-        "MultiFedAvg+MFP_v2_iti": {"Strategy": "MultiFedAvg", "Version": "MFP_iti", "Table": "$MultiFedAvg+MFP_{v2iti}$"},
+        "MultiFedAvg+MFP_v2_dh": {"Strategy": "MultiFedAvg", "Version": "MFP_dh", "Table": "$MultiFedAvg+MFP_{DDH}$"},
+        "MultiFedAvg+MFP_v2_iti": {"Strategy": "MultiFedAvg", "Version": "MFP_iti", "Table": "$MultiFedAvg+MFP_{ITI}$"},
         "MultiFedAvg+MFP": {"Strategy": "MultiFedAvg", "Version": "MFP", "Table": "MultiFedAvg+MFP"},
         "MultiFedAvg+FPD": {"Strategy": "MultiFedAvg", "Version": "FPD", "Table": "MultiFedAvg+FPD"},
         "MultiFedAvg+FP": {"Strategy": "MultiFedAvg", "Version": "FP", "Table": "MultiFedAvg+FP"},
@@ -138,6 +138,9 @@ def read_data_multi_experiments(
                 read_solutions[solution].append(
                     "{}{}_{}.csv".format(read_path, dt, solution)
                 )
+
+                if "0.1-1.0" in experiment_id:
+                    print("📂 Arquivo lido:", "{}{}_{}.csv".format(read_path, dt, solution))
 
         df_exp = read_data(read_solutions, read_dataset_order)
 
@@ -528,14 +531,11 @@ def generate_summary_table(df_gain, metric, output_path, baseline="MultiFedAvg")
 
     name_map = {
         "MultiFedAvg+MFP_v2": "MFP",
-        "MultiFedAvg+MFP_v2_dh": "MFP-dh",
-        "MultiFedAvg+MFP_v2_iti": "MFP-iti",
-        "MultiFedAvg+MFP": "MFP",
+        "MultiFedAvg+MFP_v2_dh": "MFP$_{\\text{DDH}}$",
+        "MultiFedAvg+MFP_v2_iti": "MFP$_{\\text{ITI}}$",
         "MultiFedAvg+FPD": "FPD",
         "MultiFedAvg+FP": "FP",
         "DMA-FL": "DMA-FL",
-        # "AdaptiveFedAvg": "AdaptiveFedAvg",
-        "MultiFedAvgRR": "MultiFedAvgRR",
         "MultiFedAvg": "MultiFedAvg"
     }
 
@@ -673,7 +673,7 @@ def generate_summary_table(df_gain, metric, output_path, baseline="MultiFedAvg")
     with open(latex_path, "w") as f:
         f.write(latex_code)
 
-    print("Tabela LaTeX salva em:", latex_path)
+    print("-- Tabela LaTeX salva em:", latex_path)
 
     return df_summary
 
@@ -717,7 +717,7 @@ if __name__ == "__main__":
     total_clients = 40
     datasets = ["WISDM-W", "ImageNet10", "Foursquare"]
     model_name = ["gru", "CNN", "lstm"]
-    fraction_fit = 0.3
+    fraction_fit = 0.375
     # number_of_rounds = 30
     number_of_rounds = 100
     local_epochs = 1
@@ -735,7 +735,7 @@ if __name__ == "__main__":
         "MultiFedAvg"
     ]
 
-    write_path = f"plots/MEFL/multi_experiments/rounds_{number_of_rounds}/"
+    write_path = f"plots/MEFL/multi_experiments/rounds_{number_of_rounds}/fc_{fraction_fit}/"
 
     df = read_data_multi_experiments(
         experiment_ids,
@@ -750,6 +750,6 @@ if __name__ == "__main__":
     )
 
     # Exemplo:
-    analysis_path = f"plots/MEFL/multi_experiments/analysis/rounds_{number_of_rounds}/"
+    analysis_path = f"plots/MEFL/multi_experiments/analysis/rounds_{number_of_rounds}/fc_{fraction_fit}/"
     # run_transition_analysis(df, "Balanced accuracy (%)", analysis_path)
     run_transition_analysis(df, "Accuracy (%)", analysis_path)

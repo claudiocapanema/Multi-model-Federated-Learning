@@ -100,7 +100,7 @@ def filter_after_shift(df):
 
     # retorna apenas após shift
     df = df[df[round_col] >= shift_round]
-    df = df[df[round_col] <= shift_round + 10]
+    df = df[df[round_col] < shift_round + 10]
     return df
 
 def read_data(read_solutions, read_dataset_order):
@@ -108,9 +108,9 @@ def read_data(read_solutions, read_dataset_order):
     df_concat = None
 
     solution_strategy_version = {
-        "MultiFedAvg+MFP_v2": {"Strategy": "MultiFedAvg", "Version": "MFP_v2", "Table": "$MultiFedAvg+MFP_{v2}$"},
-        "MultiFedAvg+MFP_v2_dh": {"Strategy": "MultiFedAvg", "Version": "MFP_v2_dh", "Table": "$MultiFedAvg+MFP_{v2dh}$"},
-        "MultiFedAvg+MFP_v2_iti": {"Strategy": "MultiFedAvg", "Version": "MFP_v2_iti", "Table": "$MultiFedAvg+MFP_{v2iti}$"},
+        "MultiFedAvg+MFP_v2": {"Strategy": "MultiFedAvg", "Version": "MFP_v2", "Table": "$MultiFedAvg+MFP$"},
+        "MultiFedAvg+MFP_v2_dh": {"Strategy": "MultiFedAvg", "Version": "MFP_v2_dh", "Table": "$MultiFedAvg+MFP_{DDH}$"},
+        "MultiFedAvg+MFP_v2_iti": {"Strategy": "MultiFedAvg", "Version": "MFP_v2_iti", "Table": "$MultiFedAvg+MFP_{ITI}$"},
         "MultiFedAvg+MFP": {"Strategy": "MultiFedAvg", "Version": "MFP", "Table": "MultiFedAvg+MFP"},
         "MultiFedAvg+FPD": {"Strategy": "MultiFedAvg", "Version": "FPD", "Table": "MultiFedAvg+FPD"},
         "MultiFedAvg+FP": {"Strategy": "MultiFedAvg", "Version": "FP", "Table": "MultiFedAvg+FP"},
@@ -540,8 +540,8 @@ def generate_rich_heatmaps(df, metric, output_path, baseline="MultiFedAvg"):
             "figure.titlesize": 17
         })
 
-        filename_png = save_dir / f"{dataset}_{metric.replace(' ', '_')}_rich_heatmap.png"
-        filename_pdf = save_dir / f"{dataset}_{metric.replace(' ', '_')}_rich_heatmap.pdf".replace("_(%)", "")
+        filename_png = save_dir / f"{dataset}_{metric.replace(' ', '_')}_after_round_of_data_shift_rich_heatmap.png"
+        filename_pdf = save_dir / f"{dataset}_{metric.replace(' ', '_')}_after_round_of_data_shift_rich_heatmap.pdf".replace("_(%)", "")
 
         plt.savefig(filename_png, dpi=300, bbox_inches="tight")
         plt.savefig(filename_pdf, format="pdf", bbox_inches="tight")
@@ -598,14 +598,12 @@ def generate_summary_table(df_gain, metric, output_path, baseline="MultiFedAvg")
     # =====================================================
 
     name_map = {
-        "MultiFedAvg+MFP_v2": "MFPv2",
-        "MultiFedAvg+MFP_v2_dh": "MFPv2-dh",
-        "MultiFedAvg+MFP_v2_iti": "MFPv2-iti",
-        "MultiFedAvg+MFP": "MFP",
+        "MultiFedAvg+MFP_v2": "MFP",
+        "MultiFedAvg+MFP_v2_dh": "MFP$_{\\text{DDH}}$",
+        "MultiFedAvg+MFP_v2_iti": "MFP$_{\\text{ITI}}$",
         "MultiFedAvg+FPD": "FPD",
         "MultiFedAvg+FP": "FP",
         "DMA-FL": "DMA-FL",
-        # "AdaptiveFedAvg": "AdaptiveFedAvg",
         "MultiFedAvg": "MultiFedAvg"
     }
 
@@ -664,7 +662,6 @@ def generate_summary_table(df_gain, metric, output_path, baseline="MultiFedAvg")
             else:
                 mean_gain = np.mean(dataset_means)
 
-            # 🔹 substituir 0 por "-"
             if round(mean_gain, 2) == 0.00:
                 row[label] = "-"
             else:
@@ -674,7 +671,6 @@ def generate_summary_table(df_gain, metric, output_path, baseline="MultiFedAvg")
 
         mean_global = np.mean(gains_all)
 
-        # 🔹 substituir 0 por "-"
         if round(mean_global, 2) == 0.00:
             row["Mean Gain"] = "-"
         else:
@@ -685,7 +681,7 @@ def generate_summary_table(df_gain, metric, output_path, baseline="MultiFedAvg")
     df_summary = pd.DataFrame(rows)
 
     # =====================================================
-    # 🔹 DESTACAR MELHOR POR COLUNA (exceto baseline)
+    # 🔹 DESTACAR MELHOR POR COLUNA (TRANSIÇÕES)
     # =====================================================
 
     for label in transition_labels:
@@ -708,6 +704,29 @@ def generate_summary_table(df_gain, metric, output_path, baseline="MultiFedAvg")
 
                 if cell != "-" and float(cell) == max_value:
                     df_summary.loc[idx, label] = "\\textbf{" + cell + "}"
+
+    # =====================================================
+    # 🔹 DESTACAR MELHOR NA COLUNA "Mean Gain"
+    # =====================================================
+
+    mean_values = []
+
+    for _, row in df_summary.iterrows():
+        if row["Solution"] == "MultiFedAvg":
+            mean_values.append(-np.inf)
+        elif row["Mean Gain"] == "-":
+            mean_values.append(-np.inf)
+        else:
+            mean_values.append(float(row["Mean Gain"]))
+
+    max_mean = max(mean_values)
+
+    for idx in df_summary.index:
+        if df_summary.loc[idx, "Solution"] != "MultiFedAvg":
+            cell = df_summary.loc[idx, "Mean Gain"]
+
+            if cell != "-" and float(cell) == max_mean:
+                df_summary.loc[idx, "Mean Gain"] = "\\textbf{" + cell + "}"
 
     # =====================================================
     # 🔹 GERAR LATEX
@@ -734,7 +753,6 @@ def generate_summary_table(df_gain, metric, output_path, baseline="MultiFedAvg")
         f"{body}\n"
         "\\bottomrule\n"
         "\\end{tabular}%\n"
-        
         "\\end{table*}"
     )
 
@@ -787,7 +805,7 @@ if __name__ == "__main__":
     total_clients = 40
     datasets = ["WISDM-W", "ImageNet10", "Foursquare"]
     model_name = ["gru", "CNN", "lstm"]
-    fraction_fit = 0.3
+    fraction_fit = 0.375
     # number_of_rounds = 30
     number_of_rounds = 100
     local_epochs = 1
@@ -795,17 +813,17 @@ if __name__ == "__main__":
 
     solutions = [
         "MultiFedAvg+MFP_v2",
-        # "MultiFedAvg+MFP_v2_dh",
-        # "MultiFedAvg+MFP_v2_iti",
+        "MultiFedAvg+MFP_v2_dh",
+        "MultiFedAvg+MFP_v2_iti",
         # "MultiFedAvg+MFP",
         "MultiFedAvg+FPD",
         "MultiFedAvg+FP",
-        # "DMA-FL",
+        "DMA-FL",
         # "AdaptiveFedAvg",
         "MultiFedAvg"
     ]
 
-    write_path = f"plots/MEFL/multi_experiments/rounds_{number_of_rounds}/"
+    write_path = f"plots/MEFL/multi_experiments/rounds_{number_of_rounds}/fc_{fraction_fit}/"
 
     df = read_data_multi_experiments(
         experiment_ids,
@@ -820,6 +838,6 @@ if __name__ == "__main__":
     )
 
     # Exemplo:
-    analysis_path = f"plots/MEFL/multi_experiments/analysis/rounds_{number_of_rounds}/"
+    analysis_path = f"plots/MEFL/multi_experiments/analysis/rounds_{number_of_rounds}/fc_{fraction_fit}/"
     # run_transition_analysis(df, "Balanced accuracy (%)", analysis_path)
     run_transition_analysis(df, "Accuracy (%)", analysis_path)
