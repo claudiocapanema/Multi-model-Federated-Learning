@@ -13,33 +13,81 @@ import os
 from base_plots import bar_plot, line_plot, ecdf_plot
 import matplotlib.pyplot as plt
 
-def read_data(alphas, datasets, total_clients):
+def read_data(alphas,
+              datasets,
+              total_clients):
 
-    filename = f"clients_{total_clients}_datasets_{datasets}_alphas_{alphas}_metrics_clients.csv"
+    filename = (
+        f"clients_{total_clients}_datasets_{datasets}"
+        f"_alphas_{alphas}_metrics_clients.csv"
+    )
 
     if os.path.exists(filename):
         print("O arquivo existe!")
         df = pd.read_csv(filename)
+
     else:
         print("O arquivo não existe!")
 
         n_classes = [
-            {'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'ImageNet': 15,
-             "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30, "Foursquare": 10}[dataset] for dataset in
-            datasets]
+            {
+                'EMNIST': 47,
+                'MNIST': 10,
+                'CIFAR10': 10,
+                'GTSRB': 43,
+                'WISDM-W': 12,
+                'WISDM-P': 12,
+                'ImageNet': 15,
+                "ImageNet10": 10,
+                "ImageNet_v2": 15,
+                "Gowalla": 7,
+                "wikitext": 30,
+                "Foursquare": 10
+            }[dataset]
+            for dataset in datasets
+        ]
+
         ME = len(datasets)
+
         client_metrics = {
-                cid: {me: {alpha: {"fc": None, "il": None, "similarity": None} for alpha in [0.1, 1.0, 10.0]} for me in
-                      range(ME)} for cid in range(1, total_clients + 1)}
-        clients_train_loader = {cid:  {alpha: {me: None for me in range(ME)} for alpha in alphas} for cid in range(1, total_clients + 1)}
+            cid: {
+                me: {
+                    alpha: {
+                        "fc": None,
+                        "il": None,
+                        "similarity": None
+                    }
+                    for alpha in [0.1, 1.0, 10.0]
+                }
+                for me in range(ME)
+            }
+            for cid in range(1, total_clients + 1)
+        }
+
+        clients_train_loader = {
+            cid: {
+                alpha: {
+                    me: None
+                    for me in range(ME)
+                }
+                for alpha in alphas
+            }
+            for cid in range(1, total_clients + 1)
+        }
+
         rows = []
+
         for client_id in range(1, total_clients + 1):
 
             for i in range(len(alphas)):
+
                 alpha = alphas[i]
+
                 if i > 0:
                     p_ME_old = copy.deepcopy(p_ME)
+
                 for me in range(ME):
+
                     clients_train_loader[client_id][alpha][me], a = load_data(
                         dataset_name=datasets[me],
                         alpha=alpha,
@@ -48,66 +96,149 @@ def read_data(alphas, datasets, total_clients):
                         num_partitions=total_clients + 1,
                         batch_size=32,
                     )
-                    print("""leu dados cid: {} dataset: {} size:  {}""".format(client_id, datasets[me],
-                                                                               len(clients_train_loader[client_id][alpha][me].dataset)))
 
+                    print(
+                        """leu dados cid: {} dataset: {} size: {}""".format(
+                            client_id,
+                            datasets[me],
+                            len(
+                                clients_train_loader[client_id][alpha][me].dataset
+                            )
+                        )
+                    )
 
-                p_ME, fc_ME, il_ME = get_datasets_metrics(clients_train_loader[client_id][alpha], ME, n_classes)
-                # similarity_ME = []
-                #
-                # for me in range(ME):
-                #     if i>0:
-                #         similarity_me = cosine_similarity(p_ME[me], p_ME_old[me])
-                #     else:
-                #         similarity_me = 1
-                #     similarity_ME.append(similarity_me)
+                p_ME, fc_ME, il_ME = get_datasets_metrics(
+                    clients_train_loader[client_id][alpha],
+                    ME,
+                    n_classes
+                )
 
                 for me in range(ME):
+
                     client_metrics[client_id][me][alpha]["fc"] = fc_ME[me]
+
                     client_metrics[client_id][me][alpha]["il"] = il_ME[me]
-                    # client_metrics[client_id][me][alpha]["similarity"] = similarity_ME[me]
 
+        alpha_tuples = [
+            (0.1, 1.0),
+            (0.1, 10.0),
+            (1.0, 10.0)
+        ]
 
-        alpha_tuples = [(0.1, 1.0), (0.1, 10.0), (1.0, 10.0)]
-        alpha_tuples_string = [f"{alpha_tuple[0]}<->{alpha_tuple[1]}" for alpha_tuple in alpha_tuples]
-        general_metrics_dict = {alpha: {"fc": None, "il": None, "dh": None} for alpha in [0.1, 1.0, 10.0]}
+        alpha_tuples_string = [
+            f"{alpha_tuple[0]}<->{alpha_tuple[1]}"
+            for alpha_tuple in alpha_tuples
+        ]
+
+        general_metrics_dict = {
+            alpha: {
+                "fc": None,
+                "il": None,
+                "dh": None
+            }
+            for alpha in [0.1, 1.0, 10.0]
+        }
+
         for me in range(ME):
+
             for cid in range(1, total_clients + 1):
+
                 for alpha in [0.1, 1.0, 10.0]:
+
                     fc = client_metrics[cid][me][alpha]["fc"]
+
                     il = client_metrics[cid][me][alpha]["il"]
+
                     if fc is not None and il is not None:
                         dh = ((1 - fc) + il) / 2
                     else:
                         dh = None
-                    general_metrics_dict[alpha] = {"fc": round(fc, 2), "il": round(il, 2), "dh": round(dh, 2)}
 
-                similarity_ALPHA = {alpha_tuple: None for alpha_tuple in alpha_tuples_string}
+                    general_metrics_dict[alpha] = {
+                        "fc": round(fc, 2),
+                        "il": round(il, 2),
+                        "dh": round(dh, 2)
+                    }
+
+                similarity_ALPHA = {
+                    alpha_tuple: None
+                    for alpha_tuple in alpha_tuples_string
+                }
+
                 for alpha_tuple in alpha_tuples:
+
                     alpha_a = alpha_tuple[0]
+
                     alpha_b = alpha_tuple[1]
 
-                    p_ME_a, fc_ME, il_ME = get_datasets_metrics(clients_train_loader[cid][alpha_a], ME, n_classes)
-                    p_ME_b, fc_ME, il_ME = get_datasets_metrics(clients_train_loader[cid][alpha_b], ME, n_classes)
-                    similarity_me = 1 - cosine_similarity(p_ME_a[me], p_ME_b[me])
-                    similarity_ALPHA[f"{alpha_tuple[0]}<->{alpha_tuple[1]}"] = round(similarity_me, 2)
+                    p_ME_a, fc_ME, il_ME = get_datasets_metrics(
+                        clients_train_loader[cid][alpha_a],
+                        ME,
+                        n_classes
+                    )
 
+                    p_ME_b, fc_ME, il_ME = get_datasets_metrics(
+                        clients_train_loader[cid][alpha_b],
+                        ME,
+                        n_classes
+                    )
+
+                    similarity_me = (
+                        1 -
+                        cosine_similarity(
+                            p_ME_a[me],
+                            p_ME_b[me]
+                        )
+                    )
+
+                    similarity_ALPHA[
+                        f"{alpha_tuple[0]}<->{alpha_tuple[1]}"
+                    ] = round(similarity_me, 2)
 
                 for alpha in [0.1, 1.0, 10.0]:
-                    row = [cid, me, datasets[me].replace("WISDM-W", "WISDM").replace("ImageNet10", "ImageNet-10"),
-                           alpha, general_metrics_dict[alpha]["fc"], general_metrics_dict[alpha]["il"],
-                           general_metrics_dict[alpha]["dh"], similarity_ALPHA["0.1<->1.0"],
-                           similarity_ALPHA["0.1<->10.0"], similarity_ALPHA["1.0<->10.0"]]
+
+                    dataset_size = len(
+                        clients_train_loader[cid][alpha][me].dataset
+                    )
+
+                    row = [
+                        cid,
+                        me,
+                        datasets[me]
+                        .replace("WISDM-W", "WISDM")
+                        .replace("ImageNet10", "ImageNet-10"),
+                        alpha,
+                        dataset_size,
+                        general_metrics_dict[alpha]["fc"],
+                        general_metrics_dict[alpha]["il"],
+                        general_metrics_dict[alpha]["dh"],
+                        similarity_ALPHA["0.1<->1.0"],
+                        similarity_ALPHA["0.1<->10.0"],
+                        similarity_ALPHA["1.0<->10.0"]
+                    ]
+
                     rows.append(row)
 
-        df = pd.DataFrame(data=rows,
-                          columns=["cid", "me", "Dataset", "\u03B1", "fc", "il", "dh", "0.1<->1.0",
-                                   "0.1<->10.0", "1.0<->10.0"])
+        df = pd.DataFrame(
+            data=rows,
+            columns=[
+                "cid",
+                "me",
+                "Dataset",
+                "\u03B1",
+                "dataset_size",
+                "fc",
+                "il",
+                "dh",
+                "0.1<->1.0",
+                "0.1<->10.0",
+                "1.0<->10.0"
+            ]
+        )
 
         df.to_csv(filename, index=False)
 
     return df
-
 
 def get_datasets_metrics(trainloader, ME, n_classes, concept_drift_window=None):
 
@@ -187,143 +318,302 @@ def write_outputs(self, filename, data, mode='a'):
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 
-def latex_general_metrics_table(df, base_dir):
+def latex_general_metrics_table(
+        df,
+        base_dir,
+        selected_clients_fraction=0.4,
+        seed=42):
 
     Path(base_dir).mkdir(parents=True, exist_ok=True)
 
-    datasets = sorted(df["Dataset"].unique())
+    rng = np.random.default_rng(seed)
+
+    datasets = ["WISDM", "ImageNet-10", "Foursquare"]
+
     alphas = [0.1, 1.0, 10.0]
+
     metrics = ["fc", "il", "dh"]
 
-    grouped = (
-        df.groupby(["Dataset", "α"])[metrics]
-        .agg(["mean", "std", "count"])
+    selected_clients = sorted(
+        rng.choice(
+            df["cid"].unique(),
+            size=max(
+                1,
+                int(
+                    len(df["cid"].unique()) *
+                    selected_clients_fraction
+                )
+            ),
+            replace=False
+        )
     )
+
+    print("Selected clients table:", selected_clients)
+
+    df = df[df["cid"].isin(selected_clients)]
 
     tex_path = f"{base_dir}/general_metrics_table.tex"
 
     with open(tex_path, "w") as f:
 
-        f.write("\\begin{figure}[t]\n")
+        f.write("\\begin{table}[t]\n")
+
         f.write("\\centering\n")
-        f.write("\\caption{General Metrics (mean $\\pm$ 95\\% CI)}\n")
+
+        f.write(
+            "\\caption{General Metrics "
+            "(weighted mean $\\pm$ 95\\% CI)}\n"
+        )
+
         f.write("\\label{tab:general_metrics}\n")
 
         col_format = "ll" + "c" * len(datasets)
+
         f.write(f"\\begin{{tabular}}{{{col_format}}}\n")
+
         f.write("\\toprule\n")
 
         header = ["$\\alpha$", "Metric"] + datasets
+
         f.write(" & ".join(header) + " \\\\\n")
+
         f.write("\\midrule\n")
 
         for alpha in alphas:
+
             for metric in metrics:
 
                 row = [str(alpha), metric]
 
                 for dataset in datasets:
 
-                    try:
-                        mean = grouped.loc[(dataset, alpha)][(metric, "mean")]
-                        std = grouped.loc[(dataset, alpha)][(metric, "std")]
-                        n = grouped.loc[(dataset, alpha)][(metric, "count")]
+                    subset = df[
+                        (df["Dataset"] == dataset) &
+                        (df["α"] == alpha)
+                    ]
 
-                        ci = 1.96 * (std / np.sqrt(n))
+                    if len(subset) == 0:
 
-                        value = f"{mean:.2f} $\\pm$ {ci:.2f}"
-                        row.append(value)
-
-                    except:
                         row.append("-")
+
+                        continue
+
+                    values = subset[metric].values.astype(float)
+
+                    weights = subset["dataset_size"].values.astype(float)
+
+                    weights = weights / np.sum(weights)
+
+                    weighted_mean = np.sum(values * weights)
+
+                    weighted_var = np.sum(
+                        weights *
+                        (values - weighted_mean) ** 2
+                    )
+
+                    weighted_std = np.sqrt(weighted_var)
+
+                    n = len(values)
+
+                    ci = 1.96 * (
+                        weighted_std / np.sqrt(n)
+                    )
+
+                    value = (
+                        f"{weighted_mean:.2f} "
+                        f"$\\pm$ {ci:.2f}"
+                    )
+
+                    row.append(value)
 
                 f.write(" & ".join(row) + " \\\\\n")
 
             f.write("\\midrule\n")
 
         f.write("\\bottomrule\n")
+
         f.write("\\end{tabular}\n")
-        f.write("\\end{figure}\n")
+
+        f.write("\\end{table}\n")
 
     print(f"Tabela salva em {tex_path}")
 
-def latex_ps_table(df, base_dir):
+def latex_ps_table(
+        df,
+        base_dir,
+        selected_clients_fraction=0.4,
+        seed=42):
 
     Path(base_dir).mkdir(parents=True, exist_ok=True)
 
-    datasets = sorted(df["Dataset"].unique())
-    alpha_pairs = ["0.1<->1.0", "0.1<->10.0", "1.0<->10.0"]
+    rng = np.random.default_rng(seed)
 
-    rows = []
+    datasets = ["WISDM", "ImageNet-10", "Foursquare"]
 
-    for _, row in df.iterrows():
-        for pair in alpha_pairs:
-            rows.append([
-                row["Dataset"],
-                pair,
-                row[pair]
-            ])
+    alpha_pairs = [
+        "0.1<->1.0",
+        "0.1<->10.0",
+        "1.0<->10.0"
+    ]
 
-    ps_df = pd.DataFrame(rows, columns=["Dataset", "Pair", "ps"])
-
-    grouped = (
-        ps_df.groupby(["Dataset", "Pair"])["ps"]
-        .agg(["mean", "std", "count"])
+    selected_clients = sorted(
+        rng.choice(
+            df["cid"].unique(),
+            size=max(
+                1,
+                int(
+                    len(df["cid"].unique()) *
+                    selected_clients_fraction
+                )
+            ),
+            replace=False
+        )
     )
+
+    print("Selected clients table:", selected_clients)
+
+    df = df[df["cid"].isin(selected_clients)]
 
     tex_path = f"{base_dir}/label_shift_table.tex"
 
     with open(tex_path, "w") as f:
 
-        f.write("\\begin{figure}[t]\n")
+        f.write("\\begin{table}[t]\n")
+
         f.write("\\centering\n")
-        f.write("\\caption{Label Shift (mean $\\pm$ 95\\% CI)}\n")
+
+        f.write(
+            "\\caption{Label Shift "
+            "(weighted mean $\\pm$ 95\\% CI and correlated min--max)}\n"
+        )
+
         f.write("\\label{tab:ps_label_shift}\n")
 
-        col_format = "l" + "c" * len(datasets)
-        f.write(f"\\begin{{tabular}}{{{col_format}}}\n")
+        f.write("\\begin{tabular}{lccc}\n")
+
         f.write("\\toprule\n")
 
-        header = ["Pair"] + datasets
-        f.write(" & ".join(header) + " \\\\\n")
+        f.write(
+            "Dataset & Pair & "
+            "Mean $\\pm$ CI & Min--Max \\\\\n"
+        )
+
         f.write("\\midrule\n")
 
-        for pair in alpha_pairs:
+        for dataset in datasets:
 
-            row = [pair]
+            subset_dataset = df[
+                df["Dataset"] == dataset
+            ]
 
-            for dataset in datasets:
+            if len(subset_dataset) == 0:
+                continue
 
-                try:
-                    mean = grouped.loc[(dataset, pair)]["mean"]
-                    std = grouped.loc[(dataset, pair)]["std"]
-                    n = grouped.loc[(dataset, pair)]["count"]
+            for idx, pair in enumerate(alpha_pairs):
 
-                    ci = 1.96 * (std / np.sqrt(n))
+                values = subset_dataset[pair].values.astype(float)
 
-                    value = f"{mean:.2f} $\\pm$ {ci:.2f}"
-                    row.append(value)
+                weights = (
+                    subset_dataset["dataset_size"]
+                    .values.astype(float)
+                )
 
-                except:
-                    row.append("-")
+                weights = weights / np.sum(weights)
 
-            f.write(" & ".join(row) + " \\\\\n")
+                weighted_mean = np.sum(values * weights)
+
+                weighted_var = np.sum(
+                    weights *
+                    (values - weighted_mean) ** 2
+                )
+
+                weighted_std = np.sqrt(weighted_var)
+
+                n = len(values)
+
+                ci = 1.96 * (
+                    weighted_std / np.sqrt(n)
+                )
+
+                mean_ci_value = (
+                    f"{weighted_mean:.2f} "
+                    f"$\\pm$ {ci:.2f}"
+                )
+
+                min_value = np.min(values)
+
+                max_value = np.max(values)
+
+                min_max_value = (
+                    f"{min_value:.2f}--{max_value:.2f}"
+                )
+
+                if idx == 0:
+
+                    dataset_col = (
+                        f"\\multirow{{{len(alpha_pairs)}}}{{*}}"
+                        f"{{{dataset}}}"
+                    )
+
+                else:
+
+                    dataset_col = ""
+
+                row = [
+                    dataset_col,
+                    pair,
+                    mean_ci_value,
+                    min_max_value
+                ]
+
+                f.write(
+                    " & ".join(row) + " \\\\\n"
+                )
+
+            f.write("\\midrule\n")
 
         f.write("\\bottomrule\n")
+
         f.write("\\end{tabular}\n")
-        f.write("\\end{figure}\n")
+
+        f.write("\\end{table}\n")
 
     print(f"Tabela salva em {tex_path}")
 
 if __name__ == "__main__":
 
     total_clients = 40
+    fraction_fit = 0.375
+
     alphas = [0.1, 1.0, 10.0]
-    dataset = ["ImageNet10", "WISDM-W", "Foursquare"]
 
-    write_path = f"plots/MEFL/clients_{total_clients}_datasets_{dataset}_alphas_{alphas}/"
+    dataset = [
+        "WISDM-W",
+        "ImageNet10",
+        "Foursquare"
+    ]
 
-    df = read_data(alphas, dataset, total_clients)
+    write_path = (
+        f"plots/MEFL/"
+        f"clients_{total_clients}_datasets_{dataset}_alphas_{alphas}/"
+    )
 
-    latex_general_metrics_table(df, write_path)
-    latex_ps_table(df, write_path)
+    df = read_data(
+        alphas=alphas,
+        datasets=dataset,
+        total_clients=total_clients
+    )
+
+    latex_general_metrics_table(
+        df,
+        write_path,
+        selected_clients_fraction=fraction_fit,
+        seed=42
+    )
+
+    latex_ps_table(
+        df,
+        write_path,
+        selected_clients_fraction=fraction_fit,
+        seed=42
+    )

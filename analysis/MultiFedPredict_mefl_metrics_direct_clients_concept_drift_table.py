@@ -15,7 +15,10 @@ import matplotlib.pyplot as plt
 
 def read_data(alphas, datasets, total_clients):
 
-    filename = f"clients_{total_clients}_datasets_{datasets}_alphas_{alphas}_metrics_clients_concept_drift.csv"
+    filename = (
+        f"clients_{total_clients}_datasets_{datasets}"
+        f"_alphas_{alphas}_metrics_clients_concept_drift.csv"
+    )
 
     if os.path.exists(filename):
         print("O arquivo existe!")
@@ -25,29 +28,39 @@ def read_data(alphas, datasets, total_clients):
     print("O arquivo não existe!")
 
     n_classes = [
-        {'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43,
-         'WISDM-W': 12, 'WISDM-P': 12, 'ImageNet': 15,
-         "ImageNet10": 10, "ImageNet_v2": 15,
-         "Gowalla": 7, "wikitext": 30,
-         "Foursquare": 10}[dataset]
+        {
+            'EMNIST': 47,
+            'MNIST': 10,
+            'CIFAR10': 10,
+            'GTSRB': 43,
+            'WISDM-W': 12,
+            'WISDM-P': 12,
+            'ImageNet': 15,
+            "ImageNet10": 10,
+            "ImageNet_v2": 15,
+            "Gowalla": 7,
+            "wikitext": 30,
+            "Foursquare": 10
+        }[dataset]
         for dataset in datasets
     ]
 
     ME = len(datasets)
 
-    # TRANSIÇÕES ENTRE ALPHAS (igual ao primeiro algoritmo)
     alpha_pairs = [(0.1, 1.0), (0.1, 10.0), (1.0, 10.0)]
-    alpha_pairs_str = [f"{a}<->{b}" for a, b in alpha_pairs]
 
     clients_train_loader = {
-        cid: {alpha: {me: None for me in range(ME)} for alpha in alphas}
+        cid: {
+            alpha: {me: None for me in range(ME)}
+            for alpha in alphas
+        }
         for cid in range(1, total_clients + 1)
     }
 
     rows = []
 
     # -----------------------
-    # Carrega todos os dados
+    # Carrega dados
     # -----------------------
     for cid in range(1, total_clients + 1):
 
@@ -73,18 +86,18 @@ def read_data(alphas, datasets, total_clients):
 
             drift_dict = {}
 
+            dataset_size = None
+
             for alpha_a, alpha_b in alpha_pairs:
 
-                # janela t0
-                p_ME_a, _, _ = get_datasets_metrics(
+                p_ME_a, _, _, dataset_sizes_a = get_datasets_metrics(
                     clients_train_loader[cid][alpha_a],
                     ME,
                     n_classes,
                     concept_drift_window=[0] * ME
                 )
 
-                # janela t1
-                p_ME_b, _, _ = get_datasets_metrics(
+                p_ME_b, _, _, dataset_sizes_b = get_datasets_metrics(
                     clients_train_loader[cid][alpha_b],
                     ME,
                     n_classes,
@@ -96,13 +109,20 @@ def read_data(alphas, datasets, total_clients):
                     p_ME_b[me]
                 )
 
-                drift_dict[f"{alpha_a}<->{alpha_b}"] = round(drift_value, 4)
+                drift_dict[f"{alpha_a}<->{alpha_b}"] = round(
+                    drift_value,
+                    4
+                )
+
+                dataset_size = dataset_sizes_a[me]
 
             row = [
                 cid,
                 me,
-                datasets[me].replace("WISDM-W", "WISDM")
-                            .replace("ImageNet10", "ImageNet-10"),
+                datasets[me]
+                    .replace("WISDM-W", "WISDM")
+                    .replace("ImageNet10", "ImageNet-10"),
+                dataset_size,
                 drift_dict["0.1<->1.0"],
                 drift_dict["0.1<->10.0"],
                 drift_dict["1.0<->10.0"],
@@ -116,6 +136,7 @@ def read_data(alphas, datasets, total_clients):
             "cid",
             "me",
             "Dataset",
+            "dataset_size",
             "0.1<->1.0",
             "0.1<->10.0",
             "1.0<->10.0"
@@ -132,37 +153,67 @@ def get_datasets_metrics(trainloader, ME, n_classes, concept_drift_window=None):
         p_ME = []
         fc_ME = []
         il_ME = []
+        dataset_sizes = []
+
         for me in range(ME):
+
             labels_me = []
             n_classes_me = n_classes[me]
             p_me = {i: 0 for i in range(n_classes_me)}
+
             with (torch.no_grad()):
+
                 for batch in trainloader[me]:
+
                     labels = batch["label"]
                     labels = labels.to("cuda:0")
 
                     if concept_drift_window is not None:
                         labels = (labels + concept_drift_window[me])
                         labels = labels % n_classes[me]
+
                     labels = labels.detach().cpu().numpy()
                     labels_me += labels.tolist()
+
+                dataset_size = len(labels_me)
+                dataset_sizes.append(dataset_size)
+
                 unique, count = np.unique(labels_me, return_counts=True)
-                data_unique_count_dict = dict(zip(np.array(unique).tolist(), np.array(count).tolist()))
+
+                data_unique_count_dict = dict(
+                    zip(
+                        np.array(unique).tolist(),
+                        np.array(count).tolist()
+                    )
+                )
+
                 for label in data_unique_count_dict:
                     p_me[label] = data_unique_count_dict[label]
+
                 p_me = np.array(list(p_me.values()))
+
                 fc_me = len(np.argwhere(p_me > 0)) / n_classes_me
-                print("fc: ", fc_me)
-                il_me = len(np.argwhere(p_me < np.sum(p_me) / n_classes_me)) / n_classes_me
+
+                il_me = (
+                    len(np.argwhere(p_me < np.sum(p_me) / n_classes_me))
+                    / n_classes_me
+                )
+
                 p_me = p_me / np.sum(p_me)
+
                 p_ME.append(p_me)
                 fc_ME.append(fc_me)
                 il_ME.append(il_me)
-                # print(f"p_me {p_me} fc_me {fc_me} il_me {il_me} model {me} client {client_id}")
-        return p_ME, fc_ME, il_ME
+
+        return p_ME, fc_ME, il_ME, dataset_sizes
+
     except Exception as e:
        print("_get_datasets_metrics error")
-       print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+       print("""Error on line {} {} {}""".format(
+           sys.exc_info()[-1].tb_lineno,
+           type(e).__name__,
+           e
+       ))
 
 def cosine_similarity(p_1, p_2):
 
@@ -264,73 +315,150 @@ def latex_general_metrics_table(df, base_dir):
 
     print(f"Tabela salva em {tex_path}")
 
-def latex_concept_drift_table(df, base_dir):
+def latex_concept_drift_table(
+    df,
+    base_dir,
+    fraction_clients=0.3,
+    seed=42
+):
 
     Path(base_dir).mkdir(parents=True, exist_ok=True)
 
     datasets = sorted(df["Dataset"].unique())
-    alpha_pairs = ["0.1<->1.0", "0.1<->10.0", "1.0<->10.0"]
 
-    # Reorganiza no mesmo formato da label shift
-    rows = []
+    alpha_pairs = [
+        "0.1<->1.0",
+        "0.1<->10.0",
+        "1.0<->10.0"
+    ]
 
-    for _, row in df.iterrows():
-        for pair in alpha_pairs:
-            rows.append([
-                row["Dataset"],
-                pair,
-                row[pair]
-            ])
-
-    drift_df = pd.DataFrame(rows, columns=["Dataset", "Pair", "Drift"])
-
-    grouped = (
-        drift_df.groupby(["Dataset", "Pair"])["Drift"]
-        .agg(["mean", "std", "count"])
-    )
+    rng = np.random.default_rng(seed)
 
     tex_path = f"{base_dir}/concept_drift_table.tex"
 
     with open(tex_path, "w") as f:
 
-        f.write("\\begin{figure}[t]\n")
+        f.write("\\begin{table}[t]\n")
+
         f.write("\\centering\n")
-        f.write("\\caption{Concept Drift (mean $\\pm$ 95\\% CI)}\n")
+
+        f.write(
+            "\\caption{Concept Drift "
+            "(weighted mean $\\pm$ 95\\% CI "
+            "and correlated min--max)}\n"
+        )
+
         f.write("\\label{tab:ps_concept_drift}\n")
 
-        # Mesmo formato da label shift
-        col_format = "l" + "c" * len(datasets)
-        f.write(f"\\begin{{tabular}}{{{col_format}}}\n")
+        f.write("\\begin{tabular}{lccc}\n")
+
         f.write("\\toprule\n")
 
-        header = ["Pair"] + datasets
-        f.write(" & ".join(header) + " \\\\\n")
+        f.write(
+            "Dataset & Pair & "
+            "Mean $\\pm$ CI & Min--Max \\\\\n"
+        )
+
         f.write("\\midrule\n")
 
-        for pair in alpha_pairs:
+        for dataset in datasets:
 
-            row = [pair]
+            dataset_df = df[
+                df["Dataset"] == dataset
+            ]
 
-            for dataset in datasets:
+            unique_clients = sorted(
+                dataset_df["cid"].unique()
+            )
 
-                try:
-                    mean = grouped.loc[(dataset, pair)]["mean"]
-                    std = grouped.loc[(dataset, pair)]["std"]
-                    n = grouped.loc[(dataset, pair)]["count"]
+            n_selected = max(
+                1,
+                int(len(unique_clients) * fraction_clients)
+            )
 
-                    ci = 1.96 * (std / np.sqrt(n))
-                    value = f"{mean:.2f} $\\pm$ {ci:.2f}"
+            selected_clients = rng.choice(
+                unique_clients,
+                size=n_selected,
+                replace=False
+            )
 
-                except:
-                    value = "-"
+            selected_df = dataset_df[
+                dataset_df["cid"].isin(selected_clients)
+            ]
 
-                row.append(value)
+            for idx, pair in enumerate(alpha_pairs):
 
-            f.write(" & ".join(row) + " \\\\\n")
+                values = (
+                    selected_df[pair]
+                    .values.astype(float)
+                )
+
+                weights = (
+                    selected_df["dataset_size"]
+                    .values.astype(float)
+                )
+
+                weights = weights / np.sum(weights)
+
+                weighted_mean = np.sum(
+                    values * weights
+                )
+
+                weighted_var = np.sum(
+                    weights *
+                    (values - weighted_mean) ** 2
+                )
+
+                weighted_std = np.sqrt(
+                    weighted_var
+                )
+
+                ci = 1.96 * (
+                    weighted_std / np.sqrt(len(values))
+                )
+
+                mean_ci_value = (
+                    f"{weighted_mean:.2f} "
+                    f"$\\pm$ {ci:.2f}"
+                )
+
+                min_value = np.min(values)
+
+                max_value = np.max(values)
+
+                min_max_value = (
+                    f"{min_value:.2f}--{max_value:.2f}"
+                )
+
+                if idx == 0:
+
+                    dataset_col = (
+                        f"\\multirow{{{len(alpha_pairs)}}}{{*}}"
+                        f"{{{dataset}}}"
+                    )
+
+                else:
+
+                    dataset_col = ""
+
+                row = [
+                    dataset_col,
+                    pair,
+                    mean_ci_value,
+                    min_max_value
+                ]
+
+                f.write(
+                    " & ".join(row) + " \\\\\n"
+                )
+
+            f.write("\\midrule\n")
 
         f.write("\\bottomrule\n")
+
         f.write("\\end{tabular}\n")
-        f.write("\\end{figure}\n")
+
+        f.write("\\end{table}\n")
 
     print(f"Tabela salva em {tex_path}")
 
@@ -345,4 +473,4 @@ if __name__ == "__main__":
 
     df = read_data(alphas, dataset, total_clients)
 
-    latex_concept_drift_table(df, write_path)
+    latex_concept_drift_table(df, write_path, fraction_clients=0.375)

@@ -212,6 +212,8 @@ TEXTS = {
         "mean_fairness": "Mean Fairness",
         "cumulative": "Cumulative",
         "fairness": "Fairness",
+        "inter_client_fairness": "CPF-Inter",
+        "intra_client_fairness": "CPF-Intra",
 
         # tabelas
         "table_accuracy_caption": "Accuracy comparison (\\%) with 95\\% confidence intervals.",
@@ -240,6 +242,8 @@ TEXTS = {
         "mean_fairness": "Fairness Médio",
         "cumulative": "Acumulado",
         "fairness": "Fairness",
+        "inter_client_fairness": "CPF-Inter",
+        "intra_client_fairness": "CPF-Intra",
 
         # tabelas
         "table_accuracy_caption": "Comparação de acurácia (\\%) com intervalos de confiança de 95\\%.",
@@ -593,7 +597,7 @@ def build_accuracy_table_multi_alpha(df):
 FAIRNESS_METRICS = [
     "inter_client_fairness",
     "intra_client_fairness",
-    "inter_model_fairness"
+    # "inter_model_fairness"
 ]
 
 RESOURCE_METRICS = [
@@ -1183,7 +1187,7 @@ def plot_fairness_vs_accuracy(df):
                     )
 
                     if i == len(ALPHAS) - 1:
-                        ax.set_xlabel(texts["fairness"] + " (%)", fontsize=14)
+                        ax.set_xlabel(texts[metric] + " (%)", fontsize=14)
 
                     if j == 0:
                         ax.set_ylabel(texts["accuracy"] + " (%)", fontsize=14)
@@ -1248,7 +1252,7 @@ def plot_fairness_vs_accuracy(df):
             }
 
             plt.suptitle(
-                f"{texts['fairness']} vs {texts['accuracy']} "
+                f"{texts['accuracy']} vs {texts['fairness']} "
                 f"({metric_display.get(metric, metric)})",
                 y=0.97,
                 fontsize=16

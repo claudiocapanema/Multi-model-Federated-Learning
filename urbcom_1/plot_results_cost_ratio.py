@@ -140,8 +140,8 @@ def plot_all():
 
     metrics = [
         ("accuracy", "Accuracy (%)"),
-        ("inter", "IRCPF-Inter (%)"),
-        ("intra", "IRCPF-Intra (%)"),
+        ("inter", "CPF-Inter (%)"),
+        ("intra", "CPF-Intra (%)"),
     ]
 
     for i, (metric, ylabel) in enumerate(metrics):

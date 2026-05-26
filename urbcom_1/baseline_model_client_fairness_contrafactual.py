@@ -30,7 +30,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 BASE_SEED = 42
 NUM_FOLDS = 1
-TOTAL_CLIENTS = 50
+TOTAL_CLIENTS = 40
 
 ROUNDS = 100
 FRAC = 0.3
@@ -146,22 +146,29 @@ ABLATION_MODE = "full"
 version = VERSIONS[4]
 
 # DIRICHLET_ALPHA = 0.1
-DIRICHLET_ALPHA = 1.0
+# DIRICHLET_ALPHA = 1.0
 
 if ABLATION_MODE == "data_only":
     DIRICHLET_ALPHA = 0.1  # alta heterogeneidade
-
-elif ABLATION_MODE in ["speed_only", "cost_only"]:
+    COST_SETUP_NAME = "cost_1x"
+elif ABLATION_MODE == "speed_only":
     DIRICHLET_ALPHA = 10.0  # quase IID
+    COST_SETUP_NAME = "cost_1x"
+elif ABLATION_MODE == "cost_only":
+    DIRICHLET_ALPHA = 10.0  # quase IID
+    COST_SETUP_NAME = "cost_4x"
+elif ABLATION_MODE == "full":
+    DIRICHLET_ALPHA = 0.1 # quase IID
+    COST_SETUP_NAME = "cost_4x"
 
 # COST_SETUP_NAME = "cost_1x"
 # COST_SETUP_NAME = "cost_2x"
-COST_SETUP_NAME = "cost_4x"
+# COST_SETUP_NAME = "cost_4x"
 # COST_SETUP_NAME = "cost_6x"
 # COST_SETUP_NAME = "cost_8x"
 # COST_SETUP_NAME = "cost_10x"
 
-print(f"Versão: {version}")
+print(f"\nVERSION {version} | Ablation {ABLATION_MODE} | DIRICHLET {DIRICHLET_ALPHA} | COST {COST_SETUP_NAME}")
 
 MODEL_COST = MODEL_COST_SETUPS[COST_SETUP_NAME]
 
@@ -491,6 +498,7 @@ def clear_previous_results(removal_fraction):
     for model_name in ["cifar", "gtsrb"]:
         directory = (
             f"{RESULTS_DIR}/"
+            f"clients_{TOTAL_CLIENTS}/"
             f"frac_{FRAC}/"
             f"alpha_{DIRICHLET_ALPHA}/"
             f"beta_{BETA}/"
@@ -663,7 +671,13 @@ def compute_gamma_inter_static(beta=BETA, eps=1e-16):
             n_km = client_resources[cid][f"data_size_{m}"]
 
             # ñ_k^me (normalização por modelo)
-            n_tilde = n_km / total_data_per_model[m]
+            total_data_global = sum(
+                client_resources[cid][f"data_size_{m}"]
+                for cid in client_resources
+                for m in model_names
+            )
+
+            n_tilde = n_km / total_data_global
 
             # c̃^me
             c_tilde = inv_flops[m] / total_inv_flops
@@ -713,7 +727,7 @@ def compute_gamma_intra_static(beta=BETA, eps=1e-16):
             # c̃^me
             c_tilde = inv_flops[m] / total_inv_flops
 
-            term = n_tilde * v_tilde * c_tilde
+            term = n_tilde * c_tilde
 
             if term > 0:
                 gamma_km = (term) ** beta
@@ -1350,6 +1364,7 @@ def run_experiment():
 
                     directory = (
                         f"{RESULTS_DIR}/"
+                        f"clients_{TOTAL_CLIENTS}/"
                         f"frac_{FRAC}/"
                         f"alpha_{DIRICHLET_ALPHA}/"
                         f"beta_{BETA}/"

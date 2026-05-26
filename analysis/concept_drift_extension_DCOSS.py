@@ -222,6 +222,127 @@ def extract_alpha_from_experiment(experiment_id):
     return float(alpha_str)
 
 
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+
+def plot_per_dataset_alpha(df, solutions_order, metric="Accuracy (%)", save_path=None):
+
+    import os
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    # ==============================
+    # 1️⃣ garantir diretório
+    # ==============================
+    if save_path is not None:
+        os.makedirs(save_path, exist_ok=True)
+
+    # ==============================
+    # 2️⃣ coluna de rodada
+    # ==============================
+    round_col = "Round (t)"
+
+    # ==============================
+    # 3️⃣ ORDEM IGUAL À TABELA
+    # ==============================
+    table_order = [
+        df[df["Solution"] == s]["Table"].iloc[0]
+        for s in solutions_order
+        if s in df["Solution"].values
+    ]
+
+    print("✔️ Ordem das soluções no plot:")
+    print(table_order)
+
+    # ==============================
+    # 4️⃣ setup geral
+    # ==============================
+    datasets = sorted(df["Dataset"].unique())
+    alphas = sorted(df["Alpha"].unique())
+
+    sns.set(style="whitegrid")
+
+    # ==============================
+    # 5️⃣ loop por dataset
+    # ==============================
+    for dataset in datasets:
+
+        fig, axes = plt.subplots(
+            len(alphas), 1,
+            figsize=(8, 5 * len(alphas)),
+            sharex=True
+        )
+
+        if len(alphas) == 1:
+            axes = [axes]
+
+        for i, alpha in enumerate(alphas):
+            ax = axes[i]
+
+            filtered = df[
+                (df["Dataset"] == dataset) &
+                (df["Alpha"] == alpha)
+            ]
+
+            # ==============================
+            # 6️⃣ agregação (se necessário)
+            # ==============================
+            if filtered.duplicated(subset=[round_col, "Table"]).any():
+                filtered = (
+                    filtered
+                    .groupby([round_col, "Table"], as_index=False)[metric]
+                    .mean()
+                )
+
+            # ==============================
+            # 7️⃣ plot com ORDEM FIXA
+            # ==============================
+            sns.lineplot(
+                data=filtered,
+                x=round_col,
+                y=metric,
+                hue="Table",
+                hue_order=table_order,   # 🔥 AQUI ESTÁ O SEGREDO
+                linewidth=2,
+                ax=ax
+            )
+
+            ax.set_title(f"{dataset} | α={alpha}")
+            ax.set_ylabel(metric)
+
+            ax.legend().remove()
+
+        # ==============================
+        # 8️⃣ legenda única (ordenada)
+        # ==============================
+        handles, labels = axes[-1].get_legend_handles_labels()
+
+        # reordenar legenda manualmente (garantia extra)
+        label_to_handle = dict(zip(labels, handles))
+        ordered_handles = [label_to_handle[l] for l in table_order if l in label_to_handle]
+
+        fig.legend(
+            ordered_handles,
+            table_order,
+            loc="upper center",
+            ncol=min(5, len(table_order)),
+            frameon=False
+        )
+
+        plt.tight_layout(rect=[0, 0, 1, 0.9])
+
+        # ==============================
+        # 9️⃣ salvar
+        # ==============================
+        if save_path:
+            filename = f"{save_path}/plot_{dataset}_{metric.replace(' ', '_').replace('(%)','')}.png"
+            plt.savefig(filename, dpi=300, bbox_inches="tight")
+            print(f"📊 Plot salvo em: {filename}")
+
+        plt.close(fig)
+
 
 if __name__ == "__main__":
 
@@ -292,3 +413,10 @@ if __name__ == "__main__":
 
     # table_per_dataset(df_all, write_path, "Balanced accuracy (%)")
     table_per_dataset(df_all, write_path, "Accuracy (%)", solutions)
+
+    # plot_per_dataset_alpha(
+    #     df_all,
+    #     solutions_order=solutions,
+    #     metric="Accuracy (%)",
+    #     save_path=write_path
+    # )
