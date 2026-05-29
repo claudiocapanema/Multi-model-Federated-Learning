@@ -82,7 +82,18 @@ class MultiFedAvgClient:
             # Concept drift parameters
             self.experiment_id = self.args.experiment_id
             self.gradual_rounds = 5
-            self.data_shift_config = self.get_data_shift_config(self.ME, self.number_of_rounds, self.alpha_train, self.experiment_id, self.client_id, gradual_rounds=self.total_clients // self.gradual_rounds, seed=self.fold_id)
+
+            # Número de rodadas usadas para realizar a transição do alpha
+            self.label_shift_transition_window = self.args.label_shift_transition_window
+            self.data_shift_config = self.get_data_shift_config(
+                self.ME,
+                self.number_of_rounds,
+                self.alpha_train,
+                self.experiment_id,
+                self.client_id,
+                gradual_rounds=self.total_clients // self.gradual_rounds,
+                seed=self.fold_id
+            )
             print(f"data shift config {self.data_shift_config} data shift id {self.experiment_id}")
 
             for me in range(self.ME):
@@ -166,13 +177,26 @@ class MultiFedAvgClient:
                     config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                    "type": type_} for me in range(ME)}
                 elif experiment_id == "label_shift#0.1-10.0_gradual":
-                    ME_concept_drift_rounds = [[int(n_rounds * 0.3) + client_id // gradual_rounds],
-                                               [int(n_rounds * 0.5) + client_id // gradual_rounds],
-                                               [int(n_rounds * 0.7) + client_id // gradual_rounds]]
+
+                    ME_concept_drift_rounds = [
+                        [int(n_rounds * 0.3)],
+                        [int(n_rounds * 0.5)],
+                        [int(n_rounds * 0.7)]
+                    ]
+
                     new_alphas = [[10.0], [10.0], [10.0]]
+
                     type_ = "label_shift"
-                    config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
-                                   "type": type_} for me in range(ME)}
+
+                    config = {
+                        me: {
+                            "data_shift_rounds": ME_concept_drift_rounds[me],
+                            "new_alphas": new_alphas[me],
+                            "transition_window": self.label_shift_transition_window,
+                            "type": type_
+                        }
+                        for me in range(ME)
+                    }
                 elif experiment_id == "label_shift#0.1-10.0_recurrent":
                     ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5)],
                                                [int(n_rounds * 0.3), int(n_rounds * 0.6)],
@@ -190,13 +214,26 @@ class MultiFedAvgClient:
                     config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                    "type": type_} for me in range(ME)}
                 elif experiment_id == "label_shift#10.0-0.1_gradual":
-                    ME_concept_drift_rounds = [[int(n_rounds * 0.3) + client_id // gradual_rounds],
-                                               [int(n_rounds * 0.5) + client_id // gradual_rounds],
-                                               [int(n_rounds * 0.7) + client_id // gradual_rounds]]
+
+                    ME_concept_drift_rounds = [
+                        [int(n_rounds * 0.3)],
+                        [int(n_rounds * 0.5)],
+                        [int(n_rounds * 0.7)]
+                    ]
+
                     new_alphas = [[0.1], [0.1], [0.1]]
+
                     type_ = "label_shift"
-                    config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
-                                   "type": type_} for me in range(ME)}
+
+                    config = {
+                        me: {
+                            "data_shift_rounds": ME_concept_drift_rounds[me],
+                            "new_alphas": new_alphas[me],
+                            "transition_window": self.label_shift_transition_window,
+                            "type": type_
+                        }
+                        for me in range(ME)
+                    }
                 elif experiment_id == "label_shift#10.0-0.1_recurrent":
                     ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5)],
                                                [int(n_rounds * 0.3), int(n_rounds * 0.6)],
@@ -542,34 +579,88 @@ class MultiFedAvgClient:
 
     def _get_current_alpha(self, server_round, me, train):
         """
-         Returns current alpha and whether or not alhpha has changed (flag)
-        :param server_round:
-        :param me:
-        :param train:
-        :return:
-            alpha: current alpha
-            flag: True only if alpha has changed
+        Retorna o alpha atual.
+
+        Para cenários sudden:
+            alpha muda instantaneamente.
+
+        Para cenários gradual:
+            alpha é interpolado linearmente ao longo de
+            transition_window rodadas.
         """
+
         try:
-            reference_alpha = self.alpha_train[me] if train else self.alpha_test[me]
+
+            reference_alpha = (
+                self.alpha_train[me]
+                if train
+                else self.alpha_test[me]
+            )
+
             if self.data_shift_config == {}:
-                return reference_alpha
-            else:
-                config = self.data_shift_config[me]
-                alpha = None
+                return reference_alpha, False
 
-                for i, round_ in enumerate(config["data_shift_rounds"]):
-                    if server_round >= round_:
-                        alpha = config["new_alphas"][i]
+            config = self.data_shift_config[me]
 
-                if alpha is None:
-                    alpha = reference_alpha
+            shift_rounds = config["data_shift_rounds"]
+            target_alphas = config["new_alphas"]
 
-                return alpha, alpha != reference_alpha
+            transition_window = config.get(
+                "transition_window",
+                1
+            )
+
+            alpha = None
+
+            initial_alpha = float(self.alpha_train[me])
+
+            for i, start_round in enumerate(shift_rounds):
+
+                target_alpha = float(target_alphas[i])
+
+                if "gradual" in self.experiment_id:
+
+                    end_round = start_round + transition_window
+
+                    if server_round < start_round:
+                        continue
+
+                    elif start_round <= server_round < end_round:
+
+                        progress = (
+                                (server_round - start_round)
+                                / transition_window
+                        )
+
+                        alpha = (
+                                initial_alpha
+                                + progress *
+                                (target_alpha - initial_alpha)
+                        )
+
+                        break
+
+                    else:
+                        alpha = target_alpha
+                        initial_alpha = target_alpha
+
+                else:
+
+                    if server_round >= start_round:
+                        alpha = target_alpha
+
+            if alpha is None:
+                alpha = initial_alpha
+
+            return alpha, abs(alpha - reference_alpha) > 1e-8
+
         except Exception as e:
             print(f"_get_current_alpha error {self.data_shift_config}")
-            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
-
+            print("""Error on line {} {} {}""".format(
+                sys.exc_info()[-1].tb_lineno,
+                type(e).__name__,
+                e
+            ))
 
     def _data_shift_flag(self, server_round, me, train):
 

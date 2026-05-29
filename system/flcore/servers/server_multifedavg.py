@@ -121,6 +121,7 @@ class MultiFedAvg:
             download_datasets(self.dataset, self.alpha, self.total_clients)
             # Concept drift parameters
             self.experiment_id = args.experiment_id
+            self.label_shift_transition_window = self.args.label_shift_transition_window
             self.set_clients()
 
             # self.concept_drift_config = global_concept_dirft_config(self.ME, self.number_of_rounds, self.alpha, self.experiment_id, 0)
@@ -494,16 +495,31 @@ class MultiFedAvg:
 
     def get_result_path(self, train_test):
 
-        result_path = """results/experiment_id_{}/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/{}/""".format(
-            self.experiment_id,
-            self.total_clients,
-            self.alpha,
-            self.dataset,
-            self.model_name,
-            self.fraction_fit,
-            self.number_of_rounds,
-            self.local_epochs,
-            train_test)
+        if self.label_shift_transition_window > 1:
+            result_path = """results/experiment_id_{}/clients_{}/alpha_{}/transition_window_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/{}/""".format(
+                self.experiment_id,
+                self.total_clients,
+                self.alpha,
+                self.label_shift_transition_window,
+                self.dataset,
+                self.model_name,
+                self.fraction_fit,
+                self.number_of_rounds,
+                self.local_epochs,
+                train_test)
+
+        else:
+
+            result_path = """results/experiment_id_{}/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/{}/""".format(
+                self.experiment_id,
+                self.total_clients,
+                self.alpha,
+                self.dataset,
+                self.model_name,
+                self.fraction_fit,
+                self.number_of_rounds,
+                self.local_epochs,
+                train_test)
 
         return result_path
 
