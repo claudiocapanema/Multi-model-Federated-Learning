@@ -30,6 +30,7 @@ from flcore.servers.server_multifedavgrr import MultiFedAvgRR
 from flcore.servers.server_fedfairmmfl import FedFairMMFL
 from flcore.servers.server_multifedavg_with_multifedpredict import MultiFedAvgWithMultiFedPredict
 from flcore.servers.server_dma_fl_synchronous import DMAFLSynchronous
+from flcore.servers.server_fedcond import FedConD
 from flcore.servers.server_adaptive_fedavg import AdaptiveFedAvg
 from flcore.servers.server_multifedavg_with_fedpredict_dynamic import MultiFedAvgWithFedPredictDynamic
 from flcore.servers.server_multifedavg_with_fedpredict import MultiFedAvgWithFedPredict
@@ -50,6 +51,48 @@ torch.manual_seed(0)
 # vocab_size = 98635   #98635 for AG_News and 399198 for Sogou_News
 max_len=200
 emb_dim=32
+
+def _init_shift_detection_files(self):
+
+    result_path = self.get_result_path("test")
+
+    metrics_file = (
+            result_path
+            + f"shift_detection_metrics_{self.strategy_name}.csv"
+    )
+
+    curve_file = (
+            result_path
+            + f"shift_detection_curve_{self.strategy_name}.csv"
+    )
+
+    self._write_header(
+        metrics_file,
+        [
+            "Fold ID",
+            "Model",
+            "Precision",
+            "Recall",
+            "F1",
+            "Detection Delay",
+            "False Alarms",
+            "Detection Rounds",
+            "Shift Rounds"
+        ],
+        mode="w"
+    )
+
+    self._write_header(
+        curve_file,
+        [
+            "Fold ID",
+            "Round",
+            "Model",
+            "Drift Rate",
+            "Ground Truth"
+        ],
+        mode="w"
+    )
 
 def load_model(model_name, dataset, strategy, device):
     try:
@@ -134,6 +177,19 @@ def load_model(model_name, dataset, strategy, device):
         logger.error("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 def run(args):
+    if args.strategy == "FedConD":
+        temp_server = FedConD(
+            args,
+            [load_model(
+                args.model[m],
+                args.dataset[m],
+                args.strategy,
+                args.device
+            ) for m in range(len(args.model))],
+            fold_id=1
+        )
+
+        temp_server._init_shift_detection_files()
 
     time_list = []
     for fold_id in range(1, args.k_fold + 1):
@@ -159,6 +215,8 @@ def run(args):
             server = MultiFedAvgMDH
         elif args.strategy == "DMA-FL":
             server = DMAFLSynchronous
+        elif args.strategy == "FedConD":
+            server = FedConD
         elif args.strategy == "AdaptiveFedAvg":
             server = AdaptiveFedAvg
         elif args.strategy == "MultiFedAvgRR":
@@ -317,15 +375,31 @@ if __name__ == "__main__":
     else:
         log_name = args.strategy
 
-    result_path = """results/experiment_id_{}/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/log_{}.txt""".format(args.experiment_id,
-                                                                                                                       args.total_clients,
-                                                                                                            [float(i) for i in args.alpha],
-                                                                                                            args.dataset,
-                                                                                                            args.model,
-                                                                                                            args.fraction_fit,
-                                                                                                            args.number_of_rounds,
-                                                                                                            args.local_epochs,
-                                                                                                            log_name)
+    if args.label_shift_transition_window > 1:
+        result_path = """results/experiment_id_{}/clients_{}/alpha_{}/transition_window_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/log_{}.txt""".format(
+            args.experiment_id,
+            args.total_clients,
+            [float(i) for i in args.alpha],
+            args.label_shift_transition_window,
+            args.dataset,
+            args.model,
+            args.fraction_fit,
+            args.number_of_rounds,
+            args.local_epochs,
+            log_name)
+
+    else:
+
+        result_path = """results/experiment_id_{}/clients_{}/alpha_{}/{}/{}/fc_{}/rounds_{}/epochs_{}/log_{}.txt""".format(args.experiment_id,
+                                                                                                                           args.total_clients,
+                                                                                                                [float(i) for i in args.alpha],
+                                                                                                                args.dataset,
+                                                                                                                args.model,
+                                                                                                                args.fraction_fit,
+                                                                                                                args.number_of_rounds,
+                                                                                                                args.local_epochs,
+                                                                                                                log_name)
+
     print("log: ", result_path)
     import sys
 
