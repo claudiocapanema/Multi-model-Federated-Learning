@@ -339,6 +339,7 @@ class MultiFedAvg:
     def _save_data_metrics(self):
 
         try:
+            print("save data metrics")
             for me in range(self.ME):
                 algo = self.dataset[me] + "_" + self.strategy_name
                 result_path = self.get_result_path("test")
@@ -458,6 +459,7 @@ class MultiFedAvg:
             with open(filename, mode) as server_log_file:
                 writer = csv.writer(server_log_file)
                 writer.writerow(header)
+                print(f"""Escreveu hearder do arquivo {filename}""")
         except Exception as e:
             print("_write_header error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
@@ -534,3 +536,36 @@ class MultiFedAvg:
             sys.stdout = f
             sys.stdout = original
 
+    def _write_rows(self, filename, rows):
+        """
+        Escreve múltiplas linhas em um CSV.
+        Diferentemente de _write_outputs(), grava todas as linhas recebidas.
+        """
+
+        try:
+            os.makedirs(os.path.dirname(filename), exist_ok=True)
+
+            formatted_rows = []
+
+            for row in rows:
+                formatted_row = []
+                for element in row:
+                    if isinstance(element, float):
+                        formatted_row.append(round(element, 6))
+                    else:
+                        formatted_row.append(element)
+                formatted_rows.append(formatted_row)
+
+            with open(filename, "a", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerows(formatted_rows)
+
+        except Exception as e:
+            print("_write_rows error")
+            print(
+                "Error on line {} {} {}".format(
+                    sys.exc_info()[-1].tb_lineno,
+                    type(e).__name__,
+                    e,
+                )
+            )

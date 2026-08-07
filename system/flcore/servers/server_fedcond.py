@@ -30,8 +30,29 @@ class FedConD(MultiFedAvg):
             "Data shift"
         ]
         self.test_metrics_names = ["Accuracy", "Balanced accuracy", "Loss", "Round (t)", "Fraction fit",
-                                   "# training clients", "training clients and models", "Model size", "Fold ID", "Alpha", "Drift clients", "Drift rate", "Data shift", "Ground truth shift", "Detection delay", "False alarm", "Detection rate"]
+                                   "# training clients", "training clients and models", "Model size", "Fold ID", "Alpha", "Drift clients", "Drift rate", "Data shift", "Ground truth shift"]
         self.results_test_metrics = {me: {metric: [] for metric in self.test_metrics_names} for me in range(self.ME)}
+
+        # Detector
+        self.detector = self.strategy_name
+
+        # Dataset(s)
+        self.dataset = self.args.dataset
+
+        # Shift type
+        self.shift_type = (
+            "Label"
+            if "label_shift" in self.args.experiment_id
+            else "Concept"
+        )
+
+        # Shift configuration
+        self.shift_configuration = (
+            self.args.experiment_id
+            .replace("label_shift#", "")
+            .replace("concept_drift#", "")
+            .replace("_sudden", "")
+        )
 
     def set_clients(self):
 
@@ -67,6 +88,16 @@ class FedConD(MultiFedAvg):
         }
 
         self.drift_rate_history = {
+            me: []
+            for me in range(self.ME)
+        }
+
+        self.shift_ground_truth_state = {
+            me: []
+            for me in range(self.ME)
+        }
+
+        self.shift_ground_truth_event = {
             me: []
             for me in range(self.ME)
         }
@@ -137,7 +168,7 @@ class FedConD(MultiFedAvg):
     ):
         """Aggregate fit results using weighted average."""
         try:
-
+            print("entrou aggregate_fit")
             self.selected_clients_m = [[] for me in range(self.ME)]
 
             trained_models = []
@@ -213,40 +244,48 @@ class FedConD(MultiFedAvg):
                     # Data shift detection evaluation
                     # =====================================================
 
-                    ground_truth = int(
+                    # Estado do shift (para curvas)
+                    ground_truth_state = int(
                         any(
                             server_round >= r
                             for r in self.shift_rounds[me]
                         )
                     )
 
+                    # Evento do shift (para Precision/Recall/F1)
+                    ground_truth_event = int(
+                        server_round in self.shift_rounds[me]
+                    )
+
                     # Estado atual do detector
                     current_state = self.data_shift_type[me]
 
-                    # Evento somente quando ocorre
-                    # NO_SHIFT -> DATA_SHIFT
+                    # Evento do detector
                     self.detection_event[me] = int(
                         self.previous_detector_state[me] == "NO_SHIFT"
-                        and
-                        current_state == "DATA_SHIFT"
+                        and current_state == "DATA_SHIFT"
                     )
 
                     # Atualiza estado anterior
                     self.previous_detector_state[me] = current_state
 
-                    # Histórico
-                    self.shift_ground_truth[me].append(
-                        ground_truth
+                    # Salva históricos
+                    self.shift_ground_truth_state[me].append(
+                        ground_truth_state
+                    )
+
+                    self.shift_ground_truth_event[me].append(
+                        ground_truth_event
                     )
 
                     self.shift_detected[me].append(
                         self.detection_event[me]
                     )
 
-                    # Se houve um evento
+                    # Atualiza métricas do detector
                     if self.detection_event[me]:
 
-                        if ground_truth == 0:
+                        if ground_truth_event == 0:
 
                             self.false_alarm_rounds[me].append(
                                 server_round
@@ -261,26 +300,15 @@ class FedConD(MultiFedAvg):
                                     - self.shift_rounds[me][0]
                             )
 
-                    metrics_aggregated_mefl[me][
-                        "Ground truth shift"
-                    ] = ground_truth
-
-                    metrics_aggregated_mefl[me][
-                        "Detection delay"
-                    ] = self.detection_delay[me]
-
-                    metrics_aggregated_mefl[me][
-                        "False alarm"
-                    ] = len(
+                    metrics_aggregated_mefl[me]["Ground truth shift"] = ground_truth_state
+                    metrics_aggregated_mefl[me]["Detection delay"] = self.detection_delay[me]
+                    metrics_aggregated_mefl[me]["False alarm"] = len(
                         self.false_alarm_rounds[me]
                     )
+                    metrics_aggregated_mefl[me]["Detection rate"] = self.drift_rate[me]
 
-                    metrics_aggregated_mefl[me][
-                        "Detection rate"
-                    ] = self.drift_rate[me]
-
-            if server_round > 10:
-                self._save_data_metrics()
+            # if server_round > 10:
+            self._save_data_metrics()
             self._save_shift_detection_metrics(server_round)
             self._save_shift_detection_curve(server_round)
 
@@ -298,6 +326,7 @@ class FedConD(MultiFedAvg):
 
     def add_metrics(self, server_round, metrics_aggregated, me):
         try:
+            print("adicionar metricas")
             metrics_aggregated[me]["Fraction fit"] = self.fraction_fit
             metrics_aggregated[me]["# training clients"] = self.n_trained_clients
             metrics_aggregated[me]["training clients and models"] = self.selected_clients_m[me]
@@ -311,24 +340,6 @@ class FedConD(MultiFedAvg):
                 self.shift_ground_truth[me][-1]
                 if len(self.shift_ground_truth[me]) > 0
                 else 0
-            )
-
-            metrics_aggregated[me]["Detection delay"] = (
-                self.detection_delay[me]
-            )
-
-            metrics_aggregated[me]["False alarm"] = (
-                int(
-                    len(self.shift_detected[me]) > 0
-                    and
-                    self.shift_detected[me][-1] == 1
-                    and
-                    self.shift_ground_truth[me][-1] == 0
-                )
-            )
-
-            metrics_aggregated[me]["Detection rate"] = (
-                self.drift_rate[me]
             )
 
             for metric in metrics_aggregated[me]:
@@ -393,7 +404,7 @@ class FedConD(MultiFedAvg):
                         data.append(row)
 
             # print("File path: " + file_path)
-            print(data)
+            print("get results data", data, length)
 
             return file_path, header, data
         except Exception as e:
@@ -403,7 +414,7 @@ class FedConD(MultiFedAvg):
     def _save_shift_detection_metrics(self, server_round):
 
         try:
-
+            print("save shift detection metrics")
             from sklearn.metrics import (
                 precision_score,
                 recall_score,
@@ -419,7 +430,7 @@ class FedConD(MultiFedAvg):
 
             for me in range(self.ME):
 
-                y_true = self.shift_ground_truth[me]
+                y_true = self.shift_ground_truth_event[me]
                 y_pred = self.shift_detected[me]
 
                 if len(y_true) == 0:
@@ -449,9 +460,13 @@ class FedConD(MultiFedAvg):
                     )
 
                 row = [[
+                    self.detector,
+                    self.dataset[me],
                     self.fold_id,
                     server_round,
                     me,
+                    self.shift_type,
+                    self.shift_configuration,
                     precision,
                     recall,
                     f1,
@@ -463,12 +478,12 @@ class FedConD(MultiFedAvg):
                         else -1
                     ),
                     self.shift_rounds[me][0],
-                    len(self.shift_detected[me]),
-                    sum(self.shift_ground_truth[me]),
-                    sum(self.shift_detected[me]),
                 ]]
 
-                self._write_outputs(file_path, row)
+                self._write_rows(
+                    file_path,
+                    row
+                )
 
         except Exception as e:
 
@@ -485,7 +500,7 @@ class FedConD(MultiFedAvg):
     def _init_shift_detection_files(self):
 
         result_path = self.get_result_path("test")
-
+        print("inicializou arquivos em ", result_path)
         metrics_file = (
                 result_path
                 + f"shift_detection_metrics_{self.strategy_name}.csv"
@@ -499,9 +514,13 @@ class FedConD(MultiFedAvg):
         self._write_header(
             metrics_file,
             [
+                "Detector",
+                "Dataset",
                 "Fold ID",
                 "Round",
                 "Model",
+                "Shift Type",
+                "Shift Configuration",
                 "Precision",
                 "Recall",
                 "F1",
@@ -509,16 +528,15 @@ class FedConD(MultiFedAvg):
                 "False Alarms",
                 "First Detection Round",
                 "Shift Round",
-                "Rounds Seen",
-                "Ground Truth Events",
-                "Detected Events",
             ],
-            mode="w"
+            mode="w",
         )
 
         self._write_header(
             curve_file,
             [
+                "Detector",
+                "Dataset",
                 "Fold ID",
                 "Round",
                 "Model",
@@ -528,13 +546,13 @@ class FedConD(MultiFedAvg):
                 "Drift Clients",
                 "Drift Rate",
             ],
-            mode="w"
+            mode="w",
         )
 
     def _save_shift_detection_curve(self, server_round):
 
         try:
-
+            print("saving detection metrics curve")
             result_path = self.get_result_path("test")
 
             file_path = (
@@ -544,17 +562,19 @@ class FedConD(MultiFedAvg):
 
             for me in range(self.ME):
                 row = [[
+                    self.detector,
+                    self.dataset[me],
                     self.fold_id,
                     server_round,
                     me,
-                    self.shift_ground_truth[me][-1],
+                    self.shift_ground_truth_state[me][-1],
                     self.detection_event[me],
                     self.data_shift_type[me],
                     self.drift_clients[me],
                     self.drift_rate[me],
                 ]]
 
-                self._write_outputs(file_path, row)
+                self._write_rows(file_path, row)
 
         except Exception as e:
 

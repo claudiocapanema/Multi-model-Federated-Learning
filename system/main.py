@@ -177,19 +177,6 @@ def load_model(model_name, dataset, strategy, device):
         logger.error("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 def run(args):
-    if args.strategy == "FedConD":
-        temp_server = FedConD(
-            args,
-            [load_model(
-                args.model[m],
-                args.dataset[m],
-                args.strategy,
-                args.device
-            ) for m in range(len(args.model))],
-            fold_id=1
-        )
-
-        temp_server._init_shift_detection_files()
 
     time_list = []
     for fold_id in range(1, args.k_fold + 1):
@@ -258,6 +245,8 @@ def run(args):
 
         if args.strategy not in ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+FP", "MultiFedAvg+FPD"]:
             server = server(args, models, fold_id)
+            if args.strategy in ["FedConD"]:
+                server._init_shift_detection_files()
         else:
             server = server(args, models, version, fold_id)
         server.train()
