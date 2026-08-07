@@ -198,6 +198,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 il = result["non_iid"]["il"]
                 ps = result["non_iid"]["ps"]
                 similarity = result["non_iid"]["similarity"]
+                if alpha not in self.client_metrics[client_id][me].keys():
+                    self.client_metrics[client_id][me][alpha] = {"fc": None, "il": None, "similarity": None}
                 self.client_metrics[client_id][me][alpha]["fc"] = fc
                 self.client_metrics[client_id][me][alpha]["il"] = il
                 self.client_metrics[client_id][me][alpha]["similarity"] = similarity

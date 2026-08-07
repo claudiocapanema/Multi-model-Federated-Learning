@@ -58,6 +58,8 @@ class MultiFedAvgClient:
             self.concept_drift_window_test = [0] * self.ME
             self.total_clients  = args.total_clients
 
+            self.num_examples = [0] * self.ME
+
             self.number_of_rounds = args.number_of_rounds
             print("Preparing data...")
             print("""args do cliente: {} {}""".format(self.args.client_id, self.alpha_train))
@@ -67,6 +69,7 @@ class MultiFedAvgClient:
             self.recent_trainloader = [None] * self.ME
             self.optimizer = [None] * self.ME
             self.p_ME, self.fc_ME, self.il_ME = [0] * self.ME, [0] * self.ME, [0] * self.ME
+            # self.num_examples = [0] * self.ME
             self.index = 0
             self.local_epochs = self.args.local_epochs
             self.lr = self.args.learning_rate
@@ -480,6 +483,8 @@ class MultiFedAvgClient:
 
                 self.recent_trainloader[me] = copy.deepcopy(self.trainloader[me])
 
+                self.num_examples[me] = len(self.trainloader[me].dataset)
+
             else:
                 if self.data_shift_config != {}:
                     alpha_me, concept_drift_window, data_shift_flag = self._data_shift_flag(t, me, train=True)
@@ -534,6 +539,8 @@ class MultiFedAvgClient:
                                                                                                    self.n_classes,
                                                                                                    concept_drift_window=self.concept_drift_window_train,
                                                                                                    me=me)
+
+            self.num_examples[me] = len(self.trainloader[me].dataset)
 
         except Exception as e:
             print(f"update_local_train_data error {self.data_shift_config}")
