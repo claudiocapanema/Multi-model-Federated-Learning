@@ -285,27 +285,23 @@ class FedConD(MultiFedAvg):
                     # Atualiza métricas do detector
                     if self.detection_event[me]:
 
-                        if ground_truth_event == 0:
+                        shift_round = min(self.shift_rounds[me])
 
-                            self.false_alarm_rounds[me].append(
-                                server_round
-                            )
+                        if server_round < shift_round:
+                            self.false_alarm_rounds[me].append(server_round)
 
                         elif self.true_detection_round[me] is None:
-
                             self.true_detection_round[me] = server_round
-
-                            self.detection_delay[me] = (
-                                    server_round
-                                    - self.shift_rounds[me][0]
-                            )
+                            self.detection_delay[me] = server_round - shift_round
 
                     metrics_aggregated_mefl[me]["Ground truth shift"] = ground_truth_state
                     metrics_aggregated_mefl[me]["Detection delay"] = self.detection_delay[me]
                     metrics_aggregated_mefl[me]["False alarm"] = len(
                         self.false_alarm_rounds[me]
                     )
-                    metrics_aggregated_mefl[me]["Detection rate"] = self.drift_rate[me]
+                    metrics_aggregated_mefl[me]["Detection rate"] = (
+                        1.0 if self.true_detection_round[me] is not None else 0.0
+                    )
 
             # if server_round > 10:
             self._save_data_metrics()
@@ -337,8 +333,8 @@ class FedConD(MultiFedAvg):
             metrics_aggregated[me]["Data shift"] = self.data_shift_type[me]
 
             metrics_aggregated[me]["Ground truth shift"] = (
-                self.shift_ground_truth[me][-1]
-                if len(self.shift_ground_truth[me]) > 0
+                self.shift_ground_truth_state[me][-1]
+                if len(self.shift_ground_truth_state[me]) > 0
                 else 0
             )
 
@@ -415,11 +411,6 @@ class FedConD(MultiFedAvg):
 
         try:
             print("save shift detection metrics")
-            from sklearn.metrics import (
-                precision_score,
-                recall_score,
-                f1_score,
-            )
 
             result_path = self.get_result_path("test")
 
@@ -441,22 +432,15 @@ class FedConD(MultiFedAvg):
 
                 else:
 
-                    precision = precision_score(
-                        y_true,
-                        y_pred,
-                        zero_division=0,
-                    )
+                    tp = 1 if self.true_detection_round[me] is not None else 0
+                    fp = len(self.false_alarm_rounds[me])
 
-                    recall = recall_score(
-                        y_true,
-                        y_pred,
-                        zero_division=0,
-                    )
-
-                    f1 = f1_score(
-                        y_true,
-                        y_pred,
-                        zero_division=0,
+                    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+                    recall = float(tp)
+                    f1 = (
+                        2 * precision * recall / (precision + recall)
+                        if precision + recall > 0
+                        else 0.0
                     )
 
                 row = [[

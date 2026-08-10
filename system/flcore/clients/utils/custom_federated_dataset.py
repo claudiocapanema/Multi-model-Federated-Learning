@@ -23,7 +23,7 @@ from flwr_datasets.common import EventType, event
 from flwr_datasets.partitioner import Partitioner
 from flwr_datasets.preprocessor import Preprocessor
 from flwr_datasets.utils import (
-    _check_if_dataset_tested,
+    # _check_if_dataset_tested,
     _instantiate_merger_if_needed,
     _instantiate_partitioners,
 )
@@ -120,7 +120,7 @@ class CustomFederatedDataset:
         seed: Optional[int] = 42,
         **load_dataset_kwargs: Any,
     ) -> None:
-        _check_if_dataset_tested(dataset)
+        # _check_if_dataset_tested(dataset)
         self._dataset_name: str = dataset
         self._dataset_path: str = path
         self._subset: Optional[str] = subset

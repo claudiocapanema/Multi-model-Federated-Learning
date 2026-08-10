@@ -438,7 +438,22 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
         print("load_data error")
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-def train(model, trainloader, valloader, optimizer, epochs, learning_rate, device, client_id, t, dataset_name, n_classes, concept_drift_window=0):
+def train(
+    model,
+    trainloader,
+    valloader,
+    optimizer,
+    epochs,
+    learning_rate,
+    device,
+    client_id,
+    t,
+    dataset_name,
+    n_classes,
+    concept_drift_window=0,
+    global_params=None,
+    mu=0.0
+):
     try:
         """Train the utils on the training set."""
         model.to(device)  # move utils to GPU if available
@@ -463,7 +478,30 @@ def train(model, trainloader, valloader, optimizer, epochs, learning_rate, devic
                 optimizer.zero_grad()
                 outputs = model(x)
                 # print("""saida: {} true: {}""".format(outputs, labels))
+
                 loss = criterion(outputs, labels)
+                # For FedConD
+                if (
+                        global_params is not None
+                        and mu > 0
+                ):
+
+                    prox_term = 0.0
+
+                    for param, global_param in zip(
+                            model.parameters(),
+                            global_params):
+                        prox_term += torch.sum(
+                            (
+                                    param -
+                                    global_param.to(device)
+                            ) ** 2
+                        )
+
+                    loss += (
+                                    mu / 2.0
+                            ) * prox_term
+
                 loss.backward()
                 loss_total += loss.item() * labels.shape[0]
                 y_true.append(label_binarize(labels.detach().cpu().numpy().tolist(), classes=np.arange(n_classes)))
