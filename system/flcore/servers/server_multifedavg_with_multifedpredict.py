@@ -16,6 +16,7 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 import os
+import csv
 import copy
 import time
 import numpy as np
@@ -47,12 +48,14 @@ from scipy.stats import ks_2samp
 
 from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, weighted_loss_avg
 
+
 def get_weights(net):
     try:
         return [val.cpu().numpy() for _, val in net.state_dict().items()]
     except Exception as e:
         print("get_weights error")
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
 
 def weighted_average_fit(metrics):
     try:
@@ -64,8 +67,10 @@ def weighted_average_fit(metrics):
         examples = [num_examples for num_examples, _ in metrics]
 
         # Aggregate and return custom metric (weighted average)
-        return {"Accuracy": sum(accuracies) / sum(examples), "Balanced accuracy": sum(balanced_accuracies) / sum(examples),
-                "Loss": sum(loss) / sum(examples), "Round (t)": metrics[0][1]["Round (t)"], "Model size": metrics[0][1]["Model size"]}
+        return {"Accuracy": sum(accuracies) / sum(examples),
+                "Balanced accuracy": sum(balanced_accuracies) / sum(examples),
+                "Loss": sum(loss) / sum(examples), "Round (t)": metrics[0][1]["Round (t)"],
+                "Model size": metrics[0][1]["Model size"]}
     except Exception as e:
         print("weighted_average_fit error")
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
@@ -77,7 +82,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
         self.t_hat = [1] * self.ME
         self.reduced_training_intensity_flag = [False] * self.ME
         self.train_accuracy_list = {me: [] for me in range(self.ME)}
-        self.max_number_of_rounds_data_drift_adaptation = len(self.clients) //  self.num_training_clients
+        self.max_number_of_rounds_data_drift_adaptation = len(self.clients) // self.num_training_clients
         self.increased_training_intensity = [0] * self.ME
         self.reduced_training_intensity_flag = [False] * self.ME
         self.last_round_increased_training_intensity = [0] * self.ME
@@ -99,19 +104,206 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
         self.adaptation_until = [-1] * self.ME
         self.data_drift_model = -1
 
+        # =====================================================
+        # Shift-detection evaluation (same CSV format as FedConD)
+        # =====================================================
+        self.detector = self.strategy_name
+        self.dataset = self.args.dataset
+        self.shift_type = (
+            "Label" if "label_shift" in self.args.experiment_id else "Concept"
+        )
+        self.shift_configuration = (
+            self.args.experiment_id
+            .replace("label_shift#", "")
+            .replace("concept_drift#", "")
+            .replace("_sudden", "")
+        )
+
+        # -------------------------------------------------------------
+        # Shift-detection evaluation state
+        # -------------------------------------------------------------
+        #
+        # IMPORTANT:
+        # super().__init__() invokes set_clients() through dynamic
+        # dispatch. set_clients() creates the clients and obtains the
+        # ground-truth shift rounds from each client's data_shift_config.
+        #
+        # Do NOT lose those values by leaving shift_rounds empty here.
+        # Reload them explicitly after the subclass state initialization.
+        # -------------------------------------------------------------
+        self.shift_rounds = {me: [] for me in range(self.ME)}
+
+        if len(self.clients) > 0:
+            reference_client = self.clients[0]
+
+            for me in range(self.ME):
+                config = reference_client.data_shift_config.get(me, {})
+                self.shift_rounds[me] = list(
+                    config.get("data_shift_rounds", [])
+                )
+
+        self.previous_detector_state = {
+            me: "NO_SHIFT" for me in range(self.ME)
+        }
+
+        self.detection_event = {
+            me: 0 for me in range(self.ME)
+        }
+
+        self.shift_detected = {
+            me: [] for me in range(self.ME)
+        }
+
+        # First occurrence of Label shift / Concept drift in the
+        # normal MultiFedPredict metrics ("Data shift" field).
+        self.first_data_shift_round = {
+            me: None for me in range(self.ME)
+        }
+
+        self.shift_ground_truth_state = {
+            me: [] for me in range(self.ME)
+        }
+
+        self.shift_ground_truth_event = {
+            me: [] for me in range(self.ME)
+        }
+
+        self.false_alarm_rounds = {
+            me: [] for me in range(self.ME)
+        }
+
+        # First detection that occurs at or after the ground-truth
+        # shift round.
+        self.true_detection_round = {
+            me: None for me in range(self.ME)
+        }
+
+        self.detection_delay = {
+            me: -1 for me in range(self.ME)
+        }
+
+        self.drift_clients = {
+            me: 0 for me in range(self.ME)
+        }
+
+        self.drift_rate = {
+            me: 0.0 for me in range(self.ME)
+        }
+
+        self._init_shift_detection_files()
+
     def set_clients(self):
 
         try:
+            self.data_shift_type = {
+                me: "NO_SHIFT"
+                for me in range(self.ME)
+            }
+
+            self.drift_clients = {
+                me: 0
+                for me in range(self.ME)
+            }
+
+            self.drift_rate = {
+                me: 0.0
+                for me in range(self.ME)
+            }
+
+            self.shift_rounds = {
+                me: []
+                for me in range(self.ME)
+            }
+
+            # Histórico (usado para métricas)
+            self.shift_detected = {
+                me: []
+                for me in range(self.ME)
+            }
+
+            self.shift_ground_truth = {
+                me: []
+                for me in range(self.ME)
+            }
+
+            self.drift_rate_history = {
+                me: []
+                for me in range(self.ME)
+            }
+
+            self.shift_ground_truth_state = {
+                me: []
+                for me in range(self.ME)
+            }
+
+            self.shift_ground_truth_event = {
+                me: []
+                for me in range(self.ME)
+            }
+
+            # ===============================
+            # Novos atributos
+            # ===============================
+
+            # Estado do detector na rodada anterior
+            self.previous_detector_state = {
+                me: "NO_SHIFT"
+                for me in range(self.ME)
+            }
+
+            # Evento ocorrido na rodada corrente
+            self.detection_event = {
+                me: 0
+                for me in range(self.ME)
+            }
+
+            # Primeira ocorrência de qualquer data shift no campo
+            # "Data shift" do CSV normal do MultiFedPredict.
+            self.first_data_shift_round = {
+                me: None
+                for me in range(self.ME)
+            }
+
+            # Rodadas de falso alarme
+            self.false_alarm_rounds = {
+                me: []
+                for me in range(self.ME)
+            }
+
+            # Primeira detecção correta
+            self.true_detection_round = {
+                me: None
+                for me in range(self.ME)
+            }
+
+            self.detection_delay = {
+                me: -1
+                for me in range(self.ME)
+            }
+
             client_class = ClientMultiFedAvgWithMultiFedPredict
             for i in range(self.total_clients):
                 client = client_class(self.args,
-                                        id=i,
-                                        model=copy.deepcopy(self.global_model),
-                                        fold_id=self.fold_id)
+                                      id=i,
+                                      model=copy.deepcopy(self.global_model),
+                                      fold_id=self.fold_id)
                 self.clients.append(client)
 
             self.clients_ids = [i.client_id for i in self.clients]
             self.clients_ids_uniform_selection = [i for i in copy.deepcopy(self.clients_ids)]
+
+            # Ground-truth shift rounds come from the same client-side
+            # configuration used by FedConD.
+            if len(self.clients) > 0:
+
+                for me in range(self.ME):
+
+                    if me in self.clients[0].data_shift_config:
+                        self.shift_rounds[me] = (
+                            self.clients[0]
+                            .data_shift_config[me]
+                            ["data_shift_rounds"]
+                        )
 
         except Exception as e:
             print("set_clients error")
@@ -119,10 +311,10 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
     # original
     def aggregate_fit(
-        self,
-        server_round: int,
-        results,
-        failures,
+            self,
+            server_round: int,
+            results,
+            failures,
     ):
         """Aggregate fit results using weighted average."""
         try:
@@ -156,7 +348,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
                 # aggregated_ndarrays_mefl[me] = aggregate(weights_results)
                 if len(weights_results) > 1:
-                    aggregated_ndarrays_mefl[me] = self.aggregate(weights_results, self.heterogeneity_degree[me], self.parameters_aggregated_mefl[me], server_round, me)
+                    aggregated_ndarrays_mefl[me] = self.aggregate(weights_results, self.heterogeneity_degree[me],
+                                                                  self.parameters_aggregated_mefl[me], server_round, me)
                 if len(weights_results) == 1:
                     aggregated_ndarrays_mefl[me] = results_mefl[me][0][0]
 
@@ -173,6 +366,10 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     print(f"Teste data shift modelo {me} rodada {server_round} teste {self.data_shift_type[me]}")
                 else:
                     print("nao tem")
+
+            # Save the same shift-detection CSVs produced by FedConD.
+            self._save_shift_detection_metrics(server_round)
+            self._save_shift_detection_curve(server_round)
 
             print("""finalizou aggregated fit""")
 
@@ -210,7 +407,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 num_samples_list[me].append(num_examples)
                 clients_parameters_mefl[me].append(results[i][0])
 
-
             print(f"Metricas antes rodada {server_round}")
             print(fc_list)
             print(il_list)
@@ -223,9 +419,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 self.similarity[me] = self._weighted_average(il_list[me], num_samples_list[me])
                 self.heterogeneity_degree[me] = round(((1 - self.fc[me]) + (self.il[me])) / 2, 2)
                 # if self.heterogeneity_degree[me] > self.prediction_layer[me]["non_iid"]:
-                print(f"round {server_round} fc {self.fc[me]} il {self.il[me]} similarity {self.similarity[me]} ps {self.ps[me]} heterogeneity_degree {self.heterogeneity_degree[me]}")
-
-
+                print(
+                    f"round {server_round} fc {self.fc[me]} il {self.il[me]} similarity {self.similarity[me]} ps {self.ps[me]} heterogeneity_degree {self.heterogeneity_degree[me]}")
 
             flag = False
             if server_round == 1:
@@ -235,18 +430,21 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 if "dls" in self.compression:
                     if flag:
                         self.similarity_between_layers_per_round_and_client[me][server_round], \
-                        self.similarity_between_layers_per_round[me][server_round], self.mean_similarity_per_round[me][
-                            server_round], self.similarity_list_per_layer[me], self.df[me] = fedpredict_layerwise_similarity(
-                            parameters_aggregated_mefl[me], clients_parameters_mefl[me], self.similarity_list_per_layer[me])
+                            self.similarity_between_layers_per_round[me][server_round], \
+                        self.mean_similarity_per_round[me][
+                            server_round], self.similarity_list_per_layer[me], self.df[
+                            me] = fedpredict_layerwise_similarity(
+                            parameters_aggregated_mefl[me], clients_parameters_mefl[me],
+                            self.similarity_list_per_layer[me])
                     else:
                         self.similarity_between_layers_per_round_and_client[me][server_round], \
-                        self.similarity_between_layers_per_round[me][
-                            server_round], self.mean_similarity_per_round[me][
+                            self.similarity_between_layers_per_round[me][
+                                server_round], self.mean_similarity_per_round[me][
                             server_round], self.similarity_list_per_layer[me] = \
-                        self.similarity_between_layers_per_round_and_client[me][server_round - 1], \
-                        self.similarity_between_layers_per_round[me][
-                            server_round - 1], self.mean_similarity_per_round[me][
-                            server_round - 1], self.similarity_list_per_layer[me]
+                            self.similarity_between_layers_per_round_and_client[me][server_round - 1], \
+                                self.similarity_between_layers_per_round[me][
+                                    server_round - 1], self.mean_similarity_per_round[me][
+                                server_round - 1], self.similarity_list_per_layer[me]
                 else:
                     self.similarity_between_layers_per_round[me][server_round] = []
                     self.mean_similarity_per_round[me][server_round] = 0
@@ -261,7 +459,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
         except Exception as e:
             print("aggregate_fit error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
-
 
     # original
     def aggregate(self, results: list[tuple[NDArrays, int]], heterogeneity_degree: float,
@@ -317,8 +514,9 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             # if self.version in ["iti"] or t == 1 or (self.ps[me] == 0 and heterogeneity_degree < threshold[me]):
             #     heterogeneity_degree = 0
             # heterogeneity_degree = 0
-            weighted_parameters_update_list = [np.array(original_layer + (1 - heterogeneity_degree) * layer) for original_layer, layer in
-                                zip(current_parameters, weighted_parameters_update)]
+            weighted_parameters_update_list = [np.array(original_layer + (1 - heterogeneity_degree) * layer) for
+                                               original_layer, layer in
+                                               zip(current_parameters, weighted_parameters_update)]
 
             return weighted_parameters_update_list
         except Exception as e:
@@ -420,18 +618,15 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     else:
                         self.data_shift_type[me] = "NO_SHIFT"
 
-
-
             # 🔄 Finaliza adaptação apenas no início do round
             for me in range(self.ME):
                 if self.in_adaptation[me]:
-                    if t > self.adaptation_until[me]: # atingiu a rodada limite de adaptação
+                    if t > self.adaptation_until[me]:  # atingiu a rodada limite de adaptação
                         self.in_adaptation[me] = False
                         if self.data_drift_model == me:
                             self.data_drift_model = -1
-                    else: # pode continuar adaptando
+                    else:  # pode continuar adaptando
                         self.data_drift_model = me
-
 
             print(f"KS teste rodada {t} lista: {drift_ps}")
             # Detectar modelo com data shift caso nenhum esteja em adaptação
@@ -442,11 +637,13 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     print(f"Rodada {t} modelo {me} resultado ps = {self.ps[me]}")
                     can_detect = (t - self.last_drift_round[me]) >= self.min_drift_interval
 
-
                     print(f"Rodada {t} modelo {me} | last_drift={self.last_drift_round[me]} | can_detect={can_detect}")
 
                     if can_detect and not self.in_adaptation[me] \
-                            and self.ps[me] > 0.1 and (self.heterogeneity_degree[me] > 0 or "CONCEPT_DRIFT" in self.experiment_id) and self.increased_training_intensity[self.data_drift_model] < self.max_number_of_rounds_data_drift_adaptation:
+                            and self.ps[me] > 0.1 and (
+                            self.heterogeneity_degree[me] > 0 or "CONCEPT_DRIFT" in self.experiment_id) and \
+                            self.increased_training_intensity[
+                                self.data_drift_model] < self.max_number_of_rounds_data_drift_adaptation:
                         data_drift_model = me
                         self.last_drift_round[me] = t
                         self.in_adaptation[me] = True
@@ -455,16 +652,21 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
             if self.data_drift_model > -1:
 
-                print(f"##rodada {t} data_drift_model = {self.data_drift_model} drift_ps {self.ps[self.data_drift_model]}")
+                print(
+                    f"##rodada {t} data_drift_model = {self.data_drift_model} drift_ps {self.ps[self.data_drift_model]}")
                 self.increased_training_intensity[self.data_drift_model] += 1
 
-                print(f"select clients rodada {t} clients ids uniform selection {list(self.clients_ids_uniform_selection)} num training clients {self.num_training_clients}")
-                to_remove = [i for i in sorted(random.sample(list(self.clients_ids_uniform_selection), min(self.num_training_clients, len(list(self.clients_ids_uniform_selection)))))]
+                print(
+                    f"select clients rodada {t} clients ids uniform selection {list(self.clients_ids_uniform_selection)} num training clients {self.num_training_clients}")
+                to_remove = [i for i in sorted(random.sample(list(self.clients_ids_uniform_selection),
+                                                             min(self.num_training_clients,
+                                                                 len(list(self.clients_ids_uniform_selection)))))]
                 selected_clients = copy.deepcopy(list(to_remove))
                 # Remover os clientes da rodada onde ocorreu incialmente o data shift
                 if self.increased_training_intensity[self.data_drift_model] == 1:
                     to_remove += self.selected_clients_m[self.data_drift_model]
-                self.clients_ids_uniform_selection = [x for x in self.clients_ids_uniform_selection if x not in to_remove]
+                self.clients_ids_uniform_selection = [x for x in self.clients_ids_uniform_selection if
+                                                      x not in to_remove]
 
                 if len(selected_clients) < self.num_training_clients or len(self.clients_ids_uniform_selection) == 0:
                     remaining = self.num_training_clients - len(selected_clients)
@@ -508,7 +710,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             for me in range(self.ME):
                 clients_evaluate_list = []
                 metrics = {"fc": self.fc[me], "il": self.il[me], "heterogeneity_degree": self.heterogeneity_degree[me],
-                           "ps": self.ps[me], "similarity": self.similarity[me], "data_shift_type": self.data_shift_type[me]}
+                           "ps": self.ps[me], "similarity": self.similarity[me],
+                           "data_shift_type": self.data_shift_type[me]}
                 print(f"data shift type na rodada {t} no modelo {me} {metrics["data_shift_type"]}")
                 for i in range(len(self.clients)):
                     client_dict = {}
@@ -537,21 +740,410 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             print("evaluate error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    # def add_metrics(self, server_round, metrics_aggregated, me):
-    #     try:
-    #         metrics_aggregated[me]["Fraction fit"] = self.fraction_fit
-    #         metrics_aggregated[me]["# training clients"] = self.n_trained_clients
-    #         metrics_aggregated[me]["training clients and models"] = self.selected_clients_m[me]
-    #         metrics_aggregated[me]["fc"] = self.fc[me]
-    #         metrics_aggregated[me]["il"] = self.il[me]
-    #         metrics_aggregated[me]["dh"] = self.heterogeneity_degree[me]
-    #         metrics_aggregated[me]["ps"] = self.ps[me]
-    #
-    #         for metric in metrics_aggregated[me]:
-    #             self.results_test_metrics[me][metric].append(metrics_aggregated[me][metric])
-    #     except Exception as e:
-    #         print("add_metrics error")
-    #         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+    def add_metrics(self, server_round, metrics_aggregated, me):
+        try:
+            # ============================================================
+            # Metrics added by the MultiFedAvg/MultiFedPredict server
+            # ============================================================
+            metrics_aggregated[me]["Fraction fit"] = self.fraction_fit
+            metrics_aggregated[me]["# training clients"] = self.n_trained_clients
+            metrics_aggregated[me]["training clients and models"] = (
+                self.selected_clients_m[me]
+            )
+            metrics_aggregated[me]["Fold ID"] = self.fold_id
+
+            metrics_aggregated[me]["fc"] = self.fc[me]
+            metrics_aggregated[me]["il"] = self.il[me]
+            metrics_aggregated[me]["dh"] = self.heterogeneity_degree[me]
+            metrics_aggregated[me]["ps"] = self.ps[me]
+            metrics_aggregated[me]["gw"] = self.gw[me]
+            metrics_aggregated[me]["lw"] = self.lw[me]
+
+            # ============================================================
+            # Data-shift information produced by MultiFedPredict
+            # ============================================================
+            metrics_aggregated[me]["Data shift"] = self.data_shift_type[me]
+
+            metrics_aggregated[me]["Drift clients"] = (
+                self.drift_clients[me]
+            )
+
+            metrics_aggregated[me]["Drift rate"] = (
+                self.drift_rate[me]
+            )
+
+            metrics_aggregated[me]["Ground truth shift"] = (
+                self.shift_ground_truth_state[me][-1]
+                if len(self.shift_ground_truth_state[me]) > 0
+                else 0
+            )
+
+            print(
+                f"[Metrics] model={me} | "
+                f"Data shift={self.data_shift_type[me]} | "
+                f"Drift clients={self.drift_clients[me]} | "
+                f"Drift rate={self.drift_rate[me]}"
+            )
+
+            # ============================================================
+            # IMPORTANT:
+            # Some of these fields are not part of the original
+            # results_test_metrics dictionary created by the parent class.
+            #
+            # Create the lists dynamically before appending.
+            # ============================================================
+            if me not in self.results_test_metrics:
+                self.results_test_metrics[me] = {}
+
+            for metric, value in metrics_aggregated[me].items():
+
+                if metric not in self.results_test_metrics[me]:
+                    self.results_test_metrics[me][metric] = []
+
+                    # Keep the CSV header synchronized with the dictionary
+                    # used by _get_results().
+                    if metric not in self.test_metrics_names:
+                        self.test_metrics_names.append(metric)
+
+                self.results_test_metrics[me][metric].append(value)
+
+        except Exception as e:
+            print("add_metrics error")
+            print(
+                "Error on line {} {} {}".format(
+                    sys.exc_info()[-1].tb_lineno,
+                    type(e).__name__,
+                    e
+                )
+            )
+
+    # ================================================================
+    # Shift-detection evaluation
+    # ================================================================
+
+    def _write_header(self, file_path, header, mode="w"):
+        """Write a CSV header, following the FedConD file format."""
+        with open(file_path, mode, newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow(header)
+
+    def _write_rows(self, file_path, rows):
+        """Append rows to a CSV file, following the FedConD format."""
+        with open(file_path, "a", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerows(rows)
+
+    def _init_shift_detection_files(self):
+        result_path = self.get_result_path("test")
+        os.makedirs(result_path, exist_ok=True)
+
+        metrics_file = os.path.join(
+            result_path,
+            f"shift_detection_metrics_{self.strategy_name}.csv",
+        )
+        curve_file = os.path.join(
+            result_path,
+            f"shift_detection_curve_{self.strategy_name}.csv",
+        )
+
+        self._write_header(
+            metrics_file,
+            [
+                "Detector",
+                "Dataset",
+                "Fold ID",
+                "Round",
+                "Model",
+                "Shift Type",
+                "Shift Configuration",
+                "Precision",
+                "Recall",
+                "F1",
+                "Detection Delay",
+                "False Alarms",
+                "First Detection Round",
+                "Shift Round",
+            ],
+            mode="w",
+        )
+
+        self._write_header(
+            curve_file,
+            [
+                "Detector",
+                "Dataset",
+                "Fold ID",
+                "Round",
+                "Model",
+                "Ground Truth",
+                "Detection Event",
+                "Detector State",
+                "Drift Clients",
+                "Drift Rate",
+            ],
+            mode="w",
+        )
+
+    def _save_shift_detection_metrics(self, server_round):
+        """
+        Evaluate the data-shift decision already produced by
+        MultiFedPredict.
+
+        IMPORTANT:
+        This method does NOT perform detection. The actual detector
+        has already set self.data_shift_type[me] in select_clients().
+
+        A detection EVENT is counted only when the detector enters a
+        shift state:
+
+            NO_SHIFT -> LABEL_SHIFT
+            NO_SHIFT -> CONCEPT_DRIFT
+
+        Consecutive rounds with the same shift state are therefore
+        not counted as new detection events.
+        """
+
+        result_path = self.get_result_path("test")
+        os.makedirs(result_path, exist_ok=True)
+
+        file_path = os.path.join(
+            result_path,
+            f"shift_detection_metrics_{self.strategy_name}.csv",
+        )
+
+        for me in range(self.ME):
+
+            # ---------------------------------------------------------
+            # Actual detector output produced by MultiFedPredict.
+            # ---------------------------------------------------------
+            current_state = str(
+                self.data_shift_type[me]
+            ).strip()
+
+            current_normalized = (
+                current_state
+                .lower()
+                .replace("_", " ")
+                .strip()
+            )
+
+            previous_state = str(
+                self.previous_detector_state[me]
+            ).strip()
+
+            previous_normalized = (
+                previous_state
+                .lower()
+                .replace("_", " ")
+                .strip()
+            )
+
+            is_shift_state = current_normalized in {
+                "label shift",
+                "concept drift",
+            }
+
+            was_shift_state = previous_normalized in {
+                "label shift",
+                "concept drift",
+            }
+
+            # A new detection event occurs only on entry into a
+            # shift state.
+            detection_event = int(
+                is_shift_state and not was_shift_state
+            )
+
+            self.detection_event[me] = detection_event
+
+            # ---------------------------------------------------------
+            # Ground truth comes from the same client-side
+            # data_shift_config used to generate the experiment.
+            # ---------------------------------------------------------
+            shift_rounds = sorted(
+                self.shift_rounds.get(me, [])
+            )
+
+            ground_truth_state = int(
+                any(
+                    server_round >= shift_round
+                    for shift_round in shift_rounds
+                )
+            )
+
+            ground_truth_event = int(
+                server_round in shift_rounds
+            )
+
+            # ---------------------------------------------------------
+            # Evaluate this detection event.
+            # ---------------------------------------------------------
+            if detection_event:
+
+                # First detector event, regardless of whether it is
+                # a false alarm or a true detection.
+                if self.first_data_shift_round[me] is None:
+                    self.first_data_shift_round[me] = server_round
+
+                if shift_rounds:
+                    # For the current experimental design, the first
+                    # configured shift is the ground-truth event.
+                    shift_round = shift_rounds[0]
+
+                    # Detection before the ground truth.
+                    if server_round < shift_round:
+
+                        self.false_alarm_rounds[me].append(
+                            server_round
+                        )
+
+                    # First detection at/after the ground truth.
+                    elif self.true_detection_round[me] is None:
+
+                        self.true_detection_round[me] = server_round
+
+                        self.detection_delay[me] = (
+                            server_round - shift_round
+                        )
+
+            # Save the state for the next round.
+            self.previous_detector_state[me] = current_state
+
+            # Save curve histories.
+            self.shift_ground_truth_state[me].append(
+                ground_truth_state
+            )
+
+            self.shift_ground_truth_event[me].append(
+                ground_truth_event
+            )
+
+            self.shift_detected[me].append(
+                detection_event
+            )
+
+            # ---------------------------------------------------------
+            # Metrics accumulated up to this round.
+            # ---------------------------------------------------------
+            tp = int(
+                self.true_detection_round[me] is not None
+            )
+
+            fp = len(
+                self.false_alarm_rounds[me]
+            )
+
+            precision = (
+                tp / (tp + fp)
+                if (tp + fp) > 0
+                else 0.0
+            )
+
+            # One ground-truth shift event per model in these
+            # experiments.
+            recall = float(tp)
+
+            f1 = (
+                2.0 * precision * recall
+                / (precision + recall)
+                if (precision + recall) > 0
+                else 0.0
+            )
+
+            first_detection_round = (
+                self.first_data_shift_round[me]
+                if self.first_data_shift_round[me] is not None
+                else -1
+            )
+
+            true_detection_round = (
+                self.true_detection_round[me]
+                if self.true_detection_round[me] is not None
+                else -1
+            )
+
+            detection_delay = (
+                self.detection_delay[me]
+                if self.true_detection_round[me] is not None
+                else -1
+            )
+
+            shift_round = (
+                shift_rounds[0]
+                if shift_rounds
+                else -1
+            )
+
+            row = [[
+                self.detector,
+                self.dataset[me],
+                self.fold_id,
+                server_round,
+                me,
+                self.shift_type,
+                self.shift_configuration,
+                precision,
+                recall,
+                f1,
+                detection_delay,
+                fp,
+                first_detection_round,
+                shift_round,
+            ]]
+
+            self._write_rows(
+                file_path,
+                row
+            )
+
+    def _save_shift_detection_curve(self, server_round):
+        result_path = self.get_result_path("test")
+        os.makedirs(result_path, exist_ok=True)
+
+        file_path = os.path.join(
+            result_path,
+            f"shift_detection_curve_{self.strategy_name}.csv",
+        )
+
+        for me in range(self.ME):
+            ground_truth = (
+                self.shift_ground_truth_state[me][-1]
+                if self.shift_ground_truth_state[me]
+                else 0
+            )
+
+            current_state = str(
+                self.data_shift_type[me]
+            ).strip()
+
+            normalized_state = (
+                current_state
+                .lower()
+                .replace("_", " ")
+                .strip()
+            )
+
+            detector_state = (
+                "DATA_SHIFT"
+                if normalized_state in {
+                    "label shift",
+                    "concept drift",
+                }
+                else "NO_SHIFT"
+            )
+
+            row = [[
+                self.detector,
+                self.dataset[me],
+                self.fold_id,
+                server_round,
+                me,
+                ground_truth,
+                self.detection_event[me],
+                detector_state,
+                self.drift_clients[me],
+                self.drift_rate[me],
+            ]]
+
+            self._write_rows(file_path, row)
 
     def _get_results(self, train_test, mode, me):
 
@@ -635,12 +1227,12 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
         try:
             """
             Detecta mudanças repentinas usando EMA (Exponential Moving Average).
-    
+
             Args:
                 signal (list ou np.array): sequência de valores reais.
                 alpha (float): fator de suavização da EMA (0<alpha<=1).
                 threshold (float): múltiplos do desvio padrão do resíduo para detectar mudança.
-    
+
             Returns:
                 indices (list): pontos onde foram detectadas mudanças.
                 ema (np.array): valores da EMA ao longo do tempo.
