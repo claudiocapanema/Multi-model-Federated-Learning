@@ -31,6 +31,8 @@ from flcore.servers.server_fedfairmmfl import FedFairMMFL
 from flcore.servers.server_multifedavg_with_multifedpredict import MultiFedAvgWithMultiFedPredict
 from flcore.servers.server_dma_fl_synchronous import DMAFLSynchronous
 from flcore.servers.server_fedcond import FedConD
+from flcore.servers.server_feddca import FedDCA
+from flcore.servers.server_cda_fedavg import CDAFedAvg
 from flcore.servers.server_adaptive_fedavg import AdaptiveFedAvg
 from flcore.servers.server_multifedavg_with_fedpredict_dynamic import MultiFedAvgWithFedPredictDynamic
 from flcore.servers.server_multifedavg_with_fedpredict import MultiFedAvgWithFedPredict
@@ -204,6 +206,10 @@ def run(args):
             server = DMAFLSynchronous
         elif args.strategy == "FedConD":
             server = FedConD
+        elif args.strategy == "FedDCA":
+            server = FedDCA
+        elif args.strategy == "CDA-FedAvg":
+            server = CDAFedAvg
         elif args.strategy == "AdaptiveFedAvg":
             server = AdaptiveFedAvg
         elif args.strategy == "MultiFedAvgRR":
@@ -245,7 +251,7 @@ def run(args):
 
         if args.strategy not in ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+FP", "MultiFedAvg+FPD"]:
             server = server(args, models, fold_id)
-            if args.strategy in ["FedConD"]:
+            if args.strategy in ["FedConD", "FedDCA", "CDA-FedAvg"]:
                 server._init_shift_detection_files()
         else:
             server = server(args, models, version, fold_id)
