@@ -326,13 +326,32 @@ def select_final_detection_results(df):
 
 def mean_ci(values, ci=0.95, bounded=False):
     """
-    Calcula média e margem do IC de 95%.
+    Calcula a média e a margem do intervalo de confiança.
 
-    Para métricas bounded=True (Precision, Recall, F1),
-    o intervalo é limitado ao domínio [0, 1].
+    Parameters
+    ----------
+    values : array-like
+        Valores numéricos da métrica.
 
-    Retorna:
-        mean, margin
+    ci : float
+        Nível de confiança.
+
+    bounded : bool
+        Se True, limita o intervalo ao domínio [0, 1].
+        Usado para Precision, Recall e F1.
+
+    Returns
+    -------
+    mean, margin
+
+    Notes
+    -----
+    Esta função é estatística e não contém regras específicas
+    de nenhuma métrica.
+
+    Em particular, valores -1 não são removidos aqui.
+    O tratamento de valores especiais deve ser feito antes
+    da chamada desta função, de acordo com a semântica da métrica.
     """
 
     values = pd.to_numeric(
@@ -353,10 +372,10 @@ def mean_ci(values, ci=0.95, bounded=False):
     if np.allclose(values, values[0]):
         return round(mean, 2), 0.00
 
-    # Erro padrão
+    # Erro padrão da média
     sem = st.sem(values)
 
-    # Intervalo t
+    # Intervalo de confiança baseado na distribuição t
     interval = st.t.interval(
         confidence=ci,
         df=len(values) - 1,
@@ -366,25 +385,197 @@ def mean_ci(values, ci=0.95, bounded=False):
 
     lower, upper = interval
 
-    # ------------------------------------------------------------
     # Métricas limitadas a [0, 1]
-    # ------------------------------------------------------------
-
     if bounded:
         lower = max(0.0, lower)
         upper = min(1.0, upper)
 
-    # ------------------------------------------------------------
-    # Como a tabela usa mean ± margin,
-    # usamos a maior distância da média aos limites.
-    # ------------------------------------------------------------
-
+    # A tabela utiliza:
+    #
+    #     mean ± margin
+    #
+    # Portanto, usamos a maior distância entre a média
+    # e os limites do intervalo.
     margin = max(
         mean - lower,
         upper - mean
     )
 
     return round(mean, 2), round(margin, 2)
+
+def prepare_detection_metric_values(
+    df,
+    metric
+):
+    """
+    Prepara os valores de uma métrica de detecção para
+    agregação estatística.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Resultados finais dos experimentos.
+
+    metric : str
+        Nome da métrica.
+
+    Returns
+    -------
+    pd.Series
+        Valores válidos para a métrica.
+
+    Notes
+    -----
+    Detection Delay:
+        -1 significa que o shift não foi detectado.
+        Esses valores NÃO participam do cálculo do delay.
+
+    Undetected Shift Rate:
+        Não retorna valores diretamente. Essa métrica deve
+        ser calculada pela função calculate_undetected_shift_rate().
+    """
+
+    values = pd.to_numeric(
+        df[metric],
+        errors="coerce"
+    )
+
+    if metric == "Detection Delay":
+        values = values[
+            values >= 0
+        ]
+
+    return values.dropna()
+
+def calculate_undetected_shift_rate(df):
+    """
+    Calcula a taxa de shifts não detectados.
+
+    Definition
+    ----------
+        Undetected Shift Rate =
+            N_undetected / N_shifts
+
+    No CSV:
+        Detection Delay >= 0 -> shift detectado
+        Detection Delay == -1 -> shift não detectado
+
+    Returns
+    -------
+    float
+        Valor entre 0 e 1.
+
+    Notes
+    -----
+    Cada linha de df representa uma unidade experimental:
+
+        Detector × Dataset × Fold × Model × Shift Configuration
+
+    Portanto, cada linha corresponde a um shift ground-truth
+    que deve ser classificado como detectado ou não detectado.
+    """
+
+    if df.empty:
+        return np.nan
+
+    delays = pd.to_numeric(
+        df["Detection Delay"],
+        errors="coerce"
+    ).dropna()
+
+    if len(delays) == 0:
+        return np.nan
+
+    undetected = np.sum(
+        delays < 0
+    )
+
+    total = len(delays)
+
+    return float(
+        undetected / total
+    )
+
+def calculate_detection_metric(
+    df,
+    metric,
+    ci=0.95
+):
+    """
+    Calcula média e intervalo de confiança para uma métrica
+    de detecção.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Resultados finais dos experimentos.
+
+    metric : str
+        Métrica a ser calculada.
+
+    ci : float
+        Nível de confiança.
+
+    Returns
+    -------
+    mean, margin
+
+    Notes
+    -----
+    Detection Delay:
+        calculado somente sobre shifts detectados.
+
+    Undetected Shift Rate:
+        calculado sobre todos os shifts.
+
+    Precision, Recall e F1:
+        calculados sobre todos os experimentos.
+
+    False Alarms:
+        calculado sobre todos os experimentos.
+    """
+
+    if df.empty:
+        return np.nan, np.nan
+
+    if metric == "Undetected Shift Rate":
+
+        rate = calculate_undetected_shift_rate(df)
+
+        if pd.isna(rate):
+            return np.nan, np.nan
+
+        return round(rate, 2), 0.00
+
+    if metric == "Detection Delay":
+
+        values = prepare_detection_metric_values(
+            df,
+            metric
+        )
+
+    else:
+
+        if metric not in df.columns:
+            return np.nan, np.nan
+
+        values = pd.to_numeric(
+            df[metric],
+            errors="coerce"
+        ).dropna()
+
+    bounded = metric in [
+        "Precision",
+        "Recall",
+        "F1",
+        "Undetected Shift Rate"
+    ]
+
+    return mean_ci(
+        values,
+        ci=ci,
+        bounded=bounded
+    )
 
 def table_detection_quality(
     df,
@@ -394,15 +585,23 @@ def table_detection_quality(
     ci=0.95
 ):
     """
-    Gera as tabelas quantitativas de qualidade da detecção.
+    Gera tabelas quantitativas de qualidade da detecção.
 
-    Para cada tipo de shift são calculadas:
+    Métricas:
 
         Precision
         Recall
         F1
         Detection Delay
+        Undetected Shift Rate
         False Alarms
+
+    Detection Delay:
+        calculado somente sobre shifts detectados.
+
+    Undetected Shift Rate:
+        proporção de shifts ground-truth que não foram
+        detectados.
 
     A unidade experimental é:
 
@@ -410,32 +609,15 @@ def table_detection_quality(
 
     O CSV contém várias rodadas, mas somente a última rodada
     de cada experimento é utilizada na tabela.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        DataFrame contendo os CSVs de todas as soluções.
-
-    write_path : str
-        Diretório onde as tabelas LaTeX serão salvas.
-
-    solutions_order : list
-        Ordem das soluções na tabela.
-
-    metrics : list, optional
-        Métricas a serem incluídas.
-
-    ci : float
-        Nível de confiança.
     """
 
     if metrics is None:
-
         metrics = [
             "Precision",
             "Recall",
             "F1",
             "Detection Delay",
+            "Undetected Shift Rate",
             "False Alarms"
         ]
 
@@ -448,9 +630,12 @@ def table_detection_quality(
     # 1. Selecionar somente o resultado final de cada experimento
     # ------------------------------------------------------------
 
-    df_final = select_final_detection_results(df)
+    df_final = select_final_detection_results(
+        df
+    )
 
     print("\nResultados finais selecionados:")
+
     print(
         df_final[
             [
@@ -480,9 +665,9 @@ def table_detection_quality(
     # ------------------------------------------------------------
 
     solutions = [
-        s
-        for s in solutions_order
-        if s in df_final["Detector"].unique()
+        solution
+        for solution in solutions_order
+        if solution in df_final["Detector"].unique()
     ]
 
     # ------------------------------------------------------------
@@ -500,12 +685,13 @@ def table_detection_quality(
 
         for metric in metrics:
 
-            if metric not in df_shift.columns:
-
+            if (
+                metric != "Undetected Shift Rate"
+                and metric not in df_shift.columns
+            ):
                 print(
                     f"\nMétrica ausente: {metric}"
                 )
-
                 continue
 
             # ====================================================
@@ -516,8 +702,6 @@ def table_detection_quality(
 
             for solution in solutions:
 
-                rows_raw[solution] = {}
-
                 filtered_solution = df_shift[
                     df_shift["Detector"] == solution
                 ]
@@ -525,8 +709,9 @@ def table_detection_quality(
                 if filtered_solution.empty:
                     continue
 
-                mean, ci_margin = mean_ci(
-                    filtered_solution[metric],
+                mean, ci_margin = calculate_detection_metric(
+                    filtered_solution,
+                    metric,
                     ci=ci
                 )
 
@@ -539,24 +724,24 @@ def table_detection_quality(
             # 6. Determinar direção da métrica
             # ====================================================
 
-            # Para Precision, Recall e F1:
-            # maior é melhor.
-
-            # Para Delay e False Alarms:
-            # menor é melhor.
-
             higher_is_better = metric in [
                 "Precision",
                 "Recall",
                 "F1"
             ]
 
+            # Detection Delay,
+            # Undetected Shift Rate e
+            # False Alarms:
+            #
+            # menor é melhor.
+
             valid_solutions = [
-                s
-                for s in solutions
-                if s in rows_raw
+                solution
+                for solution in solutions
+                if solution in rows_raw
                 and not pd.isna(
-                    rows_raw[s]["mean"]
+                    rows_raw[solution]["mean"]
                 )
             ]
 
@@ -571,14 +756,16 @@ def table_detection_quality(
 
                 best_solution = max(
                     valid_solutions,
-                    key=lambda s: rows_raw[s]["mean"]
+                    key=lambda solution:
+                        rows_raw[solution]["mean"]
                 )
 
             else:
 
                 best_solution = min(
                     valid_solutions,
-                    key=lambda s: rows_raw[s]["mean"]
+                    key=lambda solution:
+                        rows_raw[solution]["mean"]
                 )
 
             best_mean = rows_raw[
@@ -642,11 +829,16 @@ def table_detection_quality(
 
                 bold = rows_raw[
                     solution
-                ].get("bold", False)
+                ].get(
+                    "bold",
+                    False
+                )
 
                 safe_solution = (
-                    solution
-                    .replace("_", r"\_")
+                    solution.replace(
+                        "_",
+                        r"\_"
+                    )
                 )
 
                 value_str = (
@@ -656,7 +848,6 @@ def table_detection_quality(
                 )
 
                 if bold:
-
                     value_str = (
                         f"\\textbf{{{value_str}}}"
                     )
@@ -745,42 +936,41 @@ def table_detection_quality_combined(
     Gera duas tabelas de comparação da qualidade da detecção.
 
     Tabela 1:
-        Detalhada por tipo de shift e configuração.
-
         Shift Type × Shift Configuration × Detector
 
-        Para Concept Drift:
-            alpha = valor utilizado no experimento.
-
-        Para Label Shift:
-            alpha_before -> alpha_after.
-
-        A agregação das métricas é feita sobre:
-            datasets × models × folds
-
-        mantendo separadas as diferentes configurações de shift.
-
     Tabela 2:
-        Agregada por tipo de shift.
-
         Shift Type × Detector
 
-        Todas as configurações daquele tipo de shift são
-        agregadas conjuntamente.
+    Métricas:
+        Precision
+        Recall
+        F1
+        Detection Delay
+        Undetected Shift Rate
+        False Alarms
 
-        Concept:
-            todas as configurações de Concept Drift.
+    Detection Delay:
+        média somente dos shifts detectados.
 
-        Label:
-            todas as configurações de Label Shift.
+        Se nenhum shift for detectado para uma determinada
+        combinação, o valor apresentado é N/A.
 
-    Em ambas as tabelas:
-        Precision, Recall e F1: maior é melhor.
-        Detection Delay e False Alarms: menor é melhor.
+    Critério para negrito:
+        Precision, Recall e F1:
+            maior média é melhor.
 
-    Os melhores resultados são colocados em negrito quando
-    o intervalo de confiança do resultado se sobrepõe ao
-    intervalo de confiança do melhor resultado.
+        Detection Delay, Undetected Shift Rate e False Alarms:
+            menor média é melhor.
+
+        Quando os intervalos de confiança do resultado e do
+        melhor resultado se sobrepõem, ambos são considerados
+        estatisticamente indistinguíveis e ficam em negrito.
+
+    A agregação é feita sobre:
+        datasets × models × folds
+
+    Para a tabela agregada por tipo de shift,
+    as diferentes configurações são agregadas conjuntamente.
     """
 
     # ============================================================
@@ -792,8 +982,15 @@ def table_detection_quality_combined(
         "Recall",
         "F1",
         "Detection Delay",
+        "Undetected Shift Rate",
         "False Alarms"
     ]
+
+    higher_is_better_metrics = {
+        "Precision",
+        "Recall",
+        "F1"
+    }
 
     Path(write_path).mkdir(
         parents=True,
@@ -804,7 +1001,9 @@ def table_detection_quality_combined(
     # 1. SELECIONAR SOMENTE A ÚLTIMA RODADA
     # ============================================================
 
-    df_final = select_final_detection_results(df)
+    df_final = select_final_detection_results(
+        df
+    )
 
     if df_final.empty:
         print(
@@ -812,9 +1011,15 @@ def table_detection_quality_combined(
         )
         return
 
-    print("\n==============================================")
-    print("RESULTADOS FINAIS PARA AS TABELAS")
-    print("==============================================")
+    print(
+        "\n=============================================="
+    )
+    print(
+        "RESULTADOS FINAIS PARA AS TABELAS"
+    )
+    print(
+        "=============================================="
+    )
 
     print(
         df_final[
@@ -870,36 +1075,40 @@ def table_detection_quality_combined(
     # FUNÇÃO AUXILIAR
     # ============================================================
 
-    def format_configuration(shift_type, configuration):
-
-        configuration = str(configuration).strip()
+    def format_configuration(
+        shift_type,
+        configuration
+    ):
+        configuration = str(
+            configuration
+        ).strip()
 
         # --------------------------------------------------------
         # Concept Drift
-        # --------------------------------------------------------
-        #
-        # A própria coluna Shift Configuration deve conter o alpha
-        # utilizado no cenário.
-        #
-        # Exemplos:
-        #     0.1
-        #     1.0
-        #     10.0
-        #
         # --------------------------------------------------------
 
         if shift_type.lower() == "concept":
 
             try:
 
-                alpha = float(configuration)
+                alpha = float(
+                    configuration
+                )
 
                 if alpha.is_integer():
-                    return rf"$\alpha={int(alpha)}$"
 
-                return rf"$\alpha={alpha:g}$"
+                    return (
+                        rf"$\alpha={int(alpha)}$"
+                    )
 
-            except (ValueError, TypeError):
+                return (
+                    rf"$\alpha={alpha:g}$"
+                )
+
+            except (
+                ValueError,
+                TypeError
+            ):
 
                 return configuration.replace(
                     "_",
@@ -909,21 +1118,9 @@ def table_detection_quality_combined(
         # --------------------------------------------------------
         # Label Shift
         # --------------------------------------------------------
-        #
-        # Esperamos uma configuração representando:
-        #
-        #     alpha_before -> alpha_after
-        #
-        # Exemplos:
-        #     0.1 -> 1.0
-        #     1.0 -> 0.1
-        #     1.0 -> 10.0
-        #
-        # --------------------------------------------------------
 
         if shift_type.lower() == "label":
 
-            # possíveis separadores utilizados nos CSVs
             normalized = (
                 configuration
                 .replace("→", "->")
@@ -934,7 +1131,9 @@ def table_detection_quality_combined(
 
             if "->" in normalized:
 
-                parts = normalized.split("->")
+                parts = normalized.split(
+                    "->"
+                )
 
                 if len(parts) == 2:
 
@@ -954,17 +1153,11 @@ def table_detection_quality_combined(
                             rf"{alpha_after:g}$"
                         )
 
-                    except (ValueError, TypeError):
+                    except (
+                        ValueError,
+                        TypeError
+                    ):
                         pass
-
-            return configuration.replace(
-                "_",
-                r"\_"
-            )
-
-        # --------------------------------------------------------
-        # Outros tipos de shift
-        # --------------------------------------------------------
 
         return configuration.replace(
             "_",
@@ -982,14 +1175,15 @@ def table_detection_quality_combined(
 
         rows_raw = {}
 
-        # --------------------------------------------------------
-        # Calcular média e IC para cada solução
-        # --------------------------------------------------------
-
-        for group_value in filtered_df[group_column].dropna().unique():
+        for group_value in (
+            filtered_df[group_column]
+            .dropna()
+            .unique()
+        ):
 
             df_group = filtered_df[
-                filtered_df[group_column] == group_value
+                filtered_df[group_column]
+                == group_value
             ]
 
             rows_raw[group_value] = {}
@@ -997,29 +1191,46 @@ def table_detection_quality_combined(
             for solution in solutions:
 
                 df_solution = df_group[
-                    df_group["Detector"] == solution
+                    df_group["Detector"]
+                    == solution
                 ]
 
                 if df_solution.empty:
                     continue
 
-                rows_raw[group_value][solution] = {}
+                rows_raw[
+                    group_value
+                ][solution] = {}
 
                 for metric in metrics:
 
-                    if metric not in df_solution.columns:
-                        rows_raw[group_value][solution][metric] = {
+                    if (
+                        metric !=
+                        "Undetected Shift Rate"
+                        and metric
+                        not in df_solution.columns
+                    ):
+
+                        rows_raw[
+                            group_value
+                        ][solution][metric] = {
                             "mean": np.nan,
                             "ci": np.nan
                         }
+
                         continue
 
-                    mean, margin = mean_ci(
-                        df_solution[metric],
-                        ci=ci
+                    mean, margin = (
+                        calculate_detection_metric(
+                            df_solution,
+                            metric,
+                            ci=ci
+                        )
                     )
 
-                    rows_raw[group_value][solution][metric] = {
+                    rows_raw[
+                        group_value
+                    ][solution][metric] = {
                         "mean": mean,
                         "ci": margin
                     }
@@ -1036,33 +1247,53 @@ def table_detection_quality_combined(
 
             for metric in metrics:
 
-                higher_is_better = metric in [
-                    "Precision",
-                    "Recall",
-                    "F1"
-                ]
+                # ------------------------------------------------
+                # Precision / Recall / F1:
+                # maior é melhor.
+                #
+                # Demais métricas:
+                # menor é melhor.
+                # ------------------------------------------------
+
+                higher_is_better = (
+                    metric in higher_is_better_metrics
+                )
 
                 valid_solutions = []
 
                 for solution in solutions:
 
-                    if solution not in rows_raw[group_value]:
+                    if (
+                        solution
+                        not in rows_raw[group_value]
+                    ):
+                        continue
+
+                    if (
+                        metric
+                        not in rows_raw[
+                            group_value
+                        ][solution]
+                    ):
                         continue
 
                     mean_value = rows_raw[
                         group_value
                     ][solution][metric]["mean"]
 
+                    # N/A não participa da comparação.
                     if pd.isna(mean_value):
                         continue
 
-                    valid_solutions.append(solution)
+                    valid_solutions.append(
+                        solution
+                    )
 
                 if not valid_solutions:
                     continue
 
                 # ------------------------------------------------
-                # Melhor solução
+                # Identificar melhor média
                 # ------------------------------------------------
 
                 if higher_is_better:
@@ -1070,7 +1301,9 @@ def table_detection_quality_combined(
                     best_solution = max(
                         valid_solutions,
                         key=lambda solution:
-                            rows_raw[group_value][solution][metric]["mean"]
+                            rows_raw[
+                                group_value
+                            ][solution][metric]["mean"]
                     )
 
                 else:
@@ -1078,7 +1311,9 @@ def table_detection_quality_combined(
                     best_solution = min(
                         valid_solutions,
                         key=lambda solution:
-                            rows_raw[group_value][solution][metric]["mean"]
+                            rows_raw[
+                                group_value
+                            ][solution][metric]["mean"]
                     )
 
                 best_mean = rows_raw[
@@ -1089,8 +1324,13 @@ def table_detection_quality_combined(
                     group_value
                 ][best_solution][metric]["ci"]
 
-                best_lower = best_mean - best_ci
-                best_upper = best_mean + best_ci
+                best_lower = (
+                    best_mean - best_ci
+                )
+
+                best_upper = (
+                    best_mean + best_ci
+                )
 
                 # ------------------------------------------------
                 # Verificar sobreposição dos ICs
@@ -1106,17 +1346,25 @@ def table_detection_quality_combined(
                         group_value
                     ][solution][metric]["ci"]
 
-                    lower = mean_value - ci_value
-                    upper = mean_value + ci_value
+                    lower = (
+                        mean_value - ci_value
+                    )
+
+                    upper = (
+                        mean_value + ci_value
+                    )
 
                     overlap = not (
                         upper < best_lower
-                        or lower > best_upper
+                        or
+                        lower > best_upper
                     )
 
                     rows_raw[
                         group_value
-                    ][solution][metric]["bold"] = overlap
+                    ][solution][metric]["bold"] = (
+                        overlap
+                    )
 
     # ============================================================
     # FUNÇÃO PARA GERAR UMA TABELA LATEX
@@ -1163,20 +1411,12 @@ def table_detection_quality_combined(
         )
 
     # ============================================================
-    # ============================================================
     # TABELA 1
-    # ============================================================
-    # DETALHADA:
     #
     # Shift Type × Configuration × Detector
     # ============================================================
-    # ============================================================
 
     detailed_rows = []
-
-    # ------------------------------------------------------------
-    # Ordenar os tipos de shift
-    # ------------------------------------------------------------
 
     shift_types = sorted(
         df_final["Shift Type"]
@@ -1187,23 +1427,18 @@ def table_detection_quality_combined(
     for shift_type in shift_types:
 
         df_shift = df_final[
-            df_final["Shift Type"] == shift_type
+            df_final["Shift Type"]
+            == shift_type
         ].copy()
 
-        # --------------------------------------------------------
-        # Configurações existentes
-        # --------------------------------------------------------
-
         configurations = (
-            df_shift["Shift Configuration"]
+            df_shift[
+                "Shift Configuration"
+            ]
             .dropna()
             .unique()
             .tolist()
         )
-
-        # --------------------------------------------------------
-        # Ordenação numérica quando possível
-        # --------------------------------------------------------
 
         def configuration_sort_key(value):
 
@@ -1216,7 +1451,10 @@ def table_detection_quality_combined(
                     float(value_str)
                 )
 
-            except (ValueError, TypeError):
+            except (
+                ValueError,
+                TypeError
+            ):
 
                 return (
                     1,
@@ -1228,15 +1466,12 @@ def table_detection_quality_combined(
             key=configuration_sort_key
         )
 
-        # --------------------------------------------------------
-        # Cada configuração permanece separada
-        # --------------------------------------------------------
-
         for configuration in configurations:
 
             df_config = df_shift[
-                df_shift["Shift Configuration"]
-                == configuration
+                df_shift[
+                    "Shift Configuration"
+                ] == configuration
             ].copy()
 
             if df_config.empty:
@@ -1247,7 +1482,8 @@ def table_detection_quality_combined(
             for solution in solutions:
 
                 df_solution = df_config[
-                    df_config["Detector"] == solution
+                    df_config["Detector"]
+                    == solution
                 ]
 
                 if df_solution.empty:
@@ -1257,18 +1493,39 @@ def table_detection_quality_combined(
 
                 for metric in metrics:
 
-                    mean, margin = mean_ci(
-                        df_solution[metric],
-                        ci=ci
+                    if (
+                        metric !=
+                        "Undetected Shift Rate"
+                        and metric
+                        not in df_solution.columns
+                    ):
+
+                        rows_raw[
+                            solution
+                        ][metric] = {
+                            "mean": np.nan,
+                            "ci": np.nan
+                        }
+
+                        continue
+
+                    mean, margin = (
+                        calculate_detection_metric(
+                            df_solution,
+                            metric,
+                            ci=ci
+                        )
                     )
 
-                    rows_raw[solution][metric] = {
+                    rows_raw[
+                        solution
+                    ][metric] = {
                         "mean": mean,
                         "ci": margin
                     }
 
             # ----------------------------------------------------
-            # Determinar melhor solução para cada métrica
+            # Melhor solução para cada métrica
             # ----------------------------------------------------
 
             for metric in metrics:
@@ -1276,27 +1533,34 @@ def table_detection_quality_combined(
                 valid_solutions = [
                     solution
                     for solution in solutions
-                    if solution in rows_raw
-                    and not pd.isna(
-                        rows_raw[solution][metric]["mean"]
+                    if (
+                        solution in rows_raw
+                        and metric in rows_raw[
+                            solution
+                        ]
+                        and not pd.isna(
+                            rows_raw[
+                                solution
+                            ][metric]["mean"]
+                        )
                     )
                 ]
 
                 if not valid_solutions:
                     continue
 
-                higher_is_better = metric in [
-                    "Precision",
-                    "Recall",
-                    "F1"
-                ]
+                higher_is_better = (
+                    metric in higher_is_better_metrics
+                )
 
                 if higher_is_better:
 
                     best_solution = max(
                         valid_solutions,
                         key=lambda solution:
-                            rows_raw[solution][metric]["mean"]
+                            rows_raw[
+                                solution
+                            ][metric]["mean"]
                     )
 
                 else:
@@ -1304,7 +1568,9 @@ def table_detection_quality_combined(
                     best_solution = min(
                         valid_solutions,
                         key=lambda solution:
-                            rows_raw[solution][metric]["mean"]
+                            rows_raw[
+                                solution
+                            ][metric]["mean"]
                     )
 
                 best_mean = rows_raw[
@@ -1315,8 +1581,13 @@ def table_detection_quality_combined(
                     best_solution
                 ][metric]["ci"]
 
-                best_lower = best_mean - best_ci
-                best_upper = best_mean + best_ci
+                best_lower = (
+                    best_mean - best_ci
+                )
+
+                best_upper = (
+                    best_mean + best_ci
+                )
 
                 for solution in valid_solutions:
 
@@ -1328,17 +1599,25 @@ def table_detection_quality_combined(
                         solution
                     ][metric]["ci"]
 
-                    lower = mean_value - ci_value
-                    upper = mean_value + ci_value
+                    lower = (
+                        mean_value - ci_value
+                    )
+
+                    upper = (
+                        mean_value + ci_value
+                    )
 
                     overlap = not (
                         upper < best_lower
-                        or lower > best_upper
+                        or
+                        lower > best_upper
                     )
 
                     rows_raw[
                         solution
-                    ][metric]["bold"] = overlap
+                    ][metric]["bold"] = (
+                        overlap
+                    )
 
             # ----------------------------------------------------
             # Criar uma linha por detector
@@ -1349,27 +1628,37 @@ def table_detection_quality_combined(
                 if solution not in rows_raw:
                     continue
 
-                safe_solution = solution.replace(
-                    "_",
-                    r"\_"
+                safe_solution = (
+                    solution.replace(
+                        "_",
+                        r"\_"
+                    )
                 )
 
                 row = {
                     "Shift Type": (
                         shift_type
-                        .replace("_", " ")
+                        .replace(
+                            "_",
+                            " "
+                        )
                         .title()
                     ),
-                    "Configuration": format_configuration(
-                        shift_type,
-                        configuration
-                    ),
-                    "Detector": safe_solution
+                    "Configuration":
+                        format_configuration(
+                            shift_type,
+                            configuration
+                        ),
+                    "Detector":
+                        safe_solution
                 }
 
                 for metric in metrics:
 
-                    if metric not in rows_raw[solution]:
+                    if metric not in rows_raw[
+                        solution
+                    ]:
+
                         row[metric] = "--"
                         continue
 
@@ -1388,9 +1677,16 @@ def table_detection_quality_combined(
                         False
                     )
 
+                    # ------------------------------------------------
+                    # Nenhum shift detectado
+                    # ------------------------------------------------
+
                     if pd.isna(mean_value):
 
-                        value_str = "--"
+                        if metric == "Detection Delay":
+                            value_str = "N/A"
+                        else:
+                            value_str = "--"
 
                     else:
 
@@ -1403,12 +1699,16 @@ def table_detection_quality_combined(
                         if bold:
 
                             value_str = (
-                                f"\\textbf{{{value_str}}}"
+                                f"\\textbf{{"
+                                f"{value_str}"
+                                f"}}"
                             )
 
                     row[metric] = value_str
 
-                detailed_rows.append(row)
+                detailed_rows.append(
+                    row
+                )
 
     # ------------------------------------------------------------
     # Gerar tabela detalhada
@@ -1428,6 +1728,7 @@ def table_detection_quality_combined(
             "Recall",
             "F1",
             "Detection Delay",
+            "Undetected Shift Rate",
             "False Alarms"
         ]
 
@@ -1437,33 +1738,36 @@ def table_detection_quality_combined(
 
         filename_detailed = (
             f"{write_path}/"
-            "latex_table_detection_quality_by_configuration.tex"
+            "latex_table_detection_quality_"
+            "by_configuration.tex"
         )
 
         generate_latex_table(
             df_table=df_detailed,
             filename=filename_detailed,
             caption=(
-                "Quantitative comparison of data-shift "
-                "detection quality under different shift "
-                "configurations. Values are reported as "
-                "mean $\\pm$ 95\\% confidence interval "
-                "across datasets, models, and folds."
+                "Quantitative comparison of "
+                "data-shift detection quality "
+                "under different shift "
+                "configurations. Values are "
+                "reported as mean $\\pm$ 95\\% "
+                "confidence interval across "
+                "datasets, models, and folds."
             ),
-            label="tab:detection_quality_by_configuration",
-            column_format="ll" + "l" + "ccccc"
+            label=(
+                "tab:detection_quality_"
+                "by_configuration"
+            ),
+            column_format=(
+                "lll"
+                + "cccccc"
+            )
         )
 
     # ============================================================
-    # ============================================================
     # TABELA 2
-    # ============================================================
-    # AGREGADA:
     #
     # Shift Type × Detector
-    #
-    # Todas as configurações do mesmo tipo são agregadas.
-    # ============================================================
     # ============================================================
 
     aggregated_rows = []
@@ -1471,7 +1775,8 @@ def table_detection_quality_combined(
     for shift_type in shift_types:
 
         df_shift = df_final[
-            df_final["Shift Type"] == shift_type
+            df_final["Shift Type"]
+            == shift_type
         ].copy()
 
         if df_shift.empty:
@@ -1479,17 +1784,11 @@ def table_detection_quality_combined(
 
         rows_raw = {}
 
-        # --------------------------------------------------------
-        # Média sobre:
-        #
-        # datasets × models × folds × configurations
-        #
-        # --------------------------------------------------------
-
         for solution in solutions:
 
             df_solution = df_shift[
-                df_shift["Detector"] == solution
+                df_shift["Detector"]
+                == solution
             ]
 
             if df_solution.empty:
@@ -1499,12 +1798,33 @@ def table_detection_quality_combined(
 
             for metric in metrics:
 
-                mean, margin = mean_ci(
-                    df_solution[metric],
-                    ci=ci
+                if (
+                    metric !=
+                    "Undetected Shift Rate"
+                    and metric
+                    not in df_solution.columns
+                ):
+
+                    rows_raw[
+                        solution
+                    ][metric] = {
+                        "mean": np.nan,
+                        "ci": np.nan
+                    }
+
+                    continue
+
+                mean, margin = (
+                    calculate_detection_metric(
+                        df_solution,
+                        metric,
+                        ci=ci
+                    )
                 )
 
-                rows_raw[solution][metric] = {
+                rows_raw[
+                    solution
+                ][metric] = {
                     "mean": mean,
                     "ci": margin
                 }
@@ -1518,27 +1838,34 @@ def table_detection_quality_combined(
             valid_solutions = [
                 solution
                 for solution in solutions
-                if solution in rows_raw
-                and not pd.isna(
-                    rows_raw[solution][metric]["mean"]
+                if (
+                    solution in rows_raw
+                    and metric in rows_raw[
+                        solution
+                    ]
+                    and not pd.isna(
+                        rows_raw[
+                            solution
+                        ][metric]["mean"]
+                    )
                 )
             ]
 
             if not valid_solutions:
                 continue
 
-            higher_is_better = metric in [
-                "Precision",
-                "Recall",
-                "F1"
-            ]
+            higher_is_better = (
+                metric in higher_is_better_metrics
+            )
 
             if higher_is_better:
 
                 best_solution = max(
                     valid_solutions,
                     key=lambda solution:
-                        rows_raw[solution][metric]["mean"]
+                        rows_raw[
+                            solution
+                        ][metric]["mean"]
                 )
 
             else:
@@ -1546,7 +1873,9 @@ def table_detection_quality_combined(
                 best_solution = min(
                     valid_solutions,
                     key=lambda solution:
-                        rows_raw[solution][metric]["mean"]
+                        rows_raw[
+                            solution
+                        ][metric]["mean"]
                 )
 
             best_mean = rows_raw[
@@ -1557,12 +1886,13 @@ def table_detection_quality_combined(
                 best_solution
             ][metric]["ci"]
 
-            best_lower = best_mean - best_ci
-            best_upper = best_mean + best_ci
+            best_lower = (
+                best_mean - best_ci
+            )
 
-            # ----------------------------------------------------
-            # IC overlap
-            # ----------------------------------------------------
+            best_upper = (
+                best_mean + best_ci
+            )
 
             for solution in valid_solutions:
 
@@ -1574,17 +1904,25 @@ def table_detection_quality_combined(
                     solution
                 ][metric]["ci"]
 
-                lower = mean_value - ci_value
-                upper = mean_value + ci_value
+                lower = (
+                    mean_value - ci_value
+                )
+
+                upper = (
+                    mean_value + ci_value
+                )
 
                 overlap = not (
                     upper < best_lower
-                    or lower > best_upper
+                    or
+                    lower > best_upper
                 )
 
                 rows_raw[
                     solution
-                ][metric]["bold"] = overlap
+                ][metric]["bold"] = (
+                    overlap
+                )
 
         # --------------------------------------------------------
         # Criar linhas
@@ -1595,18 +1933,24 @@ def table_detection_quality_combined(
             if solution not in rows_raw:
                 continue
 
-            safe_solution = solution.replace(
-                "_",
-                r"\_"
+            safe_solution = (
+                solution.replace(
+                    "_",
+                    r"\_"
+                )
             )
 
             row = {
                 "Shift Type": (
                     shift_type
-                    .replace("_", " ")
+                    .replace(
+                        "_",
+                        " "
+                    )
                     .title()
                 ),
-                "Detector": safe_solution
+                "Detector":
+                    safe_solution
             }
 
             for metric in metrics:
@@ -1628,7 +1972,10 @@ def table_detection_quality_combined(
 
                 if pd.isna(mean_value):
 
-                    value_str = "--"
+                    if metric == "Detection Delay":
+                        value_str = "N/A"
+                    else:
+                        value_str = "--"
 
                 else:
 
@@ -1641,12 +1988,16 @@ def table_detection_quality_combined(
                     if bold:
 
                         value_str = (
-                            f"\\textbf{{{value_str}}}"
+                            f"\\textbf{{"
+                            f"{value_str}"
+                            f"}}"
                         )
 
                 row[metric] = value_str
 
-            aggregated_rows.append(row)
+            aggregated_rows.append(
+                row
+            )
 
     # ------------------------------------------------------------
     # Gerar tabela agregada
@@ -1665,6 +2016,7 @@ def table_detection_quality_combined(
             "Recall",
             "F1",
             "Detection Delay",
+            "Undetected Shift Rate",
             "False Alarms"
         ]
 
@@ -1674,21 +2026,29 @@ def table_detection_quality_combined(
 
         filename_aggregated = (
             f"{write_path}/"
-            "latex_table_detection_quality_by_shift_type.tex"
+            "latex_table_detection_quality_"
+            "by_shift_type.tex"
         )
 
         generate_latex_table(
             df_table=df_aggregated,
             filename=filename_aggregated,
             caption=(
-                "Overall comparison of data-shift detection "
-                "quality by shift type. Values are reported "
-                "as mean $\\pm$ 95\\% confidence interval "
-                "across datasets, models, folds, and shift "
-                "configurations."
+                "Overall comparison of data-shift "
+                "detection quality by shift type. "
+                "Values are reported as mean "
+                "$\\pm$ 95\\% confidence interval "
+                "across datasets, models, folds, "
+                "and shift configurations."
             ),
-            label="tab:detection_quality_by_shift_type",
-            column_format="llccccc"
+            label=(
+                "tab:detection_quality_"
+                "by_shift_type"
+            ),
+            column_format=(
+                "ll"
+                + "cccccc"
+            )
         )
 
 def table_per_dataset(df, write_path, metric, solutions_order, ci=0.95):
@@ -2046,7 +2406,10 @@ if __name__ == "__main__":
     train_test = "test"
 
     solutions = [
+        "MultiFedAvg+MFP",
         "FedConD",
+        "FedDCA",
+        "CDA-FedAvg"
         # adicionar demais soluções aqui
     ]
 
@@ -2166,7 +2529,7 @@ if __name__ == "__main__":
 
             detection_file = (
                 f"{read_path}"
-                f"shift_detection_metrics_{solution}.csv"
+                f"shift_detection_metrics_{solution.replace("MultiFedAvg+MFP", "MultiFedAvg+MFP_v2")}.csv"
             )
 
             read_solutions[solution].append(
