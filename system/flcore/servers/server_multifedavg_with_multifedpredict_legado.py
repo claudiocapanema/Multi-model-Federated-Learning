@@ -92,19 +92,11 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
         self.train_losses = {me: [] for me in range(self.ME)}
         self.fit_metrics_aggregation_fn = weighted_average_fit
         self.data_drift_model = -1
+        # self.data_shift_type = {me: [] for me in range(self.ME)}
         self.reduction_fraction_list = {me: [] for me in range(self.ME)}
-
         self.ps_list = {me: [] for me in range(self.ME)}
-
-        # NEW:
-        # Aggregated client-level temporal label-distribution change.
-        self.ls = [0.0] * self.ME
-        self.ls_list = {me: [] for me in range(self.ME)}
-
         self.heterogeneity_degree = [-1] * self.ME
-        self.heterogeneity_degree_list = {
-            me: [] for me in range(self.ME)
-        }
+        self.heterogeneity_degree_list = {me: [] for me in range(self.ME)}
         self.data_shift_type = ["NO_SHIFT"] * self.ME
         self.min_drift_interval = 10
         self.last_drift_round = [-self.min_drift_interval] * self.ME
@@ -389,113 +381,46 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     self.model_shape_mefl[me] = [i.shape for i in parameters_aggregated_mefl[me]]
 
             clients_parameters_mefl = {me: [] for me in range(self.ME)}
-
             fc_list = {me: [] for me in range(self.ME)}
             il_list = {me: [] for me in range(self.ME)}
             ps_list = {me: [] for me in range(self.ME)}
-            ls_list = {me: [] for me in range(self.ME)}
             similarity_list = {me: [] for me in range(self.ME)}
             num_samples_list = {me: [] for me in range(self.ME)}
-
             for i in range(len(results)):
                 parameter, num_examples, result = results[i]
-
                 alpha = result["alpha"]
                 me = result["me"]
                 client_id = result["client_id"]
-
                 fc = result["non_iid"]["fc"]
                 il = result["non_iid"]["il"]
                 ps = result["non_iid"]["ps"]
                 similarity = result["non_iid"]["similarity"]
-
-                # ---------------------------------------------------------
-                # NEW:
-                # Client-computed label-distribution change.
-                #
-                # The server receives only this scalar.
-                # ---------------------------------------------------------
-                ls = float(
-                    result["non_iid"].get("ls", 0.0)
-                )
-
                 if alpha not in self.client_metrics[client_id][me].keys():
-                    self.client_metrics[client_id][me][alpha] = {
-                        "fc": None,
-                        "il": None,
-                        "similarity": None,
-                        "ls": None,
-                    }
-
+                    self.client_metrics[client_id][me][alpha] = {"fc": None, "il": None, "similarity": None}
                 self.client_metrics[client_id][me][alpha]["fc"] = fc
                 self.client_metrics[client_id][me][alpha]["il"] = il
                 self.client_metrics[client_id][me][alpha]["similarity"] = similarity
-                self.client_metrics[client_id][me][alpha]["ls"] = ls
-
                 fc_list[me].append(fc)
                 il_list[me].append(il)
                 ps_list[me].append(ps)
-                ls_list[me].append(ls)
                 similarity_list[me].append(similarity)
                 num_samples_list[me].append(num_examples)
-
                 clients_parameters_mefl[me].append(results[i][0])
 
             print(f"Metricas antes rodada {server_round}")
-            print("fc:", fc_list)
-            print("il:", il_list)
-            print("ps:", ps_list)
-            print("ls:", ls_list)
-            print("num_samples:", num_samples_list)
-
+            print(fc_list)
+            print(il_list)
+            print(ps_list)
+            print(num_samples_list)
             for me in trained_models:
-                self.fc[me] = self._weighted_average(
-                    fc_list[me],
-                    num_samples_list[me]
-                )
-
-                self.il[me] = self._weighted_average(
-                    il_list[me],
-                    num_samples_list[me]
-                )
-
-                self.ps[me] = self._weighted_average(
-                    ps_list[me],
-                    num_samples_list[me]
-                )
-
-                self.ls[me] = self._weighted_average(
-                    ls_list[me],
-                    num_samples_list[me]
-                )
-
-                self.similarity[me] = self._weighted_average(
-                    similarity_list[me],
-                    num_samples_list[me]
-                )
-
-                # ---------------------------------------------------------
-                # dh remains a heterogeneity metric.
-                #
-                # DO NOT mix ls into dh.
-                # ---------------------------------------------------------
-                self.heterogeneity_degree[me] = round(
-                    (
-                            (1 - self.fc[me])
-                            + self.il[me]
-                    ) / 2,
-                    2
-                )
-
+                self.fc[me] = self._weighted_average(fc_list[me], num_samples_list[me])
+                self.il[me] = self._weighted_average(il_list[me], num_samples_list[me])
+                self.ps[me] = self._weighted_average(ps_list[me], num_samples_list[me])
+                self.similarity[me] = self._weighted_average(il_list[me], num_samples_list[me])
+                self.heterogeneity_degree[me] = round(((1 - self.fc[me]) + (self.il[me])) / 2, 2)
+                # if self.heterogeneity_degree[me] > self.prediction_layer[me]["non_iid"]:
                 print(
-                    f"round {server_round} "
-                    f"fc={self.fc[me]} "
-                    f"il={self.il[me]} "
-                    f"similarity={self.similarity[me]} "
-                    f"ps={self.ps[me]} "
-                    f"ls={self.ls[me]} "
-                    f"dh={self.heterogeneity_degree[me]}"
-                )
+                    f"round {server_round} fc {self.fc[me]} il {self.il[me]} similarity {self.similarity[me]} ps {self.ps[me]} heterogeneity_degree {self.heterogeneity_degree[me]}")
 
             flag = False
             if server_round == 1:
@@ -574,11 +499,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             # threshold = [0.31, 0.31, 0.4]
             threshold = [0.3, 0.6, 0.7]
             # threshold = [0.6]
-            if (
-                    self.version in ["iti"]
-                    or t == 1
-                    or self.ls[me] > 0.1
-            ):
+            if self.version in ["iti"] or t == 1 or self.ps[me] > 0.1:
                 # Not use adaptive aggrgation
                 heterogeneity_degree = 0
             elif heterogeneity_degree > threshold[me] and heterogeneity_degree < 0.8:
@@ -602,75 +523,36 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             print("aggregate error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def detect_drift_ks(self, ls_list, window=5, alpha=0.05):
-        """
-        Detect a statistically significant increase in the
-        client-level label-distribution change.
+    def detect_drift_ks(self, ps_list, window=5, alpha=0.05):
 
-        The server does not have access to client data or client
-        class distributions. It receives only the scalar ls value
-        computed locally by each participating client.
-
-        Args:
-            ls_list (list[float]):
-                Historical aggregated LS values.
-            window (int):
-                Number of previous rounds used as reference.
-            alpha (float):
-                Significance level.
-
-        Returns:
-            bool:
-                True if the current LS value represents a
-                statistically significant increase.
-        """
         try:
-            if len(ls_list) < window + 1:
-                return False
+            """
+            Detecta drift usando teste de Kolmogorov-Smirnov.
+            Apenas aumentos são considerados drift.
 
-            history = np.asarray(
-                ls_list[-(window + 1):-1],
-                dtype=float
-            )
+            Args:
+                losses (list[float]): histórico de valores de loss.
+                window (int): tamanho da janela de comparação.
+                alpha (float): nível de significância.
 
-            current = float(ls_list[-1])
+            Returns:
+                bool: True se houve drift, False caso contrário.
+            """
+            if len(ps_list) < window + 1:
+                return False  # histórico insuficiente
 
-            # ---------------------------------------------------------
-            # The historical distribution is the normal reference.
-            # The current observation is compared against it.
-            # ---------------------------------------------------------
-            current_array = np.full(
-                len(history),
-                current,
-                dtype=float
-            )
+            history = np.array(ps_list[-(window + 1):-1])
+            last = np.array([ps_list[-1]] * len(history))  # simula distribuição do último valor
 
-            stat, p_value = ks_2samp(
-                history,
-                current_array
-            )
+            stat, p_value = ks_2samp(history, last)
 
-            # ---------------------------------------------------------
-            # Label-distribution change is detected only when:
-            #
-            # 1. the difference is statistically significant; and
-            # 2. the current LS is larger than the historical baseline.
-            # ---------------------------------------------------------
-            return bool(
-                p_value < alpha
-                and current > np.mean(history)
-            )
+            # KS detecta diferença significativa (p < alpha)
+            # mas só consideramos se for aumento
+            return (p_value < alpha) and (ps_list[-1] > history.mean())
 
         except Exception as e:
-            print("detect_drift_ks server error")
-            print(
-                "Error on line {} {} {}".format(
-                    sys.exc_info()[-1].tb_lineno,
-                    type(e).__name__,
-                    e
-                )
-            )
-            return False
+            print("detect_drift_ks client error")
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def binomial(self, sucessos, n_treinados):
 
@@ -713,142 +595,28 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             drift_type = ["NO_SHIFT"] * self.ME
             for me in range(self.ME):
 
-                # ---------------------------------------------------------
-                # Maintain LS history.
-                #
-                # LS is computed locally by clients and aggregated by the
-                # server. The server never accesses P_k(Y).
-                # ---------------------------------------------------------
-                if len(self.ls_list[me]) == 0:
-
-                    self.ls_list[me].append(
-                        self.ls[me]
-                    )
-
-                    self.heterogeneity_degree_list[me].append(
-                        self.heterogeneity_degree[me]
-                    )
-
-                    drift_ps[me] = self.ls[me]
-
-                    self.data_shift_type[me] = "NO_SHIFT"
-
+                if len(self.ps_list[me]) == 0:
+                    self.ps_list[me].append(self.ps[me])
+                    self.heterogeneity_degree_list[me].append(self.heterogeneity_degree[me])
                 else:
-
-                    ls_list = copy.deepcopy(
-                        self.ls_list[me]
-                    )
-
-                    dh_list = copy.deepcopy(
-                        self.heterogeneity_degree_list[me]
-                    )
-
-                    ls_list.append(
-                        self.ls[me]
-                    )
-
-                    dh_list.append(
-                        self.heterogeneity_degree[me]
-                    )
-
-                    # -----------------------------------------------------
-                    # NEW DETECTOR:
-                    # label-distribution change is detected using LS.
-                    # -----------------------------------------------------
-                    label_shift_detected = self.detect_drift_ks(
-                        ls_list,
-                        window=5,
-                        alpha=0.01
-                    )
-
-                    # -----------------------------------------------------
-                    # Current and previous heterogeneity.
-                    #
-                    # dh is NOT used to detect whether label shift occurred.
-                    # It only characterizes how heterogeneity changed.
-                    # -----------------------------------------------------
-                    previous_dh = (
-                        self.heterogeneity_degree_list[me][-1]
-                        if len(self.heterogeneity_degree_list[me]) > 0
-                        else self.heterogeneity_degree[me]
-                    )
-
-                    delta_dh = (
-                            self.heterogeneity_degree[me]
-                            - previous_dh
-                    )
-
-                    # -----------------------------------------------------
-                    # Store current observations only when they are not
-                    # consumed as the detection baseline.
-                    # -----------------------------------------------------
-                    if not label_shift_detected:
-                        self.ls_list[me].append(
-                            self.ls[me]
-                        )
-
-                        self.heterogeneity_degree_list[me].append(
-                            self.heterogeneity_degree[me]
-                        )
-
-                    # -----------------------------------------------------
-                    # Label-shift classification.
-                    #
-                    # LS is the detector.
-                    # DH only characterizes the shift.
-                    # -----------------------------------------------------
-                    if label_shift_detected:
-
-                        drift_ps[me] = self.ls[me]
-
-                        if abs(delta_dh) <= 0.10:
-                            self.data_shift_type[me] = (
-                                "LABEL_SHIFT"
-                            )
-
-                            print(
-                                f"[LS] model={me} | "
-                                f"heterogeneity-preserving label shift | "
-                                f"LS={self.ls[me]:.4f} | "
-                                f"ΔDH={delta_dh:.4f}"
-                            )
-
-                        elif delta_dh > 0.10:
-                            self.data_shift_type[me] = (
-                                "LABEL_SHIFT"
-                            )
-
-                            print(
-                                f"[LS] model={me} | "
-                                f"heterogeneity-increasing label shift | "
-                                f"LS={self.ls[me]:.4f} | "
-                                f"ΔDH={delta_dh:.4f}"
-                            )
-
-                        else:
-                            self.data_shift_type[me] = (
-                                "LABEL_SHIFT"
-                            )
-
-                            print(
-                                f"[LS] model={me} | "
-                                f"heterogeneity-decreasing label shift | "
-                                f"LS={self.ls[me]:.4f} | "
-                                f"ΔDH={delta_dh:.4f}"
-                            )
-
+                    ps_list = copy.deepcopy(self.ps_list[me])
+                    heterogeneity_degree_list = copy.deepcopy(self.heterogeneity_degree_list[me])
+                    ps_list.append(self.ps[me])
+                    heterogeneity_degree_list.append(self.heterogeneity_degree[me])
+                    shift_detected = self.detect_drift_ks(ps_list, window=5, alpha=0.01)
+                    if shift_detected:
+                        drift_ps[me] = self.ps[me]
                     else:
-                        # -------------------------------------------------
-                        # No label-distribution change detected.
-                        #
-                        # We do NOT classify this as label shift simply
-                        # because dh changed.
-                        # -------------------------------------------------
-                        drift_ps[me] = self.ls[me]
-
-                        self.data_shift_type[me] = (
-                            "NO_SHIFT"
-                        )
+                        self.ps_list[me].append(self.ps[me])
+                        # drift_ps[me] = 0
+                        drift_ps[me] = self.ps[me]
+                    same_dh_distribution = self.detect_drift_ks(drift_type, window=5, alpha=0.01)
+                    if (shift_detected or t <= self.adaptation_until[me]) and same_dh_distribution:
+                        self.data_shift_type[me] = "CONCEPT_DRIFT"
+                    elif shift_detected or t < self.adaptation_until[me]:
+                        self.data_shift_type[me] = "LABEL_SHIFT"
+                    else:
+                        self.data_shift_type[me] = "NO_SHIFT"
 
             # 🔄 Finaliza adaptação apenas no início do round
             for me in range(self.ME):
@@ -938,125 +706,39 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
         try:
             evaluate_results = []
-
             print("inicio s")
-
             for me in range(self.ME):
-
                 clients_evaluate_list = []
-
-                metrics = {
-                    "fc": self.fc[me],
-                    "il": self.il[me],
-                    "heterogeneity_degree": (
-                        self.heterogeneity_degree[me]
-                    ),
-
-                    # Existing metric retained for compatibility.
-                    "ps": self.ps[me],
-
-                    "similarity": self.similarity[me],
-
-                    # NEW:
-                    "ls": self.ls[me],
-
-                    "data_shift_type": (
-                        self.data_shift_type[me]
-                    )
-                }
-
-                print(
-                    f"data shift type na rodada {t} "
-                    f"no modelo {me} "
-                    f"{metrics['data_shift_type']} "
-                    f"LS={self.ls[me]:.4f}"
-                )
-
+                metrics = {"fc": self.fc[me], "il": self.il[me], "heterogeneity_degree": self.heterogeneity_degree[me],
+                           "ps": self.ps[me], "similarity": self.similarity[me],
+                           "data_shift_type": self.data_shift_type[me]}
+                print(f"data shift type na rodada {t} no modelo {me} {metrics["data_shift_type"]}")
                 for i in range(len(self.clients)):
                     client_dict = {}
-
-                    client_dict["client"] = (
-                        self.clients[i]
-                    )
-
-                    client_dict["cid"] = (
-                        self.clients[i].client_id
-                    )
-
-                    client_dict["nt"] = (
-                            t - self.clients[i].lt[me]
-                    )
-
-                    client_dict["lt"] = (
-                        self.clients[i].lt[me]
-                    )
-
-                    clients_evaluate_list.append(
-                        (
-                            self.clients[i],
-                            EvaluateIns(
-                                ndarrays_to_parameters(
-                                    parameters_aggregated_mefl[me]
-                                ),
-                                client_dict
-                            )
-                        )
-                    )
-
-                print(
-                    f"submetidos t: {self.t_hat[me]} "
-                    f"T: {self.number_of_rounds} "
-                    f"df: {self.df[me]}"
-                )
-
-                clients_compressed_parameters = (
-                    fedpredict_server(
-                        global_model_parameters=(
-                            parameters_aggregated_mefl[me]
-                        ),
-                        client_evaluate_list=(
-                            clients_evaluate_list
-                        ),
-                        t=t,
-                        T=self.number_of_rounds,
-                        df=self.df[me],
-                        compression=self.compression,
-                        fl_framework="flwr",
-                        k_ratio=0.3
-                    )
-                )
-
+                    client_dict["client"] = self.clients[i]
+                    client_dict["cid"] = self.clients[i].client_id
+                    client_dict["nt"] = t - self.clients[i].lt[me]
+                    client_dict["lt"] = self.clients[i].lt[me]
+                    clients_evaluate_list.append((self.clients[i],
+                                                  EvaluateIns(ndarrays_to_parameters(parameters_aggregated_mefl[me]),
+                                                              client_dict)))
+                print(f"submetidos t: {self.t_hat[me]} T: {self.number_of_rounds} df: {self.df[me]}")
+                clients_compressed_parameters = fedpredict_server(
+                    global_model_parameters=parameters_aggregated_mefl[me], client_evaluate_list=clients_evaluate_list,
+                    t=t, T=self.number_of_rounds, df=self.df[me], compression=self.compression, fl_framework="flwr",
+                    k_ratio=0.3)
                 for i in range(len(self.clients)):
-                    evaluate_results.append(
-                        self.clients[i].evaluate(
-                            me,
-                            t,
-                            parameters_to_ndarrays(
-                                clients_compressed_parameters[
-                                    i
-                                ][1].parameters
-                            ),
-                            metrics
-                        )
-                    )
+                    evaluate_results.append(self.clients[i].evaluate(me, t, parameters_to_ndarrays(
+                        clients_compressed_parameters[i][1].parameters), metrics))
+                    # evaluate_results.append(self.clients[i].evaluate(me, t,
+                    #     clients_compressed_parameters[i][1].config["parameters"]))
 
-            loss_aggregated_mefl, metrics_aggregated_mefl = (
-                self.aggregate_evaluate(
-                    server_round=t,
-                    results=evaluate_results,
-                    failures=[]
-                )
-            )
-
+            loss_aggregated_mefl, metrics_aggregated_mefl = self.aggregate_evaluate(server_round=t,
+                                                                                    results=evaluate_results,
+                                                                                    failures=[])
         except Exception as e:
             print("evaluate error")
-            print(
-                "Error on line {} {} {}".format(
-                    sys.exc_info()[-1].tb_lineno,
-                    type(e).__name__,
-                    e
-                )
-            )
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def add_metrics(self, server_round, metrics_aggregated, me):
         try:
@@ -1073,7 +755,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             metrics_aggregated[me]["fc"] = self.fc[me]
             metrics_aggregated[me]["il"] = self.il[me]
             metrics_aggregated[me]["dh"] = self.heterogeneity_degree[me]
-            metrics_aggregated[me]["ls"] = self.ls[me]
             metrics_aggregated[me]["ps"] = self.ps[me]
             metrics_aggregated[me]["gw"] = self.gw[me]
             metrics_aggregated[me]["lw"] = self.lw[me]

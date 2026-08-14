@@ -243,337 +243,138 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
         """Train the model with data of this client."""
         try:
             self.lt[me] = t
-
-            # ---------------------------------------------------------
-            # Save the previous local label distribution.
-            # ---------------------------------------------------------
-            p_old = copy.deepcopy(self.p_ME[me])
-
-            parameters, size, metrics = super().fit(
-                me, t, global_model
-            )
-
-            self.train_losses[me].append(metrics["train_loss"])
-            self.train_accuracies[me].append(metrics["train_accuracy"])
-
-            # ---------------------------------------------------------
-            # Current local label distribution.
-            #
-            # self.p_ME[me] is maintained locally by the client.
-            # The server never receives this distribution.
-            # ---------------------------------------------------------
-            p_current = copy.deepcopy(self.p_ME[me])
-
-            # ---------------------------------------------------------
-            # Existing similarity metric.
-            #
-            # Kept because it may still be used by the existing
-            # FedPredict mechanisms. It is no longer the primary
-            # label-shift detector.
-            # ---------------------------------------------------------
-            similarity = min(
-                cosine_similarity(p_current, p_old),
-                1.0
-            )
-
+            p_old = copy.deepcopy(self.p_ME)
+            trainloader_A = copy.deepcopy(self.trainloader[me])
+            parameters, size, metrics = super().fit(me, t, global_model)
+            trainloader_B = self.trainloader[me]
+            self.train_losses[me].append(metrics['train_loss'])
+            self.train_accuracies[me].append(metrics['train_accuracy'])
+            # data_shift_type = compare_loaders(trainloader_A, trainloader_B, key=self.dataset_input_map[self.dataset[me]])
+            data_shift_type = "LABEL_SHIFT" if "LABEL_SHIFT" in self.experiment_id else "CONCEPT_DRIFT"
+            similarity = min(cosine_similarity(self.p_ME[me], p_old[me]), 1)
             if 1 - similarity < 0:
-                print(
-                    f"similaridade is {similarity} "
-                    f"rodada {t}"
-                )
-
-            # ---------------------------------------------------------
-            # NEW:
-            # Client-level temporal label-distribution change.
-            #
-            # Total Variation Distance:
-            #
-            # ls = 1/2 * sum_c |p_t(c) - p_(t-1)(c)|
-            #
-            # This is calculated entirely on the client.
-            # Only the scalar ls is transmitted to the server.
-            # ---------------------------------------------------------
-            p_current = np.asarray(p_current, dtype=float).flatten()
-            p_old = np.asarray(p_old, dtype=float).flatten()
-
-            if p_current.shape != p_old.shape:
-                raise ValueError(
-                    f"Label distribution shapes differ: "
-                    f"{p_current.shape} vs {p_old.shape}"
-                )
-
-            ls = 0.5 * np.sum(
-                np.abs(p_current - p_old)
-            )
-
-            # Numerical safety.
-            ls = float(np.clip(ls, 0.0, 1.0))
-
-            # ---------------------------------------------------------
-            # Experiment ground truth is kept only as metadata.
-            # It must NOT be used by the detector itself.
-            # ---------------------------------------------------------
-            data_shift_type = (
-                "LABEL_SHIFT"
-                if "LABEL_SHIFT" in self.experiment_id
-                else "CONCEPT_DRIFT"
-            )
+                print(f"similaridade is {similarity} rodada {t}")
 
             if t in [20, 30, 40, 50, 60, 70, 80, 90]:
-                print(
-                    f"cliente #{self.client_id} "
-                    f"rodada {t} modelo {me} "
-                    f"accuracies {self.train_accuracies[me]} "
-                    f"data shift type {data_shift_type} "
-                    f"ls={ls:.6f}"
-                )
+                print(f"cliente #id {self.client_id} rodada {t} modelo {me} accuracies {self.train_accuracies[me]} data shift type {data_shift_type}")
 
-            # ---------------------------------------------------------
-            # Metrics transmitted to the server.
-            #
-            # IMPORTANT:
-            # The label distribution itself is NOT transmitted.
-            # Only the scalar ls is sent.
-            # ---------------------------------------------------------
-            metrics["non_iid"] = {
-                "fc": self.fc_ME[me],
-                "il": self.il_ME[me],
-                "similarity": similarity,
-                "ps": 1 - similarity,
-                "ls": ls,
-                "data_shift_type": data_shift_type
-            }
+            metrics["non_iid"] = {"fc": self.fc_ME[me], "il": self.il_ME[me], "similarity": similarity, "ps": 1 - similarity, "data_shift_type": data_shift_type}
 
             return parameters, size, metrics
-
         except Exception as e:
             print("fit error")
-            print(
-                "Error on line {} {} {}".format(
-                    sys.exc_info()[-1].tb_lineno,
-                    type(e).__name__,
-                    e
-                )
-            )
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def evaluate(self, me, t, global_model, metrics):
         """Evaluate the model on the data this client has."""
         try:
             g = torch.Generator()
-            g.manual_seed(t + self.fold_id)
-            random.seed(t + self.fold_id)
-            np.random.seed(t + self.fold_id)
-            torch.manual_seed(t + self.fold_id)
-
+            g.manual_seed(t+self.fold_id)
+            random.seed(t+self.fold_id)
+            np.random.seed(t+self.fold_id)
+            torch.manual_seed(t+self.fold_id)
             nt = t - self.lt[me]
-
-            p_ME, fc_ME, il_ME = self.update_local_test_data(
-                t, me
-            )
-
+            p_ME, fc_ME, il_ME = self.update_local_test_data(t, me)
             fc = metrics["fc"]
             il = metrics["il"]
-
             similarity_server = metrics["similarity"]
             data_heterogeneity_degree = metrics["heterogeneity_degree"]
-
-            # ---------------------------------------------------------
-            # NEW:
-            # Aggregated client-level label-distribution change.
-            #
-            # This is now the signal used by the server-side detector.
-            # ---------------------------------------------------------
-            ls = metrics.get("ls", 0.0)
-
-            # ---------------------------------------------------------
-            # Keep ps for backward compatibility with existing
-            # FedPredict mechanisms.
-            #
-            # It is NOT the primary label-shift detector anymore.
-            # ---------------------------------------------------------
-            ps = metrics.get("ps", 0.0)
-
+            ps = metrics["ps"]
             data_shift_type = metrics["data_shift_type"]
+            similarity_local = cosine_similarity(self.p_ME[me], p_ME[me]) # the lower its value the lower the personalization
+            a = [0.95, 0.94, 0.81]  # fc > a gw=1
+            a = [0, 0, 0]  # fc > a gw=1
+            b = [0.59, 0.59, 0.65]  # il < b gw=1
+            # b = [1, 1, 1]  # il < b gw=1
+            tau_dh = [0.31, 0.28, 0.33]  # dh < c gw=1 # 0.43
+            tau_dh = [0.31, 0.32, 0.39]  # dh < c gw=1 # 0.43
+            # c = [1, 1, 1]  # dh < c gw=1 # 0.43
+            d = 0.1  # ps > d gw=1
 
-            similarity_local = cosine_similarity(
-                self.p_ME[me],
-                p_ME[me]
-            )
-
-            a = [0.0, 0.0, 0.0]
-            b = [0.59, 0.59, 0.65]
-
-            tau_dh = [0.31, 0.32, 0.39]
-
-            # ---------------------------------------------------------
-            # Label-shift threshold.
-            #
-            # The final value should be calibrated experimentally.
-            # ---------------------------------------------------------
-            tau_ls = 0.10
-
-            # ---------------------------------------------------------
-            # Data-shift round is now triggered by LS, rather than
-            # by PS.
-            #
-            # This is the key change in the client-side logic.
-            # ---------------------------------------------------------
-            if (
-                    self.data_shift_round[me] == -1
-                    and ls > tau_ls
-            ):
+            if self.data_shift_round[me] == -1 and ps > d:
                 self.data_shift_round[me] = t
 
-            # ---------------------------------------------------------
-            # Existing diagnostic condition.
-            # Use LS instead of PS to identify label-distribution
-            # change.
-            # ---------------------------------------------------------
-            if (
-                    fc > a[me]
-                    and il < b[me]
-                    and data_heterogeneity_degree < tau_dh[me]
-                    and ls > tau_ls
-                    and nt > 0
-            ):
-                print(
-                    f"usou incorretamente. "
-                    f"cliente {self.client_id} "
-                    f"rodada {t} modelo {me} "
-                    f"valores: {fc}, {il}, "
-                    f"{data_heterogeneity_degree} "
-                    f"ls={ls} nt={nt}"
-                )
+            # if self.lt[me] < self.data_shift_round[me] and data_heterogeneity_degree > c[me] and t - self.data_shift_round[me] < 4:
+            #     # chance of using only the global model gw=1
+            #     data_shift_adaptation = True
+            #     similarity = similarity_server
+            # else:
+            #     data_shift_adaptation = False
+            #     similarity = similarity_local
+            #     ps = 0
 
-            print(
-                f"model {me} valor t {t} "
-                f"nt {nt} tamanho {len(global_model)} "
-                f"heterogeneity degree cliente "
-                f"{data_heterogeneity_degree} "
-                f"ls {ls}"
-            )
+            # # if t <= 10:
+            # #     similarity = 1
+            # if similarity_server > 1:
+            #     similarity_server = 1
+            # elif similarity_server < 0:
+            #     similarity_server = 0
 
-            # ---------------------------------------------------------
-            # Determine whether the local model is outdated.
-            #
-            # dh still characterizes heterogeneity.
-            # ls identifies label-distribution change.
-            # ---------------------------------------------------------
-            if (
-                    self.lt[me] < self.data_shift_round[me]
-                    and data_heterogeneity_degree < tau_dh[me]
-            ):
+            if fc > a[me] and il < b[me] and data_heterogeneity_degree < tau_dh[me] and ps > d and nt > 0:
+                print(f"usou incorretamente. cliente {self.client_id} rodada {t} modelo {me} valores: {fc}, {il}, {data_heterogeneity_degree} {ps} {nt}")
+
+
+            # if similarity_server < similarity_local - 0.05 and ps > d and data_heterogeneity_degree < c[me]:
+            #     # Delayed labeling scenrio. Local similarity is not reliable
+            #     similarity = similarity_server
+            # else:
+            #     similarity = similarity_local
+            print(f"model {me} valor t {t} nt {nt} tamanho {len(global_model)} heterogeneity degree cliente {data_heterogeneity_degree}")
+            if self.lt[me] < self.data_shift_round[me] and data_heterogeneity_degree < tau_dh[me]:
                 similarity = 1
                 t_hat = 1
-
                 print("entrou parou")
-
                 local_model_outdated = True
+                # exit()
             else:
                 t_hat = t
                 similarity = 1
                 local_model_outdated = False
+            combined_model, gw, lw = fedpredict_client_torch(local_model=self.model[me], global_model=global_model,
+                                                     t=t, T=self.T, nt=nt,
+                                                     s=round(float(similarity), 2),
+                                                     lt=self.lt[me],
+                                                     data_shift_round=self.data_shift_round[me],
+                                                     # fc={'global': fc, 'reference': a[me]},
+                                                     # il={'global': il, 'reference': b[me]},
+                                                     dh={'global': data_heterogeneity_degree, 'reference': tau_dh[me]},
+                                                     ps={'global': ps, 'reference': d},
+                                                     data_shift_type=data_shift_type,
+                                                     device=self.device,
+                                                     global_model_original_shape=self.model_shape_mefl[me],
+                                                    return_gw_lw=True)
 
-            # ---------------------------------------------------------
-            # Existing FedPredict parameter-combination mechanism.
-            #
-            # ps is still passed for backward compatibility, but
-            # label-shift detection itself is no longer based on ps.
-            # ---------------------------------------------------------
-            combined_model, gw, lw = fedpredict_client_torch(
-                local_model=self.model[me],
-                global_model=global_model,
-                t=t,
-                T=self.T,
-                nt=nt,
-                s=round(float(similarity), 2),
-                lt=self.lt[me],
-                data_shift_round=self.data_shift_round[me],
-                dh={
-                    "global": data_heterogeneity_degree,
-                    "reference": tau_dh[me]
-                },
-                ps={
-                    "global": ps,
-                    "reference": 0.1
-                },
-                data_shift_type=data_shift_type,
-                device=self.device,
-                global_model_original_shape=self.model_shape_mefl[me],
-                return_gw_lw=True
-            )
+            # if (me == 0 and t < 35 and t >=30 and (t-30) < nt) or (me == 1 and t < 55 and t >= 50 and (t - 50) < nt) or (me == 2 and t < 75 and t >= 70 and (t - 70) < nt):
+            #     s = 1  # keeps the standard degree of personalization and does not apply weighted predictions (used for data shift and delayed labeling)
+            #     set_weights(self.global_model[me], global_model)
+            #     combined_model = self.global_model[me]
 
-            # ---------------------------------------------------------
-            # If a label-distribution shift was detected while the
-            # heterogeneity is low, keep the existing global-model
-            # fallback behavior.
-            # ---------------------------------------------------------
-            if (
-                    gw == 1
-                    and t > 10
-                    and data_heterogeneity_degree < tau_dh[me]
-                    and ls > tau_ls
-            ):
-                similarity = 1
-
-                set_weights(
-                    self.global_model[me],
-                    global_model
-                )
-
+            if (gw == 1 and t > 10 and data_heterogeneity_degree < tau_dh[me] and ps > d):
+                similarity = 1 # keeps the standard degree of personalization and does not apply weighted predictions (used for data shift and delayed labeling)
+                set_weights(self.global_model[me], global_model)
                 combined_model = self.global_model[me]
 
-            print(
-                f"rodada {t} recebido "
-                f"fc={fc} "
-                f"il={il} "
-                f"dh={data_heterogeneity_degree} "
-                f"ls={ls} "
-                f"ps={ps} "
-                f"nt={nt}"
-            )
 
-            loss, metrics = test(
-                combined_model,
-                self.valloader[me],
-                self.device,
-                self.client_id,
-                t,
-                self.args.dataset[me],
-                self.n_classes[me],
-                self.concept_drift_window_test[me]
-            )
+            print(f"rodada {t} recebido fc{fc} il{il} homogeneity degree {data_heterogeneity_degree} ps {ps} nt {nt}")
+
+            # loss, metrics = test_fedpredict(combined_model, self.valloader[me], self.device, self.client_id, t,
+            #                                 self.args.dataset[me], self.n_classes[me], similarity, p_ME[me],
+            #                                 self.concept_drift_window_test[me])
+
+            loss, metrics = test(combined_model, self.valloader[me], self.device, self.client_id, t,
+                                 self.args.dataset[me], self.n_classes[me], self.concept_drift_window_test[me])
 
             metrics["Model size"] = self.models_size[me]
-            metrics["Dataset size"] = len(
-                self.valloader[me].dataset
-            )
+            metrics["Dataset size"] = len(self.valloader[me].dataset)
             metrics["me"] = me
             metrics["Alpha"] = self.alpha_test[me]
             metrics["gw"] = float(gw)
             metrics["lw"] = float(lw)
-
-            tuple_me = (
-                loss,
-                len(self.valloader[me].dataset),
-                metrics
-            )
-
-            return (
-                loss,
-                len(self.valloader[me].dataset),
-                tuple_me
-            )
-
+            tuple_me = (loss, len(self.valloader[me].dataset), metrics)
+            return loss, len(self.valloader[me].dataset), tuple_me
         except Exception as e:
             print("evaluate error")
-            print(
-                "Error on line {} {} {}".format(
-                    sys.exc_info()[-1].tb_lineno,
-                    type(e).__name__,
-                    e
-                )
-            )
+            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     # def evaluate(self, me, t, global_model, metrics):
     #     """Evaluate the model on the data this client has."""
