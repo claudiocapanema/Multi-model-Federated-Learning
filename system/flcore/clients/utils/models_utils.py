@@ -60,19 +60,19 @@ def fedpredict_client_weight_predictions_torch(output: torch.Tensor, t: int, cur
         print("FedPredict client weight prediction")
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-DATASET_INPUT_MAP = {"CIFAR10": "img", "MNIST": "image", "EMNIST": "image", "GTSRB": "image", "Gowalla": "sequence",
+DATASET_INPUT_MAP = {"CIFAR10": "img", "MNIST": "image", "EMNIST": "image", "F-MNIST": "image", "SVHN": "image", "GTSRB": "image", "Gowalla": "sequence",
                      "WISDM-W": "sequence", "ImageNet": "image", "ImageNet10": "image", "wikitext": "sequence", "Foursquare": "sequence"}
 
 def load_model(model_name, dataset, strategy, device):
     try:
-        num_classes = {'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'Tiny-ImageNet': 200,
+        num_classes = {'EMNIST': 47, 'MNIST': 10, "F-MNIST": 10, "SVHN": 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'Tiny-ImageNet': 200,
          'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30, "Fourquare": 100}[dataset]
         if model_name == 'CNN':
             if dataset in ['MNIST']:
                 input_shape = 1
                 mid_dim = 256*4
                 logger.info("""leu mnist com {} {} {}""".format(input_shape, mid_dim, num_classes))
-            elif dataset in ['EMNIST']:
+            elif dataset in ['EMNIST', "F-MNIST"]:
                 input_shape = 1
                 mid_dim = 256*4
                 logger.info("""leu emnist com {} {} {}""".format(input_shape, mid_dim, num_classes))
@@ -86,7 +86,7 @@ def load_model(model_name, dataset, strategy, device):
             elif dataset == "ImageNet10":
                 input_shape=3
                 mid_dim=1600
-            elif dataset == "CIFAR10":
+            elif dataset in ["CIFAR10", "SVHN"]:
                 input_shape = 3
                 mid_dim = 400*4
                 logger.info("""leu cifar com {} {} {}""".format(input_shape, mid_dim, num_classes))
@@ -96,7 +96,7 @@ def load_model(model_name, dataset, strategy, device):
                 input_shape = 1
                 mid_dim = 4
                 logger.info("""leu mnist com {} {} {}""".format(input_shape, mid_dim, num_classes))
-            elif dataset in ['EMNIST']:
+            elif dataset in ['EMNIST', "F-MNIST"]:
                 input_shape = 1
                 mid_dim = 4
                 logger.info("""leu emnist com {} {} {}""".format(input_shape, mid_dim, num_classes))
@@ -113,7 +113,7 @@ def load_model(model_name, dataset, strategy, device):
                 mid_dim = 16
                 return TinyImageNetCNN()
                 logger.info("""leu imagenet10 com {} {} {}""".format(input_shape, mid_dim, num_classes))
-            elif dataset == "CIFAR10":
+            elif dataset  in ["CIFAR10", "SVHN"]:
                 input_shape = 3
                 mid_dim = 16
                 logger.info("""leu cifar com {} {} {}""".format(input_shape, mid_dim, num_classes))
@@ -237,10 +237,22 @@ def get_transform(dataset_name, train_test):
                                           Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
                                       "test": Compose(
                                           [ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])},
-                          "MNIST": Compose([ToTensor(), RandomRotation(10),
-                                            Normalize([0.5], [0.5])]),
-                          "EMNIST": Compose([ToTensor(), RandomRotation(10),
+                          "SVHN": {"train":
+                                          Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
+                                      "test": Compose(
+                                          [ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])},
+                          "MNIST": {"train": Compose([ToTensor(), RandomRotation(10),
                                              Normalize([0.5], [0.5])]),
+                                    "test": Compose([ToTensor(), RandomRotation(10),
+                                             Normalize([0.5], [0.5])])},
+                          "EMNIST": {"train": Compose([ToTensor(), RandomRotation(10),
+                                             Normalize([0.5], [0.5])]),
+                                    "test": Compose([ToTensor(), RandomRotation(10),
+                                             Normalize([0.5], [0.5])])},
+                          "F-MNIST": {"train": Compose([ToTensor(), RandomRotation(10),
+                                             Normalize([0.5], [0.5])]),
+                                    "test": Compose([ToTensor(), RandomRotation(10),
+                                             Normalize([0.5], [0.5])])},
                           "GTSRB": Compose(
                               [
 
@@ -327,6 +339,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                                                    self_balancing=True)
                 fds[dataset_name] = CustomFederatedDataset(
                     dataset={"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "MNIST": "ylecun/mnist",
+                             "F-MNIST": "zalando-datasets/fashion_mnist", "SVHN": "ufldl-stanford/svhn",
                          "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
                          , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-1-Words-3743',
@@ -342,10 +355,11 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
             print("dataset from volume")
             fd = CustomFederatedDataset(
                 dataset={"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "MNIST": "ylecun/mnist",
+                             "F-MNIST": "zalando-datasets/fashion_mnist", "SVHN": "ufldl-stanford/svhn",
                          "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
                          , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-1-Words-3743',
-                         "Foursquare": "claudiogsc/foursquare-us-sequences-highlevel-40000-samples-10-seq-len-seq-8-classes"}[
+                             "Foursquare": "claudiogsc/foursquare-us-sequences-highlevel-40000-samples-10-seq-len-8-classes"}[
                     dataset_name],
                 partitioners={"train": partitioner},
                 path=f"datasets/{dataset_name}",
@@ -385,9 +399,9 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
         partition_train = partition.select(train_idx)
         partition_test = partition.select(val_idx)
 
-        if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla", "wikitext", "Foursquare"]:
+        if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "F-MNIST", "SVHN", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla", "wikitext", "Foursquare"]:
             # Divide data on each node: 80% train, 20% test
-
+            print("dt name", dataset_name)
             pytorch_transforms_train = get_transform(dataset_name, "train")
             pytorch_transforms_test = get_transform(dataset_name, "test")
 
@@ -409,7 +423,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
             # logger.info("""bath key: {}""".format(batch[key]))
             return batch
 
-        if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla", "wikitext"]:
+        if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "F-MNIST", "SVHN", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla", "wikitext"]:
             # partition_train = partition_train_test["train"].with_transform(apply_transforms_train)
             # partition_test = partition_train_test["test"].with_transform(apply_transforms_test)
 

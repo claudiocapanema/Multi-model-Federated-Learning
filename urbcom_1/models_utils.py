@@ -447,7 +447,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
             # logger.info("""bath key: {}""".format(batch[key]))
             return batch
 
-        if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla", "wikitext"]:
+        if dataset_name in ["CIFAR10", "SVHN", "MNIST", "EMNIST", "F-MNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla", "wikitext"]:
             # partition_train = partition_train_test["train"].with_transform(apply_transforms_train)
             # partition_test = partition_train_test["test"].with_transform(apply_transforms_test)
 

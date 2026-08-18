@@ -72,7 +72,7 @@ def load_model(model_name, dataset, strategy, device):
                 input_shape = 1
                 mid_dim = 256*4
                 logger.info("""leu mnist com {} {} {}""".format(input_shape, mid_dim, num_classes))
-            elif dataset in ['EMNIST']:
+            elif dataset in ['EMNIST', "F-MNIST"]:
                 input_shape = 1
                 mid_dim = 256*4
                 logger.info("""leu emnist com {} {} {}""".format(input_shape, mid_dim, num_classes))
@@ -86,7 +86,7 @@ def load_model(model_name, dataset, strategy, device):
             elif dataset == "ImageNet10":
                 input_shape=3
                 mid_dim=1600
-            elif dataset == "CIFAR10":
+            elif dataset in ["CIFAR10", "SVHN"]:
                 input_shape = 3
                 mid_dim = 400*4
                 logger.info("""leu cifar com {} {} {}""".format(input_shape, mid_dim, num_classes))
@@ -96,7 +96,7 @@ def load_model(model_name, dataset, strategy, device):
                 input_shape = 1
                 mid_dim = 4
                 logger.info("""leu mnist com {} {} {}""".format(input_shape, mid_dim, num_classes))
-            elif dataset in ['EMNIST']:
+            elif dataset in ['EMNIST', "F-MNIST"]:
                 input_shape = 1
                 mid_dim = 4
                 logger.info("""leu emnist com {} {} {}""".format(input_shape, mid_dim, num_classes))
@@ -113,7 +113,7 @@ def load_model(model_name, dataset, strategy, device):
                 mid_dim = 16
                 return TinyImageNetCNN()
                 logger.info("""leu imagenet10 com {} {} {}""".format(input_shape, mid_dim, num_classes))
-            elif dataset == "CIFAR10":
+            elif dataset in ["CIFAR10", "SVHN"]:
                 input_shape = 3
                 mid_dim = 16
                 logger.info("""leu cifar com {} {} {}""".format(input_shape, mid_dim, num_classes))
