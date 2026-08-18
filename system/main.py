@@ -25,7 +25,7 @@ import warnings
 import numpy as np
 import logging
 from flcore.servers.server_multifedavg import MultiFedAvg
-from flcore.servers.server_multifedavg_meh import MultiFedAvgMDH
+from flcore.servers.server_multifedavg_mdh import MultiFedAvgMDH
 from flcore.servers.server_multifedavgrr import MultiFedAvgRR
 from flcore.servers.server_fedfairmmfl import FedFairMMFL
 from flcore.servers.server_multifedavg_with_multifedpredict import MultiFedAvgWithMultiFedPredict
@@ -181,93 +181,172 @@ def load_model(model_name, dataset, strategy, device):
 def run(args):
 
     time_list = []
+
     for fold_id in range(1, args.k_fold + 1):
-        print(f"=============== Fold ID {fold_id} of {args.k_fold} ============")
+
+        print(
+            f"=============== "
+            f"Fold ID {fold_id} of {args.k_fold} "
+            f"==============="
+        )
+
         print("Creating server and clients ...")
+
         start = time.time()
+
         models = []
+
         ME = len(args.model)
 
+        # ---------------------------------------------------------
+        # Create models
+        # ---------------------------------------------------------
         for m in range(ME):
-            # Generate args.model
+
             model_name = args.model[m]
             dataset = args.dataset[m]
-            model = load_model(model_name, dataset, args.strategy, args.device)
-            print("aqui : ", model_name, dataset)
+
+            model = load_model(
+                model_name,
+                dataset,
+                args.strategy,
+                args.device
+            )
+
+            print(
+                "Model:",
+                model_name,
+                "Dataset:",
+                dataset
+            )
+
             print(model)
+
             models.append(model)
 
-        # select algorithm
+        # ---------------------------------------------------------
+        # Select algorithm
+        # ---------------------------------------------------------
         if args.strategy == "MultiFedAvg":
+
             server = MultiFedAvg
+
         elif args.strategy == "MultiFedAvg-MDH":
+
             server = MultiFedAvgMDH
+
         elif args.strategy == "DMA-FL":
+
             server = DMAFLSynchronous
+
         elif args.strategy == "FedConD":
+
             server = FedConD
+
         elif args.strategy == "FedDCA":
+
             server = FedDCA
+
         elif args.strategy == "CDA-FedAvg":
+
             server = CDAFedAvg
+
         elif args.strategy == "AdaptiveFedAvg":
+
             server = AdaptiveFedAvg
+
         elif args.strategy == "MultiFedAvgRR":
+
             server = MultiFedAvgRR
+
         elif args.strategy == "FedFairMMFL":
+
             server = FedFairMMFL
+
         elif args.strategy == "MultiFedAvg+FP":
+
             version = None
             server = MultiFedAvgWithFedPredict
+
         elif args.strategy == "MultiFedAvg+FPD":
+
             version = None
             server = MultiFedAvgWithFedPredictDynamic
+
         elif args.strategy == "MultiFedAvg+MFP":
+
             server = MultiFedAvgWithMultiFedPredictv0
+
         elif args.strategy == "MultiFedAvg+MFP_v2":
+
             version = "full"
             server = MultiFedAvgWithMultiFedPredict
+
         elif args.strategy == "MultiFedAvg+MFP_v2_dh":
+
             version = "dh"
             server = MultiFedAvgWithMultiFedPredict
+
         elif args.strategy == "MultiFedAvg+MFP_v2_iti":
+
             version = "iti"
             server = MultiFedAvgWithMultiFedPredict
 
-        # elif args.strategy == "MultiFedEfficiency":
-        #     server = MultiFedEfficiency
-        #
-        # elif args.strategy == "MultiFedAvg+FP":
-        #     server = MultiFedAvgWithFedPredict
-        #
-        # elif args.strategy == "FedFairMMFL":
-        #     server = FedFairMMFL
-        # elif args.strategy == "MultiFedAvgRR":
-        #     server = MultiFedAvgRR
-
         else:
+
             print(args.strategy)
+
             raise NotImplementedError
 
-        if args.strategy not in ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+FP", "MultiFedAvg+FPD"]:
-            server = server(args, models, fold_id)
-            if args.strategy in ["FedConD", "FedDCA", "CDA-FedAvg"]:
+        # ---------------------------------------------------------
+        # Create server
+        # ---------------------------------------------------------
+        if args.strategy not in [
+            "MultiFedAvg+MFP_v2",
+            "MultiFedAvg+MFP_v2_dh",
+            "MultiFedAvg+MFP_v2_iti",
+            "MultiFedAvg+FP",
+            "MultiFedAvg+FPD"
+        ]:
+
+            server = server(
+                args,
+                models,
+                fold_id
+            )
+
+            if args.strategy in [
+                "FedConD",
+                "FedDCA",
+                "CDA-FedAvg"
+            ]:
+
                 server._init_shift_detection_files()
+
         else:
-            server = server(args, models, version, fold_id)
+
+            server = server(
+                args,
+                models,
+                version,
+                fold_id
+            )
+
+        # ---------------------------------------------------------
+        # Train
+        # ---------------------------------------------------------
         server.train()
 
-        time_list.append(time.time()-start)
+        elapsed_time = time.time() - start
 
-        print(f"\nAverage time cost: {round(np.average(time_list), 2)}s.")
+        time_list.append(elapsed_time)
 
-
-        # Global average
-        # average_data(dataset=args.dataset, algorithm=args.algorithm, goal=args.goal, times=args.times, args=args)
+        print(
+            f"\nAverage time cost: "
+            f"{round(np.average(time_list), 2)}s."
+        )
 
         print("All done!")
-
-        # reporter.report()
 
 
 if __name__ == "__main__":
@@ -336,6 +415,16 @@ if __name__ == "__main__":
         "--fraction_fit", type=float, default=0.3
     )
     parser.add_argument(
+        "--q_max",
+        type=int,
+        default=1,
+        help=(
+            "Maximum number of heterogeneous models trained "
+            "simultaneously by MultiFedAvg-MDH. "
+            "Q_MAX=1 reproduces the original MDH."
+        )
+    )
+    parser.add_argument(
         "--client_id", type=int, default=1
     )
     parser.add_argument(
@@ -365,9 +454,25 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.strategy == "MultiFedEfficiency":
-        log_name = args.strategy + "_tw_" + str(args.tw) + "_df_" + str(args.df)
+
+        log_name = (
+                args.strategy
+                + "_tw_"
+                + str(args.tw)
+                + "_df_"
+                + str(args.df)
+        )
+
+    elif args.strategy == "MultiFedAvg-MDH":
+
+        log_name = (
+                args.strategy
+                + "_qmax_"
+                + str(args.q_max)
+        )
 
     else:
+
         log_name = args.strategy
 
     if args.label_shift_transition_window > 1:

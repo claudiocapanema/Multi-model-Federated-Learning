@@ -32,18 +32,16 @@ logger = logging.getLogger(__name__)  # Create logger for the module
 
 
 class MultiFedAvgMDHClient(MultiFedAvgClient):
-    def __init__(self, args, id, model):
+    def __init__(self, args, id, model, fold_id):
         try:
-            super().__init__(args, id, model)
+            super().__init__(args, id, model, fold_id)
             self.p_ME = [None] * self.ME
             self.p_ME_list = {me: [] for me in range(self.ME)}
             self.fc_ME = [0] * self.ME
             self.il_ME = [0] * self.ME
-            self.num_examples = [0] * self.ME
             self.similarity_ME = [[]] * self.ME
             self.mean_p_ME = [None] * self.ME
             self.NT = [None] * self.ME
-            self.previous_alpha = self.alpha
 
             self.num_examples, self.p_ME, self.fc_ME, self.il_ME = self._get_datasets_metrics_meh(self.trainloader, self.ME, self.client_id,
                                                                            self.n_classes)
