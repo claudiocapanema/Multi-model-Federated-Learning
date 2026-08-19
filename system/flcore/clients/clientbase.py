@@ -274,7 +274,7 @@ class Client(object):
                 # print("""bath key: {}""".format(batch[key]))
                 return batch
 
-            if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "WISDM-W", "Gowalla"]:
+            if dataset_name in ["CIFAR10", "SVHN", "MNIST", "EMNIST", "F-MNIST", "GTSRB", "ImageNet", "WISDM-W", "Gowalla"]:
                 partition_train_test = partition_train_test.with_transform(apply_transforms)
             trainloader = DataLoader(
                 partition_train_test["train"], batch_size=batch_size, shuffle=True

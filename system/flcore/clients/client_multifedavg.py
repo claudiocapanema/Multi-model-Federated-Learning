@@ -36,11 +36,13 @@ class MultiFedAvgClient:
             self.dataset = args.dataset
             self.batch_size = []
             for dataset in args.dataset:
-                self.batch_size.append({"CIFAR10": 32, "WISDM-W": 64, "ImageNet10": 10, "Gowalla": 64, "wikitext": 256, "Foursquare": 512}[dataset])
+                self.batch_size.append({"CIFAR10": 32, "SVHN": 32, "MNIST": 32, "F-MNIST": 32, "EMNIST": 32, "WISDM-W": 64, "ImageNet10": 10, "Gowalla": 64, "wikitext": 256, "Foursquare": 512}[dataset])
             self.lr_dict = {'EMNIST':0.01,
                             'MNIST': 0.01,
+                            "F-MNIST": 0.01,
                             'CIFAR10': 0.01,
                             'GTSRB': 0.01,
+                            "SVHN": 0.01,
                             'WISDM-W': 0.001,
                             'WISDM-P': 0.001,
                             'ImageNet100': 0.01,
@@ -78,7 +80,7 @@ class MultiFedAvgClient:
             print("ler model size")
             self.models_size = self._get_models_size()
             self.n_classes = [
-                {'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'ImageNet': 15,
+                {'EMNIST': 47, 'MNIST': 10, 'F-MNIST': 10, 'SVHN': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'ImageNet': 15,
                  "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30, "Foursquare": 10}[dataset] for dataset in
                 self.args.dataset]
             self.loss_ME = [10] * self.ME
@@ -467,10 +469,321 @@ class MultiFedAvgClient:
             print("evaluate error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def update_local_train_data(self, t, me):
+    def _apply_concept_drift_to_trainloader(
+            self,
+            trainloader,
+            me,
+            concept_drift_window
+    ):
+        """
+        Apply a pure concept-drift transformation to the local
+        training data.
+
+        The transformation preserves exactly the marginal label
+        distribution P(Y), while changing the association between
+        samples X and labels Y.
+
+        Therefore:
+
+            P_new(Y) = P_old(Y)
+
+        while:
+
+            P_new(X | Y) != P_old(X | Y)
+
+        The transformation is applied ONLY to the local training
+        data. Test/validation data are never used.
+
+        recent_trainloader is not modified by this method.
+        """
 
         try:
+
+            if trainloader is None:
+                return trainloader
+
+            if concept_drift_window is None:
+                return trainloader
+
+            concept_drift_window = int(
+                concept_drift_window
+            )
+
+            if concept_drift_window == 0:
+                return trainloader
+
+            # ---------------------------------------------------------
+            # Extract all samples from the current training loader.
+            #
+            # We keep the complete batch dictionaries because different
+            # datasets use different input keys.
+            # ---------------------------------------------------------
+
+            samples = []
+
+            for batch in trainloader:
+
+                if not isinstance(batch, dict):
+                    raise TypeError(
+                        "Expected training batches to be dictionaries."
+                    )
+
+                batch_size = (
+                    batch["label"].shape[0]
+                )
+
+                for i in range(batch_size):
+
+                    sample = {}
+
+                    for key, value in batch.items():
+
+                        if isinstance(value, torch.Tensor):
+
+                            sample[key] = (
+                                value[i].detach().cpu().clone()
+                            )
+
+                        else:
+
+                            sample[key] = copy.deepcopy(
+                                value[i]
+                            )
+
+                    samples.append(
+                        sample
+                    )
+
+            if len(samples) <= 1:
+                return trainloader
+
+            # ---------------------------------------------------------
+            # Original labels.
+            # ---------------------------------------------------------
+
+            original_labels = np.asarray(
+                [
+                    int(
+                        sample["label"].item()
+                        if isinstance(
+                            sample["label"],
+                            torch.Tensor
+                        )
+                        else sample["label"]
+                    )
+                    for sample in samples
+                ],
+                dtype=np.int64
+            )
+
+            # ---------------------------------------------------------
+            # Deterministic permutation.
+            #
+            # The permutation depends on client, model and the
+            # configured concept-drift window.
+            # ---------------------------------------------------------
+
+            seed = (
+                    42
+                    + int(self.client_id) * 100003
+                    + int(me) * 1009
+                    + int(concept_drift_window) * 9176
+            )
+
+            rng = np.random.RandomState(
+                seed
+            )
+
+            permutation = rng.permutation(
+                len(original_labels)
+            )
+
+            # Avoid the identity permutation.
+            if np.array_equal(
+                    permutation,
+                    np.arange(
+                        len(original_labels)
+                    )
+            ):
+                permutation = np.roll(
+                    permutation,
+                    1
+                )
+
+            shifted_labels = (
+                original_labels[permutation]
+            )
+
+            # ---------------------------------------------------------
+            # Safety check:
+            #
+            # The marginal label distribution MUST be exactly the same.
+            # ---------------------------------------------------------
+
+            original_unique, original_counts = np.unique(
+                original_labels,
+                return_counts=True
+            )
+
+            shifted_unique, shifted_counts = np.unique(
+                shifted_labels,
+                return_counts=True
+            )
+
+            if (
+                    not np.array_equal(
+                        original_unique,
+                        shifted_unique
+                    )
+                    or not np.array_equal(
+                original_counts,
+                shifted_counts
+            )
+            ):
+                raise RuntimeError(
+                    "Concept-drift transformation changed "
+                    "the marginal label distribution."
+                )
+
+            # ---------------------------------------------------------
+            # Build a new list of samples.
+            #
+            # Only the label is replaced.
+            # Every X remains associated with the same physical sample.
+            # ---------------------------------------------------------
+
+            shifted_samples = []
+
+            for i, sample in enumerate(samples):
+                shifted_sample = copy.deepcopy(
+                    sample
+                )
+
+                shifted_sample["label"] = torch.tensor(
+                    shifted_labels[i],
+                    dtype=(
+                        sample["label"].dtype
+                        if isinstance(
+                            sample["label"],
+                            torch.Tensor
+                        )
+                        else torch.long
+                    )
+                )
+
+                shifted_samples.append(
+                    shifted_sample
+                )
+
+            # ---------------------------------------------------------
+            # Local Dataset wrapper.
+            # ---------------------------------------------------------
+
+            class _ConceptDriftDataset(
+                torch.utils.data.Dataset
+            ):
+
+                def __init__(
+                        self,
+                        data
+                ):
+                    self.data = data
+
+                def __len__(
+                        self
+                ):
+                    return len(
+                        self.data
+                    )
+
+                def __getitem__(
+                        self,
+                        index
+                ):
+                    return self.data[index]
+
+            shifted_dataset = (
+                _ConceptDriftDataset(
+                    shifted_samples
+                )
+            )
+
+            # ---------------------------------------------------------
+            # Preserve the important DataLoader parameters.
+            # ---------------------------------------------------------
+
+            loader_kwargs = {
+                "batch_size": (
+                    trainloader.batch_size
+                ),
+                "shuffle": True,
+                "num_workers": (
+                    trainloader.num_workers
+                ),
+                "drop_last": (
+                    trainloader.drop_last
+                ),
+                "pin_memory": (
+                    trainloader.pin_memory
+                )
+            }
+
+            # Preserve the existing collate function whenever possible.
+            if (
+                    hasattr(
+                        trainloader,
+                        "collate_fn"
+                    )
+                    and trainloader.collate_fn
+                    is not None
+            ):
+                loader_kwargs["collate_fn"] = (
+                    trainloader.collate_fn
+                )
+
+            shifted_trainloader = (
+                torch.utils.data.DataLoader(
+                    shifted_dataset,
+                    **loader_kwargs
+                )
+            )
+
+            print(
+                f"[CONCEPT DRIFT] "
+                f"client={self.client_id} "
+                f"model={me} "
+                f"window={concept_drift_window} "
+                f"samples={len(samples)} "
+                f"P(Y)_preserved=True"
+            )
+
+            return shifted_trainloader
+
+        except Exception as e:
+
+            print(
+                "_apply_concept_drift_to_trainloader error"
+            )
+
+            print(
+                "Error on line {} {} {}".format(
+                    sys.exc_info()[-1].tb_lineno,
+                    type(e).__name__,
+                    e
+                )
+            )
+
+            return trainloader
+
+    def update_local_train_data(
+            self,
+            t,
+            me
+    ):
+        try:
+
             if t == 1:
+
                 self.trainloader[me], self.valloader[me] = load_data(
                     dataset_name=self.args.dataset[me],
                     alpha=self.alpha_train[me],
@@ -481,37 +794,116 @@ class MultiFedAvgClient:
                     fold_id=self.fold_id,
                 )
 
-                self.recent_trainloader[me] = copy.deepcopy(self.trainloader[me])
+                # -----------------------------------------------------
+                # KEEP THE EXISTING recent_trainloader BEHAVIOR.
+                # -----------------------------------------------------
 
-                self.num_examples[me] = len(self.trainloader[me].dataset)
+                self.recent_trainloader[me] = (
+                    copy.deepcopy(
+                        self.trainloader[me]
+                    )
+                )
+
+                self.num_examples[me] = (
+                    len(
+                        self.trainloader[me].dataset
+                    )
+                )
 
             else:
-                if self.data_shift_config != {}:
-                    alpha_me, concept_drift_window, data_shift_flag = self._data_shift_flag(t, me, train=True)
-                    print(f"Treinar modelo {me} rodada {t} cliente {self.client_id} - data drift flag {data_shift_flag} comparacao alpha {self.alpha_train[me]} novo {alpha_me} - concept drift_window antigo {self.concept_drift_window_train[me]} novo {concept_drift_window}")
 
-                    print(self.data_shift_config)
-                    if (data_shift_flag and self.data_shift_config[me]["type"] in ["label_shift"]):
-                        if self.alpha_train[me] != self.alpha_test[me] and self.alpha_test[me] == alpha_me:
-                            self.alpha_train[me] = self.alpha_test[me]
-                            self.trainloader[me] = copy.deepcopy(self.recent_trainloader[me])
-                            self.p_ME[me], self.fc_ME[me], self.il_ME[me] = self._get_datasets_metrics(self.trainloader, self.ME,
-                                                                                           self.client_id,
-                                                                                           self.n_classes, me=me)
+                if self.data_shift_config != {}:
+
+                    (
+                        alpha_me,
+                        concept_drift_window,
+                        data_shift_flag
+                    ) = self._data_shift_flag(
+                        t,
+                        me,
+                        train=True
+                    )
+
+                    print(
+                        f"Treinar modelo {me} "
+                        f"rodada {t} "
+                        f"cliente {self.client_id} - "
+                        f"data drift flag "
+                        f"{data_shift_flag} "
+                        f"comparacao alpha "
+                        f"{self.alpha_train[me]} "
+                        f"novo {alpha_me} - "
+                        f"concept drift_window antigo "
+                        f"{self.concept_drift_window_train[me]} "
+                        f"novo {concept_drift_window}"
+                    )
+
+                    print(
+                        self.data_shift_config
+                    )
+
+                    # =================================================
+                    # LABEL SHIFT
+                    # =================================================
+
+                    if (
+                            data_shift_flag
+                            and self.data_shift_config[me]["type"]
+                            in ["label_shift"]
+                    ):
+
+                        if (
+                                self.alpha_train[me]
+                                != self.alpha_test[me]
+                                and self.alpha_test[me]
+                                == alpha_me
+                        ):
+
+                            self.alpha_train[me] = (
+                                self.alpha_test[me]
+                            )
+
+                            self.trainloader[me] = (
+                                copy.deepcopy(
+                                    self.recent_trainloader[me]
+                                )
+                            )
+
+                            (
+                                self.p_ME[me],
+                                self.fc_ME[me],
+                                self.il_ME[me]
+                            ) = self._get_datasets_metrics(
+                                self.trainloader,
+                                self.ME,
+                                self.client_id,
+                                self.n_classes,
+                                me=me
+                            )
+
                         else:
-                            print(f"Atualizou dataset de treino do modelo {me} na rodada {t}. Alpha de {self.alpha_train[me]} para {alpha_me} - concept drift_window antigo {self.concept_drift_window_train[me]} novo {concept_drift_window} - cliente {self.client_id}")
-                            self.alpha_train[me] = alpha_me
-                            self.alpha_test[me] = alpha_me
-                            index = 0
-                            # self.trainloader[me], self.valloader[me] = load_data(
-                            #     dataset_name=self.args.dataset[me],
-                            #     alpha=self.alpha_train[me],
-                            #     data_sampling_percentage=self.args.data_percentage,
-                            #     partition_id=int((self.args.client_id + index) % self.args.total_clients),
-                            #     num_partitions=self.args.total_clients + 1,
-                            #     batch_size=self.args.batch_size,
-                            #     fold_id=self.fold_id
-                            # )
+
+                            print(
+                                f"Atualizou dataset de treino "
+                                f"do modelo {me} "
+                                f"na rodada {t}. "
+                                f"Alpha de "
+                                f"{self.alpha_train[me]} "
+                                f"para {alpha_me} - "
+                                f"concept drift_window antigo "
+                                f"{self.concept_drift_window_train[me]} "
+                                f"novo {concept_drift_window} - "
+                                f"cliente {self.client_id}"
+                            )
+
+                            self.alpha_train[me] = (
+                                alpha_me
+                            )
+
+                            self.alpha_test[me] = (
+                                alpha_me
+                            )
+
                             self.trainloader[me], self.valloader[me] = load_data(
                                 dataset_name=self.args.dataset[me],
                                 alpha=self.alpha_train[me],
@@ -521,30 +913,119 @@ class MultiFedAvgClient:
                                 batch_size=self.batch_size[me],
                                 fold_id=self.fold_id,
                             )
-                            self.recent_trainloader[me] = copy.deepcopy(self.trainloader[me])
-                            self.p_ME[me], self.fc_ME[me], self.il_ME[me] = self._get_datasets_metrics(self.trainloader,
-                                                                                                       self.ME,
-                                                                                                       self.client_id,
-                                                                                                       self.n_classes,
-                                                                                                       me=me)
-                    elif data_shift_flag and self.data_shift_config[me]["type"] in ["concept_drift"]:
-                        print(
-                            f"Atualizou dataset de treino do modelo {me} na rodada {t}. Alpha de {self.alpha_train[me]} para {alpha_me} - concept drift_window {self.concept_drift_window_train[me]} - cliente {self.client_id}")
-                        self.concept_drift_window_train[me] = concept_drift_window
-                        self.concept_drift_window_test[me] = self.concept_drift_window_train[me]
-                        self.recent_trainloader[me] = copy.deepcopy(self.trainloader[me])
-                        self.p_ME[me], self.fc_ME[me], self.il_ME[me] = self._get_datasets_metrics(self.trainloader,
-                                                                                                   self.ME,
-                                                                                                   self.client_id,
-                                                                                                   self.n_classes,
-                                                                                                   concept_drift_window=self.concept_drift_window_train,
-                                                                                                   me=me)
 
-            self.num_examples[me] = len(self.trainloader[me].dataset)
+                            # -------------------------------------------------
+                            # KEEP EXISTING recent_trainloader BEHAVIOR.
+                            # -------------------------------------------------
+
+                            self.recent_trainloader[me] = (
+                                copy.deepcopy(
+                                    self.trainloader[me]
+                                )
+                            )
+
+                            (
+                                self.p_ME[me],
+                                self.fc_ME[me],
+                                self.il_ME[me]
+                            ) = self._get_datasets_metrics(
+                                self.trainloader,
+                                self.ME,
+                                self.client_id,
+                                self.n_classes,
+                                me=me
+                            )
+
+                    # =================================================
+                    # CONCEPT DRIFT
+                    # =================================================
+
+                    elif (
+                            data_shift_flag
+                            and self.data_shift_config[me]["type"]
+                            in ["concept_drift"]
+                    ):
+
+                        print(
+                            f"Aplicando concept drift "
+                            f"puro ao modelo {me} "
+                            f"na rodada {t} "
+                            f"cliente {self.client_id}. "
+                            f"window antigo "
+                            f"{self.concept_drift_window_train[me]} "
+                            f"novo "
+                            f"{concept_drift_window}"
+                        )
+
+                        # -------------------------------------------------
+                        # Concept drift does NOT change alpha.
+                        # -------------------------------------------------
+
+                        self.alpha_train[me] = (
+                            alpha_me
+                        )
+
+                        self.alpha_test[me] = (
+                            alpha_me
+                        )
+
+                        self.concept_drift_window_train[me] = (
+                            concept_drift_window
+                        )
+
+                        # -------------------------------------------------
+                        # Apply the shift to the ACTUAL TRAINING DATA.
+                        #
+                        # This preserves P(Y), but changes P(X|Y).
+                        # -------------------------------------------------
+
+                        self.trainloader[me] = (
+                            self._apply_concept_drift_to_trainloader(
+                                self.trainloader[me],
+                                me,
+                                concept_drift_window
+                            )
+                        )
+
+                        # -------------------------------------------------
+                        # IMPORTANT:
+                        #
+                        # Do NOT transform labels inside
+                        # _get_datasets_metrics().
+                        # -------------------------------------------------
+
+                        (
+                            self.p_ME[me],
+                            self.fc_ME[me],
+                            self.il_ME[me]
+                        ) = self._get_datasets_metrics(
+                            self.trainloader,
+                            self.ME,
+                            self.client_id,
+                            self.n_classes,
+                            me=me
+                        )
+
+                self.num_examples[me] = (
+                    len(
+                        self.trainloader[me].dataset
+                    )
+                )
 
         except Exception as e:
-            print(f"update_local_train_data error {self.data_shift_config}")
-            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+            print(
+                f"update_local_train_data error "
+                f"{self.data_shift_config}"
+            )
+
+            print(
+                "Error on line {} {} {}".format(
+                    sys.exc_info()[-1].tb_lineno,
+                    type(e).__name__,
+                    e
+                )
+            )
 
     def update_local_test_data(self, t, me):
 
@@ -722,7 +1203,9 @@ class MultiFedAvgClient:
             return {
                     'EMNIST': torch.optim.SGD(self.model[me].parameters(), self.lr_dict[dataset_name], momentum=0.9),
                     'MNIST': torch.optim.SGD(self.model[me].parameters(), self.lr_dict[dataset_name], momentum=0.9),
+                    'F-MNIST': torch.optim.SGD(self.model[me].parameters(), self.lr_dict[dataset_name], momentum=0.9),
                     'CIFAR10': torch.optim.SGD(self.model[me].parameters(), self.lr_dict[dataset_name], momentum=0.9),
+                    'SVHN': torch.optim.SGD(self.model[me].parameters(), self.lr_dict[dataset_name], momentum=0.9),
                     'GTSRB': torch.optim.SGD(self.model[me].parameters(), self.lr_dict[dataset_name], momentum=0.9),
                     'WISDM-W': torch.optim.RMSprop(self.model[me].parameters(), self.lr_dict[dataset_name], momentum=0.9),
                     'WISDM-P': torch.optim.RMSprop(self.model[me].parameters(), self.lr_dict[dataset_name], momentum=0.9),
@@ -737,60 +1220,259 @@ class MultiFedAvgClient:
             print("_get_optimizer error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def _get_datasets_metrics(self, trainloader, ME, client_id, n_classes, concept_drift_window=None, me=None):
+    def _get_datasets_metrics(
+            self,
+            trainloader,
+            ME,
+            client_id,
+            n_classes,
+            concept_drift_window=None,
+            me=None
+    ):
+        """
+        Compute local training-data metrics.
+
+        IMPORTANT:
+
+        The labels are read exactly as they are stored in the
+        training loader.
+
+        concept_drift_window is NOT applied here.
+
+        Concept drift is simulated by changing the actual
+        sample-label relationship in the training loader.
+
+        Therefore this method measures the real P(Y) of the
+        training data and can be safely used to calculate LS.
         """
 
-        :param trainloader:
-        :param ME:
-        :param client_id:
-        :param n_classes:
-        :param concept_drift_window:
-        :return:
-            p_ME: proportion of samples per class per model
-            fc_ME: fraction of classes per model
-            il_ME: imbalance level per model
-        """
         try:
+
             p_ME = []
             fc_ME = []
             il_ME = []
-            ME_LIST = [i for i in range(ME)] if me is None else [me]
-            for me in ME_LIST:
+
+            ME_LIST = (
+                [i for i in range(ME)]
+                if me is None
+                else [me]
+            )
+
+            for model_id in ME_LIST:
+
                 labels_me = []
-                n_classes_me = n_classes[me]
-                p_me = {i: 0 for i in range(n_classes_me)}
-                with (torch.no_grad()):
-                    for batch in trainloader[me]:
-                        labels = batch["label"]
-                        labels = labels.to("cuda:0")
 
-                        if concept_drift_window is not None:
-                            labels = (labels + concept_drift_window[me])
-                            labels = labels % n_classes[me]
-                        labels = labels.detach().cpu().numpy()
-                        labels_me += labels.tolist()
-                    unique, count = np.unique(labels_me, return_counts=True)
-                    data_unique_count_dict = dict(zip(np.array(unique).tolist(), np.array(count).tolist()))
-                    for label in data_unique_count_dict:
-                        p_me[label] = data_unique_count_dict[label]
-                    p_me = np.array(list(p_me.values()))
-                    fc_me = len(np.argwhere(p_me > 0)) / n_classes_me
-                    il_me = len(np.argwhere(p_me < np.sum(p_me) / n_classes_me)) / n_classes_me
-                    p_me = p_me / np.sum(p_me)
-                    p_ME.append(p_me)
-                    fc_ME.append(fc_me)
-                    il_ME.append(il_me)
-                    # print(f"p_me {p_me} fc_me {fc_me} il_me {il_me} model {me} client {client_id}")
+                n_classes_me = (
+                    n_classes[model_id]
+                )
 
-            if len(p_ME) == 1 and len(il_ME) == 1 and len(fc_ME) == 1:
-                return p_ME[0], fc_ME[0], il_ME[0]
+                p_me = {
+                    i: 0
+                    for i in range(
+                        n_classes_me
+                    )
+                }
 
-            return p_ME, fc_ME, il_ME
+                with torch.no_grad():
+
+                    for batch in trainloader[model_id]:
+
+                        labels = (
+                            batch["label"]
+                        )
+
+                        if not isinstance(
+                                labels,
+                                torch.Tensor
+                        ):
+                            labels = torch.tensor(
+                                labels
+                            )
+
+                        labels = (
+                            labels.detach()
+                            .cpu()
+                            .numpy()
+                            .reshape(-1)
+                        )
+
+                        labels_me.extend(
+                            labels.tolist()
+                        )
+
+                # -----------------------------------------------------
+                # No samples.
+                # -----------------------------------------------------
+
+                if len(labels_me) == 0:
+                    p_ME.append(
+                        np.zeros(
+                            n_classes_me,
+                            dtype=float
+                        )
+                    )
+
+                    fc_ME.append(
+                        0.0
+                    )
+
+                    il_ME.append(
+                        0.0
+                    )
+
+                    continue
+
+                # -----------------------------------------------------
+                # Count labels.
+                # -----------------------------------------------------
+
+                unique, count = np.unique(
+                    labels_me,
+                    return_counts=True
+                )
+
+                data_unique_count_dict = dict(
+                    zip(
+                        unique.tolist(),
+                        count.tolist()
+                    )
+                )
+
+                for label, label_count in (
+                        data_unique_count_dict.items()
+                ):
+
+                    label = int(
+                        label
+                    )
+
+                    if (
+                            0 <= label
+                            < n_classes_me
+                    ):
+                        p_me[label] = (
+                            label_count
+                        )
+
+                p_me = np.asarray(
+                    list(
+                        p_me.values()
+                    ),
+                    dtype=float
+                )
+
+                total_samples = (
+                    np.sum(
+                        p_me
+                    )
+                )
+
+                if total_samples <= 0:
+                    p_ME.append(
+                        np.zeros(
+                            n_classes_me,
+                            dtype=float
+                        )
+                    )
+
+                    fc_ME.append(
+                        0.0
+                    )
+
+                    il_ME.append(
+                        0.0
+                    )
+
+                    continue
+
+                # -----------------------------------------------------
+                # Fraction of represented classes.
+                # -----------------------------------------------------
+
+                fc_me = (
+                        np.count_nonzero(
+                            p_me > 0
+                        )
+                        / n_classes_me
+                )
+
+                # -----------------------------------------------------
+                # Imbalance level.
+                # -----------------------------------------------------
+
+                expected = (
+                        total_samples
+                        / n_classes_me
+                )
+
+                il_me = (
+                        np.count_nonzero(
+                            p_me < expected
+                        )
+                        / n_classes_me
+                )
+
+                # -----------------------------------------------------
+                # Convert counts into P(Y).
+                # -----------------------------------------------------
+
+                p_me = (
+                        p_me
+                        / total_samples
+                )
+
+                p_ME.append(
+                    p_me
+                )
+
+                fc_ME.append(
+                    fc_me
+                )
+
+                il_ME.append(
+                    il_me
+                )
+
+            if (
+                    len(p_ME) == 1
+                    and len(il_ME) == 1
+                    and len(fc_ME) == 1
+            ):
+                return (
+                    p_ME[0],
+                    fc_ME[0],
+                    il_ME[0]
+                )
+
+            return (
+                p_ME,
+                fc_ME,
+                il_ME
+            )
 
         except Exception as e:
-           print("_get_datasets_metrics error")
-           print(f"Dataset {self.args.dataset[me]}")
-           print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+            print(
+                "_get_datasets_metrics error"
+            )
+
+            try:
+
+                print(
+                    f"Dataset "
+                    f"{self.args.dataset[me]}"
+                )
+
+            except Exception:
+                pass
+
+            print(
+                "Error on line {} {} {}".format(
+                    sys.exc_info()[-1].tb_lineno,
+                    type(e).__name__,
+                    e
+                )
+            )
 
 
 
