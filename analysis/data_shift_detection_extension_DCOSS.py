@@ -254,9 +254,9 @@ def format_shift_configuration(shift_type, experiment_id):
 
 def select_final_detection_results(df):
     """
-    Seleciona somente a última rodada disponível de cada experimento.
+    Seleciona o resultado final de cada unidade experimental.
 
-    Uma observação final é definida por:
+    A unidade experimental é:
 
         Detector
         Dataset
@@ -265,12 +265,18 @@ def select_final_detection_results(df):
         Shift Type
         Shift Configuration
 
-    Isso evita que o mesmo experimento seja contado 100 vezes,
-    uma vez para cada rodada.
+    Para cada unidade experimental, seleciona a linha correspondente
+    à maior rodada disponível.
 
-    Returns
-    -------
-    pd.DataFrame
+    IMPORTANTE
+    ----------
+    Os arquivos de detecção do MultiFedAvg+MFP contêm métricas
+    cumulativas: cada rodada representa o estado acumulado do detector
+    até aquela rodada.
+
+    Portanto, para o MFP, a linha da maior rodada é justamente o
+    resultado final do experimento e deve ser utilizada diretamente,
+    sem recalcular as métricas a partir das rodadas anteriores.
     """
 
     required_columns = [
@@ -290,11 +296,76 @@ def select_final_detection_results(df):
     ]
 
     if missing:
-
         raise ValueError(
             "Colunas obrigatórias ausentes: "
             + ", ".join(missing)
         )
+
+    if df.empty:
+        return df.copy()
+
+    df_work = df.copy()
+
+    # ============================================================
+    # 1. Normalizar Round
+    # ============================================================
+
+    df_work["Round"] = pd.to_numeric(
+        df_work["Round"],
+        errors="coerce"
+    )
+
+    # Remover linhas sem rodada válida
+    df_work = df_work[
+        df_work["Round"].notna()
+    ].copy()
+
+    if df_work.empty:
+        return df_work
+
+    # ============================================================
+    # 2. Normalizar identificadores da unidade experimental
+    # ============================================================
+
+    string_columns = [
+        "Detector",
+        "Dataset",
+        "Shift Type",
+        "Shift Configuration"
+    ]
+
+    for column in string_columns:
+        df_work[column] = (
+            df_work[column]
+            .astype(str)
+            .str.strip()
+        )
+
+    # ============================================================
+    # 3. Model e Fold ID
+    # ============================================================
+
+    # Não converter Model para string, pois os CSVs atuais utilizam
+    # o índice inteiro do modelo.
+
+    # Fold ID pode eventualmente vir como string numérica.
+    if "Fold ID" in df_work.columns:
+        fold_numeric = pd.to_numeric(
+            df_work["Fold ID"],
+            errors="coerce"
+        )
+
+        # Só substituir quando a conversão for possível.
+        mask = fold_numeric.notna()
+
+        df_work.loc[
+            mask,
+            "Fold ID"
+        ] = fold_numeric[mask]
+
+    # ============================================================
+    # 4. Unidade experimental
+    # ============================================================
 
     group_columns = [
         "Detector",
@@ -305,22 +376,100 @@ def select_final_detection_results(df):
         "Shift Configuration"
     ]
 
-    # Ordena cronologicamente
-    df_sorted = df.sort_values(
-        group_columns + ["Round"]
+    # ============================================================
+    # 5. Ordenar por rodada
+    # ============================================================
+
+    df_work = df_work.sort_values(
+        by=group_columns + ["Round"],
+        kind="mergesort"
     ).copy()
 
-    # Pega a última rodada disponível de cada experimento
+    # ============================================================
+    # 6. Selecionar somente a última rodada
+    # ============================================================
+
     df_final = (
-        df_sorted
+        df_work
         .groupby(
             group_columns,
             as_index=False,
             sort=False
         )
         .tail(1)
-        .reset_index(drop=True)
+        .copy()
     )
+
+    # ============================================================
+    # 7. Restaurar índice
+    # ============================================================
+
+    df_final.reset_index(
+        drop=True,
+        inplace=True
+    )
+
+    # ============================================================
+    # 8. DEBUG específico do MultiFedPredict
+    # ============================================================
+
+    mfp_mask = (
+        df_final["Detector"]
+        .astype(str)
+        .str.strip()
+        .eq("MultiFedAvg+MFP")
+    )
+
+    if mfp_mask.any():
+
+        print(
+            "\n"
+            + "=" * 80
+        )
+
+        print(
+            "DEBUG - RESULTADOS FINAIS DO MULTIFEDAVG+MFP"
+        )
+
+        print(
+            "=" * 80
+        )
+
+        debug_columns = [
+            "Detector",
+            "Dataset",
+            "Fold ID",
+            "Round",
+            "Model",
+            "Shift Type",
+            "Shift Configuration"
+        ]
+
+        debug_metrics = [
+            column
+            for column in [
+                "Precision",
+                "Recall",
+                "F1",
+                "Detection Delay",
+                "False Alarms"
+            ]
+            if column in df_final.columns
+        ]
+
+        print(
+            df_final.loc[
+                mfp_mask,
+                debug_columns + debug_metrics
+            ].to_string(
+                index=False
+            )
+        )
+
+        print(
+            "=" * 80
+            + "\n"
+        )
 
     return df_final
 

@@ -32,7 +32,7 @@ def download_datasets(datasets_name: list, alphas: list, num_partitions: int):
             "WISDM-W": "claudiogsc/WISDM-W",
             "ImageNet": "claudiogsc/ImageNet-15_household_objects",
             "ImageNet10": "claudiogsc/ImageNet-10_household_objects",
-            "wikitext": "claudiogsc/wikitext-Window-1-Words-3743",
+            "wikitext": "claudiogsc/wikitext-Window-10-Words-30",
             "Foursquare": "claudiogsc/foursquare-us-sequences-highlevel-40000-samples-10-seq-len-8-classes"
         }
 
@@ -73,7 +73,7 @@ def download_datasets(datasets_name: list, alphas: list, num_partitions: int):
                     dataset["train"] = (
                         dataset["train"]
                         .shuffle(seed=42)
-                        .select(range(480000))
+                        .select(range(200000))
                     )
 
                     dataset["test"] = (
@@ -89,6 +89,7 @@ def download_datasets(datasets_name: list, alphas: list, num_partitions: int):
 
     except Exception as e:
         print("load_data aa error")
+        print(dataset_name)
         print(
             """Error on line {} {} {}""".format(
                 sys.exc_info()[-1].tb_lineno,

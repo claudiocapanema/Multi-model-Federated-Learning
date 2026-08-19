@@ -1,0 +1,29 @@
+0.1_sudden
+
+python main.py --total_clients=40 --number_of_rounds=100 --strategy="MultiFedAvg" --dataset="F-MNIST" --dataset="SVHN"  --model="CNN" --model="CNN" --fraction_fit=0.375 --alpha=0.1 --alpha=0.1 --k_fold=1 --experiment_id=""
+
+python main.py --total_clients=40 --number_of_rounds=100 --strategy="MultiFedAvg+FP" --dataset="WISDM-W" --dataset="ImageNet10"  --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=0.1 --alpha=0.1 --alpha=0.1 --k_fold=5 --experiment_id="concept_drift#0.1_sudden"
+
+python main.py --total_clients=40 --number_of_rounds=100 --strategy="MultiFedAvg+FPD" --dataset="WISDM-W" --dataset="ImageNet10"  --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=0.1 --alpha=0.1 --alpha=0.1 --k_fold=5 --experiment_id="concept_drift#0.1_sudden"
+
+python main.py --total_clients=40 --number_of_rounds=100 --strategy="MultiFedAvg+MFP" --dataset="WISDM-W" --dataset="ImageNet10"  --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=0.1 --alpha=0.1 --alpha=0.1 --k_fold=5 --experiment_id="concept_drift#0.1_sudden"
+
+python main.py --total_clients=40 --number_of_rounds=100 --strategy="MultiFedAvg+MFP_v2_dh" --dataset="WISDM-W" --dataset="ImageNet10"  --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=0.1 --alpha=0.1 --alpha=0.1 --k_fold=5 --experiment_id="concept_drift#0.1_sudden"
+
+python main.py --total_clients=40 --number_of_rounds=100 --strategy="MultiFedAvg+MFP_v2_iti" --dataset="WISDM-W" --dataset="ImageNet10"  --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=0.1 --alpha=0.1 --alpha=0.1 --k_fold=5 --experiment_id="concept_drift#0.1_sudden"
+
+python main.py --total_clients=40 --number_of_rounds=100 --strategy="MultiFedAvg+MFP_v2" --dataset="WISDM-W" --dataset="ImageNet10"  --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=0.1 --alpha=0.1 --alpha=0.1 --k_fold=5 --experiment_id="concept_drift#0.1_sudden"
+
+python main.py --total_clients=40 --number_of_rounds=100 --strategy="AdaptiveFedAvg" --dataset="WISDM-W" --dataset="ImageNet10"  --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=0.1 --alpha=0.1 --alpha=0.1 --k_fold=5 --experiment_id="concept_drift#0.1_sudden"
+
+python main.py --total_clients=40 --number_of_rounds=100 --strategy="DMA-FL" --dataset="WISDM-W" --dataset="ImageNet10"  --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=0.1 --alpha=0.1 --alpha=0.1 --k_fold=5 --experiment_id="concept_drift#0.1_sudden"
+
+python main.py --total_clients=40 --number_of_rounds=100 --strategy="MultiFedAvgRR" --dataset="WISDM-W" --dataset="ImageNet10" --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=0.1 --alpha=0.1 --alpha=0.1 --k_fold=5 --experiment_id="concept_drift#0.1_sudden"
+
+
+
+
+
+
+
+python main.py --total_clients=100 --number_of_rounds=100 --strategy="MultiFedAvg" --dataset="MNIST"  --dataset="EMNIST" --dataset="F-MNIST" --dataset="SVHN" --dataset="CIFAR10" --dataset="CINIC10" --dataset="ImageNet10" --dataset="WISDM-W" --dataset="wikitext" --dataset="Foursquare"  --model="CNN" --model="CNN" --model="CNN" --model="CNN" --model="CNN" --model="CNN" --model="CNN" --model="gru" --model="lstm" --model="lstm" --fraction_fit=0.375 --alpha=0.1 --alpha=0.1 --alpha=0.1 --alpha=0.1 --alpha=0.1 --alpha=0.1 --alpha=0.1 --alpha=0.1 --alpha=0.1 --alpha=0.1 --k_fold=1 --experiment_id=""
