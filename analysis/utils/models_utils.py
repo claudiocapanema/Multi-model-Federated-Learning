@@ -86,7 +86,7 @@ def load_model(model_name, dataset, strategy, device):
             elif dataset == "ImageNet10":
                 input_shape=3
                 mid_dim=1600
-            elif dataset in ["CIFAR10", "SVHN"]:
+            elif dataset in ["CIFAR10", "SVHN", "CINIC10"]:
                 input_shape = 3
                 mid_dim = 400*4
                 logger.info("""leu cifar com {} {} {}""".format(input_shape, mid_dim, num_classes))
@@ -113,7 +113,7 @@ def load_model(model_name, dataset, strategy, device):
                 mid_dim = 16
                 return TinyImageNetCNN()
                 logger.info("""leu imagenet10 com {} {} {}""".format(input_shape, mid_dim, num_classes))
-            elif dataset in ["CIFAR10", "SVHN"]:
+            elif dataset in ["CIFAR10", "SVHN", "CINIC10"]:
                 input_shape = 3
                 mid_dim = 16
                 logger.info("""leu cifar com {} {} {}""".format(input_shape, mid_dim, num_classes))
@@ -237,6 +237,14 @@ def get_transform(dataset_name, train_test):
                                           Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
                                       "test": Compose(
                                           [ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])},
+                          "CINIC10": {"train":
+                                          Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
+                                      "test": Compose(
+                                          [ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])},
+                          "SVHN": {"train":
+                                          Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
+                                      "test": Compose(
+                                          [ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])},
                           "MNIST": Compose([ToTensor(), RandomRotation(10),
                                             Normalize([0.5], [0.5])]),
                           "EMNIST": Compose([ToTensor(), RandomRotation(10),
@@ -326,10 +334,12 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
 
                                                    self_balancing=True)
                 fds[dataset_name] = CustomFederatedDataset(
-                    dataset={"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "MNIST": "ylecun/mnist",
+                    dataset={"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "CINIC10": "flwrlabs/cinic10",
+                             "MNIST": "ylecun/mnist", "F-MNIST": "zalando-datasets/fashion_mnist", "SVHN": "ufldl-stanford/svhn",
                          "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
-                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-1-Words-3743'}[dataset_name],
+                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-1-Words-3743',
+                             "Foursquare": "claudiogsc/foursquare-us-sequences-highlevel-40000-samples-10-seq-len-8-classes"}[dataset_name],
                     partitioners={"train": partitioner},
                     seed=42
                 )
@@ -340,11 +350,12 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                                                self_balancing=True)
             print("dataset from volume")
             fd = CustomFederatedDataset(
-                dataset={"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "MNIST": "ylecun/mnist",
+                dataset={"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "CINIC10": "flwrlabs/cinic10",
+                             "MNIST": "ylecun/mnist", "F-MNIST": "zalando-datasets/fashion_mnist", "SVHN": "ufldl-stanford/svhn",
                          "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
                          , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-1-Words-3743',
-                         "Foursquare": "claudiogsc/foursquare-us-sequences-highlevel-20000-samples"}[
+                             "Foursquare": "claudiogsc/foursquare-us-sequences-highlevel-40000-samples-10-seq-len-8-classes"}[
                     dataset_name],
                 partitioners={"train": partitioner},
                 path=f"/home/gustavo/PycharmProjects/Multi-model-Federated-Learning/system/datasets/{dataset_name}",
@@ -382,7 +393,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
         partition_train = partition.select(train_idx)
         partition_test = partition.select(val_idx)
 
-        if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla", "wikitext", "Forsquare"]:
+        if dataset_name in ["CIFAR10", "CINIC10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla", "wikitext", "Forsquare"]:
             # Divide data on each node: 80% train, 20% test
 
             pytorch_transforms_train = get_transform(dataset_name, "train")
@@ -406,7 +417,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
             # logger.info("""bath key: {}""".format(batch[key]))
             return batch
 
-        if dataset_name in ["CIFAR10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla", "wikitext"]:
+        if dataset_name in ["CIFAR10", "CINIC10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla", "wikitext"]:
             partition_train = partition_train.with_transform(apply_transforms_train)
             partition_test = partition_train.with_transform(apply_transforms_test)
         elif dataset_name == "Foursquare":

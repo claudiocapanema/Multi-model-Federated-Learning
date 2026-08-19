@@ -1353,10 +1353,6 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                         "reference":
                             tau_dh[me]
                     },
-                    ps={
-                        "global": ps,
-                        "reference": 0.1
-                    },
                     data_shift_type=(
                         data_shift_type
                     ),

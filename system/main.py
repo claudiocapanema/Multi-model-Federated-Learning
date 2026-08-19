@@ -98,7 +98,7 @@ emb_dim=32
 
 def load_model(model_name, dataset, strategy, device):
     try:
-        num_classes = {'EMNIST': 47, 'MNIST': 10, 'F-MNIST': 10, 'CIFAR10': 10, 'SVHN': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'Tiny-ImageNet': 200,
+        num_classes = {'EMNIST': 47, 'MNIST': 10, 'F-MNIST': 10, 'CIFAR10': 10, "CINIC10": 10, 'SVHN': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'Tiny-ImageNet': 200,
          'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 3743, "Foursquare": 10}[dataset]
         out_channel = 32
         if model_name == 'CNN':
@@ -124,7 +124,7 @@ def load_model(model_name, dataset, strategy, device):
                 input_shape = 3
                 mid_dim = 1600
                 # return TinyImageNetCNN()
-            elif dataset in ["CIFAR10", "SVHN"]:
+            elif dataset in ["CIFAR10", "SVHN", "CINIC10"]:
                 input_shape = 3
                 mid_dim = 400*4
                 logger.info("""leu cifar com {} {} {}""".format(input_shape, mid_dim, num_classes))
@@ -150,7 +150,7 @@ def load_model(model_name, dataset, strategy, device):
                 input_shape = 3
                 mid_dim = 16
                 logger.info("""leu imagenet10 com {} {} {}""".format(input_shape, mid_dim, num_classes))
-            elif dataset in ["CIFAR10", "SVHN"]:
+            elif dataset in ["CIFAR10", "SVHN", "CINIC10"]:
                 input_shape = 3
                 mid_dim = 16
                 logger.info("""leu cifar com {} {} {}""".format(input_shape, mid_dim, num_classes))

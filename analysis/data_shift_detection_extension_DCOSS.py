@@ -926,6 +926,20 @@ def table_detection_quality(
                 f"\n{filename}"
             )
 
+def normalize_configuration_for_table(configuration):
+    if pd.isna(configuration):
+        return configuration
+
+    configuration = str(configuration)
+
+    if "#" in configuration:
+        configuration = configuration.split("#", 1)[1]
+
+    if configuration.endswith("_sudden"):
+        configuration = configuration[:-len("_sudden")]
+
+    return configuration
+
 def table_detection_quality_combined(
     df,
     write_path,
@@ -1075,94 +1089,105 @@ def table_detection_quality_combined(
     # FUNÇÃO AUXILIAR
     # ============================================================
 
-    def format_configuration(
-        shift_type,
-        configuration
-    ):
-        configuration = str(
-            configuration
-        ).strip()
+    def format_configuration(shift_type, config):
+        """
+        Format the shift configuration for LaTeX tables.
 
-        # --------------------------------------------------------
-        # Concept Drift
-        # --------------------------------------------------------
+        The formatting is normalized across all detectors so that
+        equivalent representations of Label Shift / Concept Drift
+        produce the same LaTeX output.
+        """
 
-        if shift_type.lower() == "concept":
+        # ---------------------------------------------------------
+        # Normalize shift type
+        # ---------------------------------------------------------
+        shift_type_normalized = str(shift_type).strip().lower()
+        shift_type_normalized = (
+            shift_type_normalized
+            .replace("_", " ")
+            .replace("-", " ")
+        )
 
-            try:
+        # ---------------------------------------------------------
+        # Normalize configuration
+        # ---------------------------------------------------------
+        config = str(config).strip()
 
-                alpha = float(
-                    configuration
-                )
-
-                if alpha.is_integer():
-
-                    return (
-                        rf"$\alpha={int(alpha)}$"
-                    )
-
-                return (
-                    rf"$\alpha={alpha:g}$"
-                )
-
-            except (
-                ValueError,
-                TypeError
-            ):
-
-                return configuration.replace(
-                    "_",
-                    r"\_"
-                )
-
-        # --------------------------------------------------------
+        # ---------------------------------------------------------
         # Label Shift
-        # --------------------------------------------------------
+        # ---------------------------------------------------------
+        if shift_type_normalized in {
+            "label",
+            "label shift",
+        }:
+            # Expected format:
+            #     alpha1->alpha2
+            #
+            # Examples:
+            #     0.1->1.0
+            #     1.0->0.1
+            #
+            # Convert to:
+            #     $0.1 \rightarrow 1.0$
 
-        if shift_type.lower() == "label":
-
-            normalized = (
-                configuration
-                .replace("→", "->")
-                .replace("=>", "->")
-                .replace(" to ", "->")
-                .replace("TO", "->")
-            )
-
-            if "->" in normalized:
-
-                parts = normalized.split(
-                    "->"
-                )
+            if "->" in config:
+                parts = config.split("->", 1)
 
                 if len(parts) == 2:
+                    before = parts[0].strip()
+                    after = parts[1].strip()
 
-                    try:
+                    return (
+                        f"${before} \\rightarrow {after}$"
+                    )
 
-                        alpha_before = float(
-                            parts[0].strip()
-                        )
+            # If the configuration does not contain the expected
+            # transition notation, preserve it while escaping
+            # LaTeX-sensitive underscores.
+            return config.replace("_", "\\_")
 
-                        alpha_after = float(
-                            parts[1].strip()
-                        )
+        # ---------------------------------------------------------
+        # Concept Drift
+        # ---------------------------------------------------------
+        if shift_type_normalized in {
+            "concept",
+            "concept drift",
+        }:
+            # Preserve the existing concept-drift representation.
+            #
+            # Expected examples may contain:
+            #     0.1->1.0
+            #     1.0->0.1
+            #
+            # and should be displayed as:
+            #     $0.1 \rightarrow 1.0$
 
-                        return (
-                            rf"${alpha_before:g}"
-                            rf"\rightarrow "
-                            rf"{alpha_after:g}$"
-                        )
+            if "->" in config:
+                parts = config.split("->", 1)
 
-                    except (
-                        ValueError,
-                        TypeError
-                    ):
-                        pass
+                if len(parts) == 2:
+                    before = parts[0].strip()
+                    after = parts[1].strip()
 
-        return configuration.replace(
-            "_",
-            r"\_"
-        )
+                    return (
+                        f"${before} \\rightarrow {after}$"
+                    )
+
+            return config.replace("_", "\\_")
+
+        # ---------------------------------------------------------
+        # Combined Shift
+        # ---------------------------------------------------------
+        if shift_type_normalized in {
+            "combined",
+            "combined shift",
+        }:
+            return config.replace("_", "\\_")
+
+        # ---------------------------------------------------------
+        # Generic fallback
+        # ---------------------------------------------------------
+        return config.replace("_", "\\_")
 
     # ============================================================
     # FUNÇÃO PARA CALCULAR MÉTRICAS
@@ -1371,43 +1396,30 @@ def table_detection_quality_combined(
     # ============================================================
 
     def generate_latex_table(
-        df_table,
-        filename,
-        caption,
-        label,
-        column_format
+            df_table,
+            filename,
+            caption,
+            label,
+            column_format
     ):
+
+        # ------------------------------------------------------------
+        # Normalizar Configuration somente quando essa coluna existir.
+        #
+        # A tabela by_configuration possui essa coluna.
+        # A tabela by_shift_type não possui.
+        # ------------------------------------------------------------
+        if "Configuration" in df_table.columns:
+            df_table["Configuration"] = (
+                df_table["Configuration"].apply(
+                    normalize_configuration_for_table
+                )
+            )
 
         latex = df_table.to_latex(
             escape=False,
             column_format=column_format,
             index_names=False
-        )
-
-        latex_complete = f"""
-\\begin{{table*}}[t]
-\\centering
-\\caption{{{caption}}}
-\\label{{{label}}}
-\\resizebox{{\\textwidth}}{{!}}{{%
-{latex}
-}}
-\\end{{table*}}
-"""
-
-        with open(
-            filename,
-            "w",
-            encoding="utf-8"
-        ) as f:
-
-            f.write(
-                latex_complete
-            )
-
-        print(
-            f"\nTabela salva:"
-            f"\n{filename}"
         )
 
     # ============================================================

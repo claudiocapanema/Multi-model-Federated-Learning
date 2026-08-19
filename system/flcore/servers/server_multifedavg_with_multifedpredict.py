@@ -221,12 +221,13 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
             self.dataset = self.args.dataset
 
-            self.shift_type = (
-                "Label"
-                if "label_shift"
-                   in self.args.experiment_id
-                else "Concept"
-            )
+            if "label_shift" in self.args.experiment_id:
+                self.shift_type = "LABEL_SHIFT"
+            elif "concept_drift" in  self.args.experiment_id:
+                self.shift_type = "CONCEPT_DRIFT"
+            else:
+                self.shift_type = "NO_SHIFT"
+
 
             self.shift_configuration = (
                 self.args.experiment_id

@@ -24,6 +24,7 @@ def download_datasets(datasets_name: list, alphas: list, num_partitions: int):
         dataset_paths = {
             "EMNIST": "claudiogsc/emnist_balanced",
             "CIFAR10": "uoft-cs/cifar10",
+            "CINIC10": "flwrlabs/cinic10",
             "MNIST": "ylecun/mnist",
             "F-MNIST": "zalando-datasets/fashion_mnist",
             "GTSRB": "claudiogsc/GTSRB",
