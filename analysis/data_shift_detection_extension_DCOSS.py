@@ -803,6 +803,15 @@ def table_detection_quality(
     # 2. Tipos de shift
     # ------------------------------------------------------------
 
+    # ------------------------------------------------------------
+    # Padronizar nomes dos tipos de shift para a tabela
+    # ------------------------------------------------------------
+    if "Shift Type" in df_final.columns:
+        df_final["Shift Type"] = (
+            df_final["Shift Type"]
+            .apply(normalize_shift_type_for_table)
+        )
+
     shift_types = sorted(
         df_final["Shift Type"]
         .dropna()
@@ -1037,7 +1046,6 @@ def table_detection_quality(
             )
 
             metric_label = metric
-
             latex_complete = f"""
 \\begin{{table}}[t]
 \\centering
@@ -1047,7 +1055,8 @@ def table_detection_quality(
 {latex}
 }}
 \\end{{table}}
-"""
+""".replace(" "
+            "Concept ", " Concept drift ").replace(" Label ", " Label shift ")
 
             # ====================================================
             # 11. Salvar
@@ -1088,6 +1097,34 @@ def normalize_configuration_for_table(configuration):
         configuration = configuration[:-len("_sudden")]
 
     return configuration
+
+def normalize_shift_type_for_table(shift_type):
+    """
+    Padroniza os nomes dos tipos de data shift
+    exclusivamente para apresentação nas tabelas.
+    """
+
+    if pd.isna(shift_type):
+        return shift_type
+
+    shift_type = str(shift_type).strip()
+
+    normalized = {
+        "Concept": "Concept Drift",
+        "Concept Drift": "Concept Drift",
+        "CONCEPT": "Concept Drift",
+        "CONCEPT_DRIFT": "Concept Drift",
+
+        "Label": "Label Shift",
+        "Label Shift": "Label Shift",
+        "LABEL": "Label Shift",
+        "LABEL_SHIFT": "Label Shift",
+    }
+
+    return normalized.get(
+        shift_type,
+        shift_type
+    )
 
 def table_detection_quality_combined(
     df,
@@ -1551,7 +1588,6 @@ def table_detection_quality_combined(
             label,
             column_format
     ):
-
         # ------------------------------------------------------------
         # Normalizar Configuration somente quando essa coluna existir.
         #
@@ -1565,11 +1601,58 @@ def table_detection_quality_combined(
                 )
             )
 
+        # ------------------------------------------------------------
+        # Gerar conteúdo LaTeX
+        # ------------------------------------------------------------
         latex = df_table.to_latex(
             escape=False,
             column_format=column_format,
             index_names=False
         )
+
+        # ------------------------------------------------------------
+        # Adicionar caption e label
+        # ------------------------------------------------------------
+        latex = (
+            "\\begin{table}[htbp]\n"
+            "\\centering\n"
+            f"\\caption{{{caption}}}\n"
+            f"\\label{{{label}}}\n"
+            f"{latex}"
+            "\\end{table}\n"
+        ).replace(" Concept &", " Concept drift &").replace(" Label &", " Label shift &").replace(" Concept Drift &", " Concept drift &").replace(" Label Shift &", " Label shift &")
+
+        # ------------------------------------------------------------
+        # Garantir que o diretório exista
+        # ------------------------------------------------------------
+        output_dir = os.path.dirname(
+            os.path.abspath(filename)
+        )
+
+        if output_dir:
+            os.makedirs(
+                output_dir,
+                exist_ok=True
+            )
+
+        # ------------------------------------------------------------
+        # Salvar arquivo
+        # ------------------------------------------------------------
+        with open(
+                filename,
+                "w",
+                encoding="utf-8"
+        ) as f:
+            f.write(latex)
+
+        # ------------------------------------------------------------
+        # Confirmar salvamento
+        # ------------------------------------------------------------
+        print(
+            f"LaTeX table saved to: {filename}"
+        )
+
+        return latex
 
     # ============================================================
     # TABELA 1
@@ -1898,10 +1981,12 @@ def table_detection_quality_combined(
         ]
 
         filename_detailed = (
-            f"{write_path}/"
+            f"{write_path}"
             "latex_table_detection_quality_"
             "by_configuration.tex"
         )
+
+        print("salvar: ", filename_detailed)
 
         generate_latex_table(
             df_table=df_detailed,
@@ -2186,10 +2271,12 @@ def table_detection_quality_combined(
         ]
 
         filename_aggregated = (
-            f"{write_path}/"
+            f"{write_path}"
             "latex_table_detection_quality_"
             "by_shift_type.tex"
         )
+
+        print("salvar 2: ", filename_aggregated)
 
         generate_latex_table(
             df_table=df_aggregated,
@@ -2317,8 +2404,8 @@ def table_per_dataset(df, write_path, metric, solutions_order, ci=0.95):
             escape=False,
             column_format="l" + "c" * len(alphas),
             index_names=False
-        ).replace("MFP\_v2\_dh", "$\\textit{MFP}_{\\textit{DDH}}$").replace("MFP\_v2\_iti", "$\\textit{MFP}_{\\textit{ITI}}$").replace("MFP\_v2", "$\\textit{MFP}$")
-
+        ).replace("MFP\_v2\_dh", "$\\textit{MFP}_{\\textit{DDH}}$").replace("MFP\_v2\_iti", "$\\textit{MFP}_{\\textit{ITI}}$").replace("MFP\_v2", "$\\textit{MFP}$").replace(" Concept ", " Concept drift ").replace(" Label ", " Label shift ")
+        print("Latexx: ", latex)
         latex_complete = f"""
         \\begin{{table}}[t]
         \\centering
@@ -2328,7 +2415,7 @@ def table_per_dataset(df, write_path, metric, solutions_order, ci=0.95):
         {latex}
         }}
         \\end{{table}}
-        """
+        """.replace(" Concept ", " Concept drift ").replace(" Label ", " Label shift ")
 
         filename = f"{write_path}/latex_table_concept_dirft_{dataset}_{metric.replace(' ','_')}.tex".replace("_(%)", "")
 
