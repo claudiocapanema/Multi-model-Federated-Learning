@@ -254,29 +254,11 @@ def format_shift_configuration(shift_type, experiment_id):
 
 def select_final_detection_results(df):
     """
-    Seleciona o resultado final de cada unidade experimental.
+    Select only the final round of each experimental unit.
 
-    A unidade experimental é:
-
-        Detector
-        Dataset
-        Fold ID
-        Model
-        Shift Type
-        Shift Configuration
-
-    Para cada unidade experimental, seleciona a linha correspondente
-    à maior rodada disponível.
-
-    IMPORTANTE
-    ----------
-    Os arquivos de detecção do MultiFedAvg+MFP contêm métricas
-    cumulativas: cada rodada representa o estado acumulado do detector
-    até aquela rodada.
-
-    Portanto, para o MFP, a linha da maior rodada é justamente o
-    resultado final do experimento e deve ser utilizada diretamente,
-    sem recalcular as métricas a partir das rodadas anteriores.
+    Experimental unit:
+        Detector × Dataset × Fold ID × Model
+        × Shift Type × Shift Configuration
     """
 
     required_columns = [
@@ -286,18 +268,17 @@ def select_final_detection_results(df):
         "Round",
         "Model",
         "Shift Type",
-        "Shift Configuration"
+        "Shift Configuration",
     ]
 
     missing = [
-        col
-        for col in required_columns
+        col for col in required_columns
         if col not in df.columns
     ]
 
     if missing:
         raise ValueError(
-            "Colunas obrigatórias ausentes: "
+            "Missing required columns: "
             + ", ".join(missing)
         )
 
@@ -306,66 +287,48 @@ def select_final_detection_results(df):
 
     df_work = df.copy()
 
-    # ============================================================
-    # 1. Normalizar Round
-    # ============================================================
+    # ------------------------------------------------------------
+    # Normalize Round
+    # ------------------------------------------------------------
 
     df_work["Round"] = pd.to_numeric(
         df_work["Round"],
         errors="coerce"
     )
 
-    # Remover linhas sem rodada válida
     df_work = df_work[
         df_work["Round"].notna()
     ].copy()
 
-    if df_work.empty:
-        return df_work
+    # ------------------------------------------------------------
+    # Normalize identifiers
+    # ------------------------------------------------------------
 
-    # ============================================================
-    # 2. Normalizar identificadores da unidade experimental
-    # ============================================================
-
-    string_columns = [
+    for column in [
         "Detector",
         "Dataset",
         "Shift Type",
-        "Shift Configuration"
-    ]
-
-    for column in string_columns:
+        "Shift Configuration",
+    ]:
         df_work[column] = (
             df_work[column]
             .astype(str)
             .str.strip()
         )
 
-    # ============================================================
-    # 3. Model e Fold ID
-    # ============================================================
+    df_work["Fold ID"] = pd.to_numeric(
+        df_work["Fold ID"],
+        errors="coerce"
+    )
 
-    # Não converter Model para string, pois os CSVs atuais utilizam
-    # o índice inteiro do modelo.
+    df_work["Model"] = pd.to_numeric(
+        df_work["Model"],
+        errors="coerce"
+    )
 
-    # Fold ID pode eventualmente vir como string numérica.
-    if "Fold ID" in df_work.columns:
-        fold_numeric = pd.to_numeric(
-            df_work["Fold ID"],
-            errors="coerce"
-        )
-
-        # Só substituir quando a conversão for possível.
-        mask = fold_numeric.notna()
-
-        df_work.loc[
-            mask,
-            "Fold ID"
-        ] = fold_numeric[mask]
-
-    # ============================================================
-    # 4. Unidade experimental
-    # ============================================================
+    # ------------------------------------------------------------
+    # Experimental unit
+    # ------------------------------------------------------------
 
     group_columns = [
         "Detector",
@@ -373,103 +336,86 @@ def select_final_detection_results(df):
         "Fold ID",
         "Model",
         "Shift Type",
-        "Shift Configuration"
+        "Shift Configuration",
     ]
 
-    # ============================================================
-    # 5. Ordenar por rodada
-    # ============================================================
+    # ------------------------------------------------------------
+    # Find maximum round for each experimental unit
+    # ------------------------------------------------------------
 
-    df_work = df_work.sort_values(
-        by=group_columns + ["Round"],
-        kind="mergesort"
-    ).copy()
-
-    # ============================================================
-    # 6. Selecionar somente a última rodada
-    # ============================================================
-
-    df_final = (
+    max_round = (
         df_work
         .groupby(
             group_columns,
-            as_index=False,
-            sort=False
-        )
-        .tail(1)
-        .copy()
+            dropna=False
+        )["Round"]
+        .transform("max")
     )
 
-    # ============================================================
-    # 7. Restaurar índice
-    # ============================================================
+    # ------------------------------------------------------------
+    # Keep only final round
+    # ------------------------------------------------------------
+
+    df_final = df_work[
+        df_work["Round"] == max_round
+    ].copy()
+
+    # ------------------------------------------------------------
+    # Safety check
+    # ------------------------------------------------------------
+
+    duplicated_units = (
+        df_final
+        .duplicated(
+            subset=group_columns,
+            keep=False
+        )
+    )
+
+    if duplicated_units.any():
+
+        print(
+            "\nWARNING: multiple rows remain "
+            "for some experimental units."
+        )
+
+        print(
+            df_final.loc[
+                duplicated_units,
+                group_columns + ["Round"]
+            ].sort_values(
+                group_columns
+            ).to_string(index=False)
+        )
 
     df_final.reset_index(
         drop=True,
         inplace=True
     )
 
-    # ============================================================
-    # 8. DEBUG específico do MultiFedPredict
-    # ============================================================
+    # ------------------------------------------------------------
+    # Debug
+    # ------------------------------------------------------------
 
-    mfp_mask = (
-        df_final["Detector"]
-        .astype(str)
-        .str.strip()
-        .eq("MultiFedAvg+MFP")
+    print("\n" + "=" * 90)
+    print("FINAL EXPERIMENTAL UNITS")
+    print("=" * 90)
+
+    print(
+        df_final[
+            group_columns + ["Round"]
+        ].to_string(index=False)
     )
 
-    if mfp_mask.any():
+    print("\nRows per detector:")
+    print(
+        df_final["Detector"]
+        .value_counts()
+        .sort_index()
+        .to_string()
+    )
 
-        print(
-            "\n"
-            + "=" * 80
-        )
-
-        print(
-            "DEBUG - RESULTADOS FINAIS DO MULTIFEDAVG+MFP"
-        )
-
-        print(
-            "=" * 80
-        )
-
-        debug_columns = [
-            "Detector",
-            "Dataset",
-            "Fold ID",
-            "Round",
-            "Model",
-            "Shift Type",
-            "Shift Configuration"
-        ]
-
-        debug_metrics = [
-            column
-            for column in [
-                "Precision",
-                "Recall",
-                "F1",
-                "Detection Delay",
-                "False Alarms"
-            ]
-            if column in df_final.columns
-        ]
-
-        print(
-            df_final.loc[
-                mfp_mask,
-                debug_columns + debug_metrics
-            ].to_string(
-                index=False
-            )
-        )
-
-        print(
-            "=" * 80
-            + "\n"
-        )
+    print("=" * 90)
 
     return df_final
 
@@ -782,6 +728,69 @@ def table_detection_quality(
     df_final = select_final_detection_results(
         df
     )
+
+    print("\n" + "=" * 100)
+    print("DEBUG - AFTER select_final_detection_results()")
+    print("=" * 100)
+
+    print("df_all rows:  ", len(df_all))
+    print("df_final rows:", len(df_final))
+
+    print("\nRows by detector:")
+    print(
+        df_final["Detector"]
+        .value_counts()
+        .sort_index()
+    )
+
+    print("\nRows by detector and shift type:")
+    print(
+        df_final
+        .groupby(["Detector", "Shift Type"])
+        .size()
+        .to_string()
+    )
+
+    print("\nRows by detector / dataset / model / shift:")
+    print(
+        df_final
+        .groupby(
+            [
+                "Detector",
+                "Dataset",
+                "Model",
+                "Shift Type",
+                "Shift Configuration"
+            ]
+        )
+        .size()
+        .to_string()
+    )
+
+    print("\nSelected rounds:")
+    print(
+        df_final[
+            [
+                "Detector",
+                "Dataset",
+                "Model",
+                "Shift Type",
+                "Shift Configuration",
+                "Round"
+            ]
+        ]
+        .sort_values(
+            [
+                "Detector",
+                "Shift Type",
+                "Dataset",
+                "Model"
+            ]
+        )
+        .to_string(index=False)
+    )
+
+    print("=" * 100)
 
     print("\nResultados finais selecionados:")
 
@@ -1425,7 +1434,7 @@ def generate_latex_table(
             latex
         )
 
-def table_detection_quality_combined(
+def table_detection_quality_by_shift_type(
     df_final,
     write_path,
     solutions,
@@ -1434,18 +1443,13 @@ def table_detection_quality_combined(
     ci=0.95,
 ):
     """
-    Generate the combined detection-quality table.
+    Generate the overall detection-quality table aggregated by shift type.
 
-    Grouping:
-        Shift Type × Configuration
-
-    The comparison is performed independently for:
-
-        Concept drift
-        Label shift
+    Aggregation:
+        Shift Type × Detector
 
     For each:
-        Shift Type × Configuration × Metric
+        Shift Type × Metric
 
     the best mean is identified according to the metric direction.
 
@@ -1474,11 +1478,8 @@ def table_detection_quality_combined(
         Best interval = [0.44, 0.56]
 
         0.50 -> bold
+        0.48 -> bold
         0.30 -> normal
-        0.18 -> normal
-        0.21 -> normal
-
-    Concept drift and Label shift are always evaluated independently.
     """
 
     # ============================================================
@@ -1488,19 +1489,15 @@ def table_detection_quality_combined(
     df_final = df_final.copy()
 
     if df_final.empty:
-
         print(
             "\nWARNING: "
-            "table_detection_quality_combined received "
+            "table_detection_quality_by_shift_type received "
             "an empty dataframe."
         )
-
         return
 
     # ============================================================
     # 2. NORMALIZE SHIFT TYPE
-    #
-    # This MUST happen BEFORE grouping.
     # ============================================================
 
     df_final["Shift Type"] = (
@@ -1509,668 +1506,363 @@ def table_detection_quality_combined(
     )
 
     # ============================================================
-    # 3. NORMALIZE CONFIGURATION
-    #
-    # This MUST happen BEFORE grouping.
+    # 3. KEEP ONLY VALID SHIFT TYPES
     # ============================================================
 
-    df_final["Shift Configuration"] = (
-        df_final["Shift Configuration"]
-        .apply(
-            lambda value:
-                format_configuration(
-                    None,
-                    value
-                )
-        )
-    )
-
-    # ============================================================
-    # 4. REMOVE INVALID SHIFT TYPES
-    # ============================================================
+    valid_shift_types = [
+        "Concept drift",
+        "Label shift",
+    ]
 
     df_final = df_final[
-        df_final["Shift Type"].isin(
-            [
-                "Concept drift",
-                "Label shift",
-            ]
-        )
+        df_final["Shift Type"].isin(valid_shift_types)
     ].copy()
 
     if df_final.empty:
-
         raise RuntimeError(
-            "No valid Concept drift or Label shift "
-            "records remain after normalization."
+            "No valid Concept drift or Label shift records "
+            "remain after normalization."
         )
 
     # ============================================================
-    # 5. DEBUG CANONICAL DATA
+    # 4. FIXED SHIFT TYPE ORDER
     # ============================================================
-
-    print(
-        "\n"
-        + "=" * 90
-    )
-
-    print(
-        "DEBUG - CANONICAL DATA USED BY "
-        "TABLE_DETECTION_QUALITY_COMBINED"
-    )
-
-    print(
-        "=" * 90
-    )
-
-    debug_groups = (
-        df_final[
-            [
-                "Shift Type",
-                "Shift Configuration",
-                "Detector",
-            ]
-        ]
-        .drop_duplicates()
-        .sort_values(
-            [
-                "Shift Type",
-                "Shift Configuration",
-                "Detector",
-            ]
-        )
-    )
-
-    print(
-        debug_groups.to_string(
-            index=False
-        )
-    )
-
-    print(
-        "\nRows by Shift Type:"
-    )
-
-    print(
-        df_final[
-            "Shift Type"
-        ]
-        .value_counts()
-        .to_string()
-    )
-
-    print(
-        "\nConfigurations by Shift Type:"
-    )
-
-    for current_shift_type in [
-        "Concept drift",
-        "Label shift",
-    ]:
-
-        configs = (
-            df_final.loc[
-                df_final["Shift Type"]
-                == current_shift_type,
-                "Shift Configuration",
-            ]
-            .dropna()
-            .unique()
-            .tolist()
-        )
-
-        print(
-            f"  {current_shift_type}: "
-            f"{configs}"
-        )
-
-    print(
-        "=" * 90
-        + "\n"
-    )
-
-    # ============================================================
-    # 6. INITIALIZE TABLE
-    # ============================================================
-
-    detailed_rows = []
-
-    # ============================================================
-    # 7. FIXED SHIFT TYPE ORDER
-    #
-    # This guarantees Concept drift appears before Label shift.
-    # ============================================================
-
-    shift_types = [
-        "Concept drift",
-        "Label shift",
-    ]
 
     shift_types = [
         shift_type
-        for shift_type in shift_types
-        if shift_type in
-        df_final["Shift Type"].unique()
+        for shift_type in valid_shift_types
+        if shift_type in df_final["Shift Type"].unique()
     ]
 
     # ============================================================
-    # 8. PROCESS EACH SHIFT TYPE
+    # 5. CALCULATE AGGREGATED METRICS
     # ============================================================
+
+    rows_raw = {}
 
     for shift_type in shift_types:
 
         df_shift = df_final[
-            df_final["Shift Type"]
-            == shift_type
+            df_final["Shift Type"] == shift_type
         ].copy()
 
         if df_shift.empty:
             continue
 
-        # ========================================================
-        # 9. GET CONFIGURATIONS
-        # ========================================================
+        rows_raw[shift_type] = {}
 
-        configurations = (
-            df_shift[
-                "Shift Configuration"
-            ]
-            .dropna()
-            .unique()
-            .tolist()
-        )
+        for solution in solutions:
 
-        # --------------------------------------------------------
-        # Configuration sorting
-        # --------------------------------------------------------
-
-        def configuration_sort_key(
-            value
-        ):
-
-            value = str(
-                value
-            ).strip()
-
-            # --------------------------------------------
-            # Label shift: 0.1-1.0
-            # --------------------------------------------
-
-            if "-" in value:
-
-                try:
-
-                    parts = value.split(
-                        "-",
-                        1
-                    )
-
-                    return (
-                        0,
-                        float(parts[0]),
-                        float(parts[1]),
-                    )
-
-                except (
-                    ValueError,
-                    TypeError
-                ):
-
-                    pass
-
-            # --------------------------------------------
-            # Concept drift: 0.1
-            # --------------------------------------------
-
-            try:
-
-                return (
-                    0,
-                    float(value),
-                    0.0,
-                )
-
-            except (
-                ValueError,
-                TypeError
-            ):
-
-                return (
-                    1,
-                    value,
-                    0.0,
-                )
-
-        configurations = sorted(
-            configurations,
-            key=configuration_sort_key
-        )
-
-        # ========================================================
-        # 10. PROCESS EACH CONFIGURATION
-        # ========================================================
-
-        for configuration in configurations:
-
-            df_config = df_shift[
-                df_shift[
-                    "Shift Configuration"
-                ]
-                == configuration
+            df_solution = df_shift[
+                df_shift["Detector"] == solution
             ].copy()
 
-            if df_config.empty:
+            if df_solution.empty:
                 continue
 
-            # ====================================================
-            # 11. CALCULATE RAW METRICS
-            # ====================================================
-
-            rows_raw = {}
-
-            for solution in solutions:
-
-                df_solution = df_config[
-                    df_config["Detector"]
-                    == solution
-                ]
-
-                if df_solution.empty:
-                    continue
-
-                rows_raw[
-                    solution
-                ] = {}
-
-                for metric in metrics:
-
-                    # ------------------------------------------------
-                    # Metric existence
-                    # ------------------------------------------------
-
-                    if (
-                        metric
-                        !=
-                        "Undetected Shift Rate"
-                        and
-                        metric
-                        not in
-                        df_solution.columns
-                    ):
-
-                        rows_raw[
-                            solution
-                        ][metric] = {
-                            "mean": np.nan,
-                            "ci": np.nan,
-                            "bold": False,
-                        }
-
-                        continue
-
-                    # ------------------------------------------------
-                    # Calculate metric
-                    # ------------------------------------------------
-
-                    mean_value, ci_value = (
-                        calculate_detection_metric(
-                            df_solution,
-                            metric,
-                            ci=ci
-                        )
-                    )
-
-                    rows_raw[
-                        solution
-                    ][metric] = {
-                        "mean": mean_value,
-                        "ci": ci_value,
-                        "bold": False,
-                    }
-
-            # ====================================================
-            # 12. DETERMINE BOLD VALUES
-            # ====================================================
+            rows_raw[shift_type][solution] = {}
 
             for metric in metrics:
 
-                valid_solutions = []
-
                 # ------------------------------------------------
-                # Collect valid methods
+                # Metric existence
                 # ------------------------------------------------
 
-                for solution in solutions:
-
-                    if solution not in rows_raw:
-                        continue
-
-                    if metric not in rows_raw[
-                        solution
-                    ]:
-                        continue
-
-                    mean_value = rows_raw[
-                        solution
-                    ][metric]["mean"]
-
-                    if pd.isna(mean_value):
-                        continue
-
-                    valid_solutions.append(
-                        solution
-                    )
-
-                if not valid_solutions:
+                if (
+                    metric != "Undetected Shift Rate"
+                    and metric not in df_solution.columns
+                ):
+                    rows_raw[shift_type][solution][metric] = {
+                        "mean": np.nan,
+                        "ci": np.nan,
+                        "bold": False,
+                    }
                     continue
 
                 # ------------------------------------------------
-                # Determine metric direction
+                # Calculate metric
                 # ------------------------------------------------
 
-                higher_is_better = (
-                    metric
-                    in
-                    higher_is_better_metrics
+                mean_value, ci_value = (
+                    calculate_detection_metric(
+                        df_solution,
+                        metric,
+                        ci=ci,
+                    )
                 )
 
-                # ------------------------------------------------
-                # Find BEST MEAN
-                # ------------------------------------------------
+                rows_raw[shift_type][solution][metric] = {
+                    "mean": mean_value,
+                    "ci": ci_value,
+                    "bold": False,
+                }
 
-                if higher_is_better:
+    # ============================================================
+    # 6. DETERMINE BOLD VALUES
+    # ============================================================
 
-                    best_solution = max(
-                        valid_solutions,
-                        key=lambda solution:
-                            rows_raw[
-                                solution
-                            ][metric]["mean"]
-                    )
+    for shift_type in shift_types:
 
-                else:
+        if shift_type not in rows_raw:
+            continue
 
-                    best_solution = min(
-                        valid_solutions,
-                        key=lambda solution:
-                            rows_raw[
-                                solution
-                            ][metric]["mean"]
-                    )
+        for metric in metrics:
 
-                best_mean = rows_raw[
-                    best_solution
-                ][metric]["mean"]
+            valid_solutions = []
 
-                best_ci = rows_raw[
-                    best_solution
-                ][metric]["ci"]
+            # ----------------------------------------------------
+            # Collect valid methods
+            # ----------------------------------------------------
 
-                # ------------------------------------------------
-                # Safety
-                # ------------------------------------------------
+            for solution in solutions:
 
-                if pd.isna(best_mean):
+                if solution not in rows_raw[shift_type]:
                     continue
 
-                # ------------------------------------------------
-                # If CI unavailable:
-                # only exact best mean is bold.
-                # ------------------------------------------------
+                if metric not in rows_raw[
+                    shift_type
+                ][solution]:
+                    continue
 
-                if pd.isna(best_ci):
+                mean_value = rows_raw[
+                    shift_type
+                ][solution][metric]["mean"]
 
-                    for solution in valid_solutions:
+                if pd.isna(mean_value):
+                    continue
 
-                        mean_value = rows_raw[
-                            solution
-                        ][metric]["mean"]
+                valid_solutions.append(solution)
 
+            if not valid_solutions:
+                continue
+
+            # ----------------------------------------------------
+            # Determine metric direction
+            # ----------------------------------------------------
+
+            higher_is_better = (
+                metric in higher_is_better_metrics
+            )
+
+            # ----------------------------------------------------
+            # Find BEST MEAN
+            # ----------------------------------------------------
+
+            if higher_is_better:
+
+                best_solution = max(
+                    valid_solutions,
+                    key=lambda solution:
                         rows_raw[
-                            solution
-                        ][metric]["bold"] = (
-                            np.isclose(
-                                mean_value,
-                                best_mean,
-                                rtol=1e-12,
-                                atol=1e-12,
-                            )
-                        )
-
-                    continue
-
-                # ------------------------------------------------
-                # BEST METHOD CI
-                # ------------------------------------------------
-
-                best_lower = (
-                    best_mean
-                    - best_ci
+                            shift_type
+                        ][solution][metric]["mean"]
                 )
 
-                best_upper = (
-                    best_mean
-                    + best_ci
+            else:
+
+                best_solution = min(
+                    valid_solutions,
+                    key=lambda solution:
+                        rows_raw[
+                            shift_type
+                        ][solution][metric]["mean"]
                 )
 
-                # ------------------------------------------------
-                # DEBUG
-                # ------------------------------------------------
+            best_mean = rows_raw[
+                shift_type
+            ][best_solution][metric]["mean"]
 
-                print(
-                    f"\nShift Type: {shift_type}"
-                )
+            best_ci = rows_raw[
+                shift_type
+            ][best_solution][metric]["ci"]
 
-                print(
-                    f"Configuration: "
-                    f"{configuration}"
-                )
+            # ----------------------------------------------------
+            # Safety
+            # ----------------------------------------------------
 
-                print(
-                    f"Metric: {metric}"
-                )
+            if pd.isna(best_mean):
+                continue
 
-                print(
-                    f"Best solution: "
-                    f"{best_solution}"
-                )
+            # ----------------------------------------------------
+            # If CI unavailable:
+            # only exact best mean is bold.
+            # ----------------------------------------------------
 
-                print(
-                    f"Best mean: "
-                    f"{best_mean:.6f}"
-                )
-
-                print(
-                    f"Best CI: "
-                    f"{best_ci:.6f}"
-                )
-
-                print(
-                    f"Best interval: "
-                    f"[{best_lower:.6f}, "
-                    f"{best_upper:.6f}]"
-                )
-
-                # ------------------------------------------------
-                # FINAL BOLD RULE
-                #
-                # Compare ONLY the competing MEAN against
-                # the BEST METHOD'S confidence interval.
-                # ------------------------------------------------
+            if pd.isna(best_ci):
 
                 for solution in valid_solutions:
 
                     mean_value = rows_raw[
-                        solution
-                    ][metric]["mean"]
-
-                    is_bold = (
-                        best_lower
-                        <= mean_value
-                        <= best_upper
-                    )
+                        shift_type
+                    ][solution][metric]["mean"]
 
                     rows_raw[
-                        solution
-                    ][metric]["bold"] = bool(
-                        is_bold
+                        shift_type
+                    ][solution][metric]["bold"] = (
+                        np.isclose(
+                            mean_value,
+                            best_mean,
+                            rtol=1e-12,
+                            atol=1e-12,
+                        )
                     )
 
-                    print(
-                        f"    {solution}: "
-                        f"mean={mean_value:.6f}, "
-                        f"bold={is_bold}"
-                    )
+                continue
 
-            # ====================================================
-            # 13. BUILD FINAL ROWS
-            # ====================================================
+            # ----------------------------------------------------
+            # BEST METHOD CI
+            # ----------------------------------------------------
 
-            for solution in solutions:
+            best_lower = (
+                best_mean - best_ci
+            )
 
-                if solution not in rows_raw:
-                    continue
+            best_upper = (
+                best_mean + best_ci
+            )
 
-                safe_solution = (
-                    solution.replace(
-                        "_",
-                        r"\_"
-                    )
+            # ----------------------------------------------------
+            # FINAL BOLD RULE
+            #
+            # Compare ONLY the competing MEAN against
+            # the BEST METHOD'S confidence interval.
+            # ----------------------------------------------------
+
+            for solution in valid_solutions:
+
+                mean_value = rows_raw[
+                    shift_type
+                ][solution][metric]["mean"]
+
+                is_bold = (
+                    best_lower
+                    <= mean_value
+                    <= best_upper
                 )
 
-                row = {
-                    "Shift Type":
-                        shift_type,
+                rows_raw[
+                    shift_type
+                ][solution][metric]["bold"] = bool(
+                    is_bold
+                )
 
-                    "Configuration":
-                        format_configuration(
-                            shift_type,
-                            configuration
-                        ),
+    # ============================================================
+    # 7. BUILD FINAL TABLE
+    # ============================================================
 
-                    "Detector":
-                        safe_solution,
-                }
+    table_rows = []
 
-                # =================================================
-                # Metrics
-                # =================================================
+    for shift_type in shift_types:
 
-                for metric in metrics:
+        if shift_type not in rows_raw:
+            continue
 
-                    if metric not in rows_raw[
-                        solution
-                    ]:
+        for solution in solutions:
 
-                        row[
-                            metric
-                        ] = "--"
+            if solution not in rows_raw[shift_type]:
+                continue
 
-                        continue
+            safe_solution = solution.replace(
+                "_",
+                r"\_"
+            )
 
-                    mean_value = rows_raw[
-                        solution
-                    ][metric]["mean"]
+            row = {
+                "Shift Type": shift_type,
+                "Detector": safe_solution,
+            }
 
-                    ci_value = rows_raw[
-                        solution
-                    ][metric]["ci"]
+            for metric in metrics:
 
-                    is_bold = rows_raw[
-                        solution
-                    ][metric].get(
-                        "bold",
-                        False
-                    )
+                if metric not in rows_raw[
+                    shift_type
+                ][solution]:
 
-                    # ---------------------------------------------
-                    # N/A
-                    # ---------------------------------------------
+                    row[metric] = "--"
+                    continue
 
-                    if pd.isna(
-                        mean_value
-                    ):
+                mean_value = rows_raw[
+                    shift_type
+                ][solution][metric]["mean"]
 
-                        if (
-                            metric
-                            ==
-                            "Detection Delay"
-                        ):
+                ci_value = rows_raw[
+                    shift_type
+                ][solution][metric]["ci"]
 
-                            value_str = "N/A"
+                is_bold = rows_raw[
+                    shift_type
+                ][solution][metric].get(
+                    "bold",
+                    False,
+                )
 
-                        else:
+                # ------------------------------------------------
+                # N/A
+                # ------------------------------------------------
 
-                            value_str = "--"
+                if pd.isna(mean_value):
+
+                    if metric == "Detection Delay":
+                        value_str = "N/A"
+                    else:
+                        value_str = "--"
+
+                else:
+
+                    # ------------------------------------------------
+                    # Mean ± CI
+                    # ------------------------------------------------
+
+                    if pd.isna(ci_value):
+
+                        value_str = (
+                            f"{mean_value:.2f}"
+                        )
 
                     else:
 
-                        # -----------------------------------------
-                        # Mean ± CI
-                        # -----------------------------------------
+                        value_str = (
+                            f"{mean_value:.2f}"
+                            f"$\\pm$"
+                            f"{ci_value:.2f}"
+                        )
 
-                        if pd.isna(
-                            ci_value
-                        ):
+                    # ------------------------------------------------
+                    # Bold
+                    # ------------------------------------------------
 
-                            value_str = (
-                                f"{mean_value:.2f}"
-                            )
+                    if is_bold:
 
-                        else:
+                        value_str = (
+                            "\\textbf{"
+                            + value_str
+                            + "}"
+                        )
 
-                            value_str = (
-                                f"{mean_value:.2f}"
-                                f"$\\pm$"
-                                f"{ci_value:.2f}"
-                            )
+                row[metric] = value_str
 
-                        # -----------------------------------------
-                        # Bold
-                        # -----------------------------------------
-
-                        if is_bold:
-
-                            value_str = (
-                                "\\textbf{"
-                                + value_str
-                                + "}"
-                            )
-
-                    row[
-                        metric
-                    ] = value_str
-
-                detailed_rows.append(
-                    row
-                )
+            table_rows.append(row)
 
     # ============================================================
-    # 14. SAFETY CHECK
+    # 8. SAFETY CHECK
     # ============================================================
 
-    if not detailed_rows:
-
+    if not table_rows:
         raise RuntimeError(
             "No rows were generated for the "
-            "detection-quality table."
+            "detection-quality-by-shift-type table."
         )
 
     # ============================================================
-    # 15. CREATE DATAFRAME
+    # 9. CREATE DATAFRAME
     # ============================================================
 
-    df_detailed = pd.DataFrame(
-        detailed_rows
+    df_table = pd.DataFrame(
+        table_rows
     )
-
-    # ============================================================
-    # 16. FORCE EXPECTED COLUMN ORDER
-    # ============================================================
 
     latex_columns = [
         "Shift Type",
-        "Configuration",
         "Detector",
         "Precision",
         "Recall",
@@ -2180,77 +1872,46 @@ def table_detection_quality_combined(
         "False Alarms",
     ]
 
-    df_detailed = df_detailed[
+    df_table = df_table[
         latex_columns
     ]
 
     # ============================================================
-    # 17. FINAL DEBUG
+    # 10. GENERATE LATEX
     # ============================================================
 
-    print(
-        "\n"
-        + "=" * 90
-    )
-
-    print(
-        "FINAL DETECTION QUALITY TABLE"
-    )
-
-    print(
-        "=" * 90
-    )
-
-    print(
-        df_detailed.to_string(
-            index=True
-        )
-    )
-
-    print(
-        "=" * 90
-        + "\n"
-    )
-
-    # ============================================================
-    # 18. GENERATE LATEX
-    # ============================================================
-
-    filename_detailed = (
+    filename = (
         f"{write_path}"
         "latex_table_detection_quality_"
-        "by_configuration.tex"
+        "by_shift_type.tex"
     )
 
     generate_latex_table(
-        df_table=df_detailed,
-        filename=filename_detailed,
+        df_table=df_table,
+        filename=filename,
         caption=(
-            "Quantitative comparison of "
-            "data-shift detection quality "
-            "under different shift "
-            "configurations. Values are "
-            "reported as mean $\\pm$ 95\\% "
-            "confidence interval across "
-            "datasets, models, and folds."
+            "Overall comparison of data-shift "
+            "detection quality by shift type. "
+            "Values are reported as mean "
+            "$\\pm$ 95\\% confidence interval "
+            "across datasets, models, folds, "
+            "and shift configurations."
         ),
         label=(
             "tab:detection_quality_"
-            "by_configuration"
+            "by_shift_type"
         ),
         column_format=(
-            "lll"
+            "ll"
             + "c" * len(metrics)
         ),
     )
 
     print(
-        "\nTabela salva em:"
+        "\nTabela by shift type salva em:"
     )
 
-    print(
-        filename_detailed
-    )
+    print(filename)
 
 def table_per_dataset(df, write_path, metric, solutions_order, ci=0.95):
 
@@ -2883,8 +2544,99 @@ if __name__ == "__main__":
         "F1",
     }
 
-    table_detection_quality_combined(
-        df_final=df_all,
+    print("\n" + "=" * 100)
+    print("VALIDAÇÃO DOS CSVs UTILIZADOS NA TABELA")
+    print("=" * 100)
+
+    for detector in solutions:
+
+        detector_df = df_all[
+            df_all["Detector"] == detector
+            ].copy()
+
+        print(f"\nDetector: {detector}")
+
+        if detector_df.empty:
+            print("  *** NENHUM DADO CARREGADO ***")
+            continue
+
+        print(f"  Número de linhas: {len(detector_df)}")
+        print(f"  Datasets: {detector_df['Dataset'].unique()}")
+        print(f"  Models: {detector_df['Model'].unique()}")
+        print(f"  Shift Types: {detector_df['Shift Type'].unique()}")
+        print(f"  Configurations: {detector_df['Shift Configuration'].unique()}")
+        print(f"  Rounds: {detector_df['Round'].min()} -> {detector_df['Round'].max()}")
+
+    # ============================================================
+    # SELECIONAR SOMENTE A ÚLTIMA RODADA DE CADA UNIDADE EXPERIMENTAL
+    # ============================================================
+
+    df_final = select_final_detection_results(
+        df_all
+    )
+
+    print("\n" + "=" * 100)
+    print("VALIDAÇÃO - DADOS FINAIS USADOS NA TABELA")
+    print("=" * 100)
+
+    print(f"Total de linhas originais: {len(df_all)}")
+    print(f"Total de linhas finais:   {len(df_final)}")
+
+    print("\nLinhas por detector:")
+    print(
+        df_final["Detector"]
+        .value_counts()
+        .sort_index()
+        .to_string()
+    )
+
+    print("\nLinhas por detector e tipo de shift:")
+    print(
+        df_final
+        .groupby(
+            ["Detector", "Shift Type"]
+        )
+        .size()
+        .to_string()
+    )
+
+    print("\nRodadas selecionadas:")
+    print(
+        df_final[
+            [
+                "Detector",
+                "Dataset",
+                "Fold ID",
+                "Model",
+                "Shift Type",
+                "Shift Configuration",
+                "Round",
+                "Precision",
+                "Recall",
+                "F1",
+                "Detection Delay",
+                "False Alarms",
+            ]
+        ]
+        .sort_values(
+            [
+                "Detector",
+                "Shift Type",
+                "Dataset",
+                "Model",
+            ]
+        )
+        .to_string(index=False)
+    )
+
+    print("=" * 100)
+
+    # ============================================================
+    # GERAR TABELA COM OS DADOS FINAIS
+    # ============================================================
+
+    table_detection_quality_by_shift_type(
+        df_final=df_final,
         write_path=write_path,
         solutions=solutions,
         metrics=metrics,
