@@ -246,10 +246,19 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
     def set_clients(self):
 
         try:
+
+            # ============================================================
+            # Shift detector state
+            # ============================================================
+
             self.data_shift_type = {
                 me: "NO_SHIFT"
                 for me in range(self.ME)
             }
+
+            # ============================================================
+            # Client-level concept-drift information
+            # ============================================================
 
             self.drift_clients = {
                 me: 0
@@ -261,12 +270,30 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 for me in range(self.ME)
             }
 
+            self.max_cd = {
+                me: 0.0
+                for me in range(self.ME)
+            }
+
+            # Threshold for classifying an individual client
+            # as showing concept-drift evidence.
+
+            self.cd_client_threshold = 0.15
+
+            # Fraction of participating clients that must show
+            # concept-drift evidence.
+
+            self.cd_drift_rate_threshold = 0.20
+
+            # ============================================================
+            # Shift history
+            # ============================================================
+
             self.shift_rounds = {
                 me: []
                 for me in range(self.ME)
             }
 
-            # Histórico (usado para métricas)
             self.shift_detected = {
                 me: []
                 for me in range(self.ME)
@@ -292,36 +319,30 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 for me in range(self.ME)
             }
 
-            # ===============================
-            # Novos atributos
-            # ===============================
+            # ============================================================
+            # Detector state
+            # ============================================================
 
-            # Estado do detector na rodada anterior
             self.previous_detector_state = {
                 me: "NO_SHIFT"
                 for me in range(self.ME)
             }
 
-            # Evento ocorrido na rodada corrente
             self.detection_event = {
                 me: 0
                 for me in range(self.ME)
             }
 
-            # Primeira ocorrência de qualquer data shift no campo
-            # "Data shift" do CSV normal do MultiFedPredict.
             self.first_data_shift_round = {
                 me: None
                 for me in range(self.ME)
             }
 
-            # Rodadas de falso alarme
             self.false_alarm_rounds = {
                 me: []
                 for me in range(self.ME)
             }
 
-            # Primeira detecção correta
             self.true_detection_round = {
                 me: None
                 for me in range(self.ME)
@@ -332,24 +353,167 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 for me in range(self.ME)
             }
 
-            client_class = ClientMultiFedAvgWithMultiFedPredict
+            # ============================================================
+            # Existing shift information
+            # ============================================================
+
+            self.data_shift_model = -1
+
+            self.data_shift_round = {
+                me: -1
+                for me in range(self.ME)
+            }
+
+            # ============================================================
+            # Model-level metric containers
+            # ============================================================
+
+            self.fc = {
+                me: 0.0
+                for me in range(self.ME)
+            }
+
+            self.il = {
+                me: 0.0
+                for me in range(self.ME)
+            }
+
+            self.ps = {
+                me: 0.0
+                for me in range(self.ME)
+            }
+
+            self.ls = {
+                me: 0.0
+                for me in range(self.ME)
+            }
+
+            self.cd = {
+                me: 0.0
+                for me in range(self.ME)
+            }
+
+            self.similarity = {
+                me: 1.0
+                for me in range(self.ME)
+            }
+
+            self.heterogeneity_degree = {
+                me: 0.0
+                for me in range(self.ME)
+            }
+
+            # ============================================================
+            # Temporal histories
+            # ============================================================
+
+            self.fc_list = {
+                me: []
+                for me in range(self.ME)
+            }
+
+            self.il_list = {
+                me: []
+                for me in range(self.ME)
+            }
+
+            self.ps_list = {
+                me: []
+                for me in range(self.ME)
+            }
+
+            self.ls_list = {
+                me: []
+                for me in range(self.ME)
+            }
+
+            self.cd_list = {
+                me: []
+                for me in range(self.ME)
+            }
+
+            self.similarity_list = {
+                me: []
+                for me in range(self.ME)
+            }
+
+            self.heterogeneity_degree_list = {
+                me: []
+                for me in range(self.ME)
+            }
+
+            # ============================================================
+            # IMPORTANT:
+            # Create clients before using self.clients_ids.
+            # ============================================================
+
+            client_class = (
+                ClientMultiFedAvgWithMultiFedPredict
+            )
+
             for i in range(self.total_clients):
-                client = client_class(self.args,
-                                      id=i,
-                                      model=copy.deepcopy(self.global_model),
-                                      fold_id=self.fold_id)
-                self.clients.append(client)
+                client = client_class(
+                    self.args,
+                    id=i,
+                    model=copy.deepcopy(
+                        self.global_model
+                    ),
+                    fold_id=self.fold_id
+                )
 
-            self.clients_ids = [i.client_id for i in self.clients]
-            self.clients_ids_uniform_selection = [i for i in copy.deepcopy(self.clients_ids)]
+                self.clients.append(
+                    client
+                )
 
-            # Ground-truth shift rounds come from the same client-side
-            # configuration used by FedConD.
+            # ============================================================
+            # Client IDs
+            # ============================================================
+
+            self.clients_ids = [
+                client.client_id
+                for client in self.clients
+            ]
+
+            self.clients_ids_uniform_selection = [
+                client_id
+                for client_id
+                in copy.deepcopy(
+                    self.clients_ids
+                )
+            ]
+
+            # ============================================================
+            # Client-level metric containers
+            # ============================================================
+
+            self.client_metrics = {
+                client_id: {
+                    me: {}
+                    for me in range(self.ME)
+                }
+                for client_id in self.clients_ids
+            }
+
+            self.selected_clients_m = [
+                []
+                for me in range(self.ME)
+            ]
+
+            # ============================================================
+            # Ground-truth shift rounds
+            #
+            # These come from the same configuration used by the
+            # client-side detector.
+            # ============================================================
+
             if len(self.clients) > 0:
 
                 for me in range(self.ME):
 
-                    if me in self.clients[0].data_shift_config:
+                    if (
+                            me
+                            in self.clients[0].data_shift_config
+                    ):
                         self.shift_rounds[me] = (
                             self.clients[0]
                             .data_shift_config[me]
@@ -357,8 +521,23 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                         )
 
         except Exception as e:
-            print("set_clients error")
-            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
+            print(
+                "set_clients error"
+            )
+
+            print(
+                "Error on line {} {} {}".format(
+                    sys.exc_info()[-1].tb_lineno,
+                    type(e).__name__,
+                    e
+                )
+            )
+
+            # Do not silently continue with a partially
+            # initialized server.
+
+            raise
 
     # original
     def aggregate_fit(
@@ -514,14 +693,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             # Shift-detection CSVs
             # ============================================================
 
-            self._save_shift_detection_metrics(
-                server_round
-            )
-
-            self._save_shift_detection_curve(
-                server_round
-            )
-
             print(
                 "finalizou aggregated fit"
             )
@@ -578,6 +749,21 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
             cd_list = {
                 me: []
+                for me in range(self.ME)
+            }
+
+            drift_client_ids = {
+                me: []
+                for me in range(self.ME)
+            }
+
+            drift_client_scores = {
+                me: []
+                for me in range(self.ME)
+            }
+
+            num_participating_clients = {
+                me: 0
                 for me in range(self.ME)
             }
 
@@ -677,6 +863,21 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                         1.0
                     )
                 )
+
+                # ========================================================
+                # Client-level concept-drift evidence
+                # ========================================================
+
+                num_participating_clients[me] += 1
+
+                drift_client_scores[me].append(
+                    cd
+                )
+
+                if cd >= self.cd_client_threshold:
+                    drift_client_ids[me].append(
+                        client_id
+                    )
 
                 # ========================================================
                 # Client metric history
@@ -836,6 +1037,53 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     )
                 )
 
+                # ========================================================
+                # Client-level CD statistics
+                # ========================================================
+
+                self.drift_clients[me] = len(
+                    drift_client_ids[me]
+                )
+
+                if num_participating_clients[me] > 0:
+
+                    self.drift_rate[me] = round(
+                        self.drift_clients[me]
+                        / num_participating_clients[me],
+                        3
+                    )
+
+                else:
+
+                    self.drift_rate[me] = 0.0
+
+                # ========================================================
+                # Maximum client-level CD score
+                # ========================================================
+
+                if len(drift_client_scores[me]) > 0:
+
+                    self.max_cd[me] = round(
+                        float(
+                            np.max(
+                                drift_client_scores[me]
+                            )
+                        ),
+                        3
+                    )
+
+                else:
+
+                    self.max_cd[me] = 0.0
+
+                # ========================================================
+                # Historical drift rate
+                # ========================================================
+
+                self.drift_rate_history[me].append(
+                    self.drift_rate[me]
+                )
+
                 self.similarity[me] = (
                     self._weighted_average(
                         similarity_list[me],
@@ -976,6 +1224,14 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
             print(
                 f"df: {self.df}"
+            )
+
+            self._save_shift_detection_metrics(
+                server_round
+            )
+
+            self._save_shift_detection_curve(
+                server_round
             )
 
             return (
@@ -1409,7 +1665,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
             ls_threshold = 0.10
 
-            cd_threshold = 0.15
+            cd_threshold = 0.1
 
             # ============================================================
             # Classify current round

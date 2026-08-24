@@ -326,30 +326,25 @@ def detect_concept_drift(
         key="image",
         label_offset_a=0,
         label_offset_b=0,
-        max_samples_per_class=256,
-        n_projections=8,
+        max_samples_per_class=512,
+        n_projections=16,
         min_samples_per_class=20,
         random_seed=42,
-        projection_alpha=0.01,
-        min_significant_projections=2
+        projection_alpha=0.05,
+        min_significant_projections=1
 ):
     """
     Detect Concept Drift by comparing P(X | Y) between two
     local training windows.
 
-    The detector is explicitly conditioned on the class label.
-    Therefore, changes in P(Y) alone should not be classified as
+    Concept Drift is characterized by a change in P(X | Y),
+    while a change in P(Y) alone should not be considered
     Concept Drift.
 
-    A class is considered to exhibit Concept Drift only when a
-    sufficient number of independent random projections provide
-    statistically significant evidence of a distributional change.
-
-    This is intentionally more conservative than simply taking
-    the maximum KS statistic across projections. The previous
-    implementation could classify sampling variability as Concept
-    Drift because a single projection with a relatively large KS
-    statistic was sufficient.
+    The KS statistic is used as the main measure of the
+    magnitude of the distributional change. Statistical
+    significance is used as supporting evidence, rather
+    than as a hard gate.
 
     Returns
     -------
@@ -368,7 +363,8 @@ def detect_concept_drift(
             key=key,
             n_classes=n_classes,
             label_offset=label_offset_a,
-            max_samples_per_class=max_samples_per_class
+            max_samples_per_class=max_samples_per_class,
+            random_seed=random_seed
         )
 
         features_b = _extract_class_conditional_features(
@@ -376,14 +372,15 @@ def detect_concept_drift(
             key=key,
             n_classes=n_classes,
             label_offset=label_offset_b,
-            max_samples_per_class=max_samples_per_class
+            max_samples_per_class=max_samples_per_class,
+            random_seed=random_seed + 7919
         )
 
         class_scores = []
         class_weights = []
 
         # ============================================================
-        # Compare P(X | Y) independently for every class
+        # Compare P(X | Y) for every class
         # ============================================================
 
         for class_id in range(n_classes):
@@ -392,11 +389,10 @@ def detect_concept_drift(
             xb = features_b[class_id]
 
             # --------------------------------------------------------
-            # A class must be represented in BOTH windows.
+            # A class must be represented in both windows.
             #
-            # If a class disappears because of a change in P(Y),
-            # this is label-shift evidence, not concept-drift
-            # evidence.
+            # This avoids interpreting a change in P(Y) as Concept
+            # Drift.
             # --------------------------------------------------------
 
             if (
@@ -420,11 +416,11 @@ def detect_concept_drift(
                 continue
 
             # ========================================================
-            # Deterministic random projections
+            # Random projections
             # ========================================================
 
             rng = np.random.RandomState(
-                random_seed + class_id
+                random_seed + 1009 * class_id
             )
 
             projections = rng.normal(
@@ -434,7 +430,9 @@ def detect_concept_drift(
                     n_projections,
                     feature_dim
                 )
-            ).astype(np.float32)
+            ).astype(
+                np.float32
+            )
 
             projection_norms = np.linalg.norm(
                 projections,
@@ -461,11 +459,11 @@ def detect_concept_drift(
             )
 
             # ========================================================
-            # KS tests over projections
+            # KS tests
             # ========================================================
 
-            projection_statistics = []
-            significant_statistics = []
+            ks_statistics = []
+            p_values = []
 
             for projection_id in range(
                     n_projections
@@ -482,10 +480,7 @@ def detect_concept_drift(
                 ]
 
                 # ----------------------------------------------------
-                # Common normalization.
-                #
-                # KS is invariant to a common monotonic scaling, but
-                # this improves numerical stability.
+                # Normalize both distributions using a common scale.
                 # ----------------------------------------------------
 
                 combined = np.concatenate(
@@ -515,10 +510,15 @@ def detect_concept_drift(
 
                 statistic, p_value = ks_2samp(
                     values_a,
-                    values_b
+                    values_b,
+                    alternative="two-sided",
+                    mode="auto"
                 )
 
                 if not np.isfinite(statistic):
+                    continue
+
+                if not np.isfinite(p_value):
                     continue
 
                 statistic = float(
@@ -529,69 +529,145 @@ def detect_concept_drift(
                     )
                 )
 
-                projection_statistics.append(
-                    statistic
-                )
-
-                # ----------------------------------------------------
-                # IMPORTANT:
-                #
-                # A single significant projection is not enough.
-                #
-                # This prevents random sampling variability from
-                # producing Concept Drift.
-                # ----------------------------------------------------
-
-                if (
-                        np.isfinite(p_value)
-                        and p_value < projection_alpha
-                ):
-                    significant_statistics.append(
-                        statistic
-                    )
-
-            # ========================================================
-            # No valid projections
-            # ========================================================
-
-            if len(projection_statistics) == 0:
-                continue
-
-            # ========================================================
-            # Require consistent statistical evidence
-            # ========================================================
-
-            if (
-                    len(significant_statistics)
-                    < min_significant_projections
-            ):
-                class_score = 0.0
-
-            else:
-                # ----------------------------------------------------
-                # Use the mean of the significant projections rather
-                # than the maximum.
-                #
-                # This is deliberately conservative.
-                # ----------------------------------------------------
-
-                class_score = float(
-                    np.mean(
-                        significant_statistics
-                    )
-                )
-
-            class_scores.append(
-                float(
+                p_value = float(
                     np.clip(
-                        class_score,
+                        p_value,
                         0.0,
                         1.0
                     )
                 )
+
+                ks_statistics.append(
+                    statistic
+                )
+
+                p_values.append(
+                    p_value
+                )
+
+            # --------------------------------------------------------
+            # No valid projections
+            # --------------------------------------------------------
+
+            if len(ks_statistics) == 0:
+                continue
+
+            ks_statistics = np.asarray(
+                ks_statistics,
+                dtype=float
             )
 
-            # Weight classes by the amount of paired evidence.
+            p_values = np.asarray(
+                p_values,
+                dtype=float
+            )
+
+            # ========================================================
+            # Statistical evidence
+            # ========================================================
+
+            significant_mask = (
+                p_values < projection_alpha
+            )
+
+            n_significant = int(
+                np.sum(
+                    significant_mask
+                )
+            )
+
+            statistically_significant = (
+                n_significant
+                >= min_significant_projections
+            )
+
+            # ========================================================
+            # Distributional magnitude
+            # ========================================================
+
+            max_ks = float(
+                np.max(
+                    ks_statistics
+                )
+            )
+
+            mean_ks = float(
+                np.mean(
+                    ks_statistics
+                )
+            )
+
+            median_ks = float(
+                np.median(
+                    ks_statistics
+                )
+            )
+
+            # --------------------------------------------------------
+            # Average of the strongest 25% of projections.
+            # --------------------------------------------------------
+
+            top_k = max(
+                1,
+                int(
+                    np.ceil(
+                        0.25
+                        * len(
+                            ks_statistics
+                        )
+                    )
+                )
+            )
+
+            strongest_ks = float(
+                np.mean(
+                    np.sort(
+                        ks_statistics
+                    )[-top_k:]
+                )
+            )
+
+            # ========================================================
+            # Class-level Concept Drift score
+            # ========================================================
+            #
+            # The KS magnitude is the main evidence.
+            #
+            # Statistical significance is used only as a confidence
+            # factor. Therefore, a real distributional displacement
+            # with small samples is not automatically reduced to zero.
+            # ========================================================
+
+            class_score = (
+                0.50 * max_ks
+                + 0.30 * strongest_ks
+                + 0.20 * mean_ks
+            )
+
+            # --------------------------------------------------------
+            # If there is statistical evidence, keep the full score.
+            #
+            # Otherwise retain 75% of the magnitude-based score.
+            # This is intentionally sensitive to moderate changes
+            # when the sample size is small.
+            # --------------------------------------------------------
+
+            if not statistically_significant:
+                class_score *= 0.75
+
+            class_score = float(
+                np.clip(
+                    class_score,
+                    0.0,
+                    1.0
+                )
+            )
+
+            class_scores.append(
+                class_score
+            )
+
+            # Weight by the amount of paired evidence.
             class_weights.append(
                 float(
                     min(
@@ -601,11 +677,34 @@ def detect_concept_drift(
                 )
             )
 
+            # ========================================================
+            # Diagnostic information
+            # ========================================================
+
+            print(
+                f"[CD CLASS] "
+                f"class={class_id} "
+                f"nA={len(xa)} "
+                f"nB={len(xb)} "
+                f"significant={n_significant}/"
+                f"{len(ks_statistics)} "
+                f"maxKS={max_ks:.4f} "
+                f"meanKS={mean_ks:.4f} "
+                f"medianKS={median_ks:.4f} "
+                f"topKS={strongest_ks:.4f} "
+                f"score={class_score:.4f}"
+            )
+
         # ============================================================
-        # No class had enough paired observations
+        # No class has enough paired observations
         # ============================================================
 
         if len(class_scores) == 0:
+            print(
+                "[CD SCORE] "
+                "no classes with sufficient paired samples"
+            )
+
             return 0.0
 
         class_scores = np.asarray(
@@ -619,7 +718,7 @@ def detect_concept_drift(
         )
 
         # ============================================================
-        # Weighted mean class-conditional drift
+        # Weighted mean class-level drift
         # ============================================================
 
         weight_sum = np.sum(
@@ -627,6 +726,7 @@ def detect_concept_drift(
         )
 
         if weight_sum <= 0:
+
             weighted_mean = float(
                 np.mean(
                     class_scores
@@ -634,6 +734,7 @@ def detect_concept_drift(
             )
 
         else:
+
             weighted_mean = float(
                 np.sum(
                     class_scores
@@ -643,9 +744,7 @@ def detect_concept_drift(
             )
 
         # ============================================================
-        # Maximum class drift
-        #
-        # A strong drift in only one class should still be visible.
+        # Strongest class
         # ============================================================
 
         maximum = float(
@@ -655,21 +754,33 @@ def detect_concept_drift(
         )
 
         # ============================================================
-        # Final CD score
+        # Final Concept Drift score
+        #
+        # A strong change in a single class must remain visible.
         # ============================================================
 
         cd_score = (
-            0.5 * maximum
-            + 0.5 * weighted_mean
+            0.60 * maximum
+            + 0.40 * weighted_mean
         )
 
-        return float(
+        cd_score = float(
             np.clip(
                 cd_score,
                 0.0,
                 1.0
             )
         )
+
+        print(
+            f"[CD SCORE] "
+            f"classes={len(class_scores)} "
+            f"max={maximum:.4f} "
+            f"mean={weighted_mean:.4f} "
+            f"CD={cd_score:.4f}"
+        )
+
+        return cd_score
 
     except Exception as e:
 
@@ -686,56 +797,6 @@ def detect_concept_drift(
         )
 
         return 0.0
-
-
-
-
-def compare_loaders(loader_a, loader_b, key="image"):
-
-    X1, y1 = extract_from_loader(loader_a, key)
-    X2, y2 = extract_from_loader(loader_b, key)
-
-    print("\nSamples:", len(y1), len(y2))
-
-    # -------------------------------------------------
-    # LABEL SHIFT
-    # -------------------------------------------------
-
-    stat, p = detect_label_shift(y1, y2)
-
-    print("\nLabel shift test")
-    print("chi2:", stat)
-    print("p-value:", p)
-
-    label_shift = p < 0.05
-
-    # -------------------------------------------------
-    # CONCEPT DRIFT
-    # -------------------------------------------------
-
-    concept_drift, results = detect_concept_drift(X1, y1, X2, y2)
-
-    print("\nConcept drift per class")
-
-    for c, (stat, p) in results.items():
-
-        print(f"class {c}: KS={stat:.4f} p={p:.4f}")
-
-    # -------------------------------------------------
-    # RESULTADO FINAL
-    # -------------------------------------------------
-
-    if label_shift:
-        result = "LABEL_SHIFT"
-    elif concept_drift:
-        result = "CONCEPT_DRIFT"
-    else:
-        result = "NO_SHIFT"
-
-    print("\nRESULT:", result)
-
-    return result
-
 
 class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
     def __init__(self, args, id, model, fold_id):
@@ -1003,37 +1064,31 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 )
 
                 cd = detect_concept_drift(
-                    loader_a=(
-                        cd_reference_loader
-                    ),
-                    loader_b=(
-                        self.trainloader[me]
-                    ),
-                    n_classes=(
-                        self.n_classes[me]
-                    ),
+                    loader_a=cd_reference_loader,
+                    loader_b=self.trainloader[me],
+                    n_classes=self.n_classes[me],
                     key=input_key,
-                    max_samples_per_class=256,
-                    n_projections=8,
+                    max_samples_per_class=512,
+                    n_projections=16,
                     min_samples_per_class=20,
                     random_seed=(
                             42
                             + self.client_id
                             + 1000 * me
                     ),
-                    projection_alpha=0.01,
-                    min_significant_projections=2
+                    projection_alpha=0.05,
+                    min_significant_projections=1
                 )
 
-            cd = float(
-                np.clip(
-                    cd,
-                    0.0,
-                    1.0
+                cd = float(
+                    np.clip(
+                        cd,
+                        0.0,
+                        1.0
+                    )
                 )
-            )
 
-            self.cd_score[me] = cd
+                self.cd_score[me] = cd
 
             # ============================================================
             # PS
@@ -1110,6 +1165,19 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                     f"LS={ls:.6f} "
                     f"CD={cd:.6f}"
                 )
+
+            print(
+                f"[CLIENT CD] "
+                f"round={t} "
+                f"client={self.client_id} "
+                f"model={me} "
+                f"CD={cd:.6f} "
+                f"max_samples_per_class=256 "
+                f"n_projections=8 "
+                f"min_samples_per_class=20 "
+                f"alpha=0.01 "
+                f"min_significant_projections=2"
+            )
 
             return (
                 parameters,

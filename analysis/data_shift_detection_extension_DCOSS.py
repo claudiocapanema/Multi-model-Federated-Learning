@@ -951,17 +951,18 @@ def table_detection_quality(
                     solution
                 ]["ci"]
 
-                lower = mean_val - ci_val
-                upper = mean_val + ci_val
+                for solution in valid_solutions:
+                    mean_val = rows_raw[
+                        solution
+                    ]["mean"]
 
-                overlap = not (
-                    upper < best_lower
-                    or lower > best_upper
-                )
-
-                rows_raw[
-                    solution
-                ]["bold"] = overlap
+                    rows_raw[
+                        solution
+                    ]["bold"] = (
+                            best_lower
+                            <= mean_val
+                            <= best_upper
+                    )
 
             # ====================================================
             # 9. Construir DataFrame da tabela
@@ -1126,547 +1127,535 @@ def normalize_shift_type_for_table(shift_type):
         shift_type
     )
 
-def table_detection_quality_combined(
-    df,
-    write_path,
-    solutions_order,
-    ci=0.95
+def format_configuration(shift_type, configuration):
+    """
+    Normalize a shift configuration for the final table.
+
+    Examples
+    --------
+    Concept drift:
+        concept_drift#0.1_sudden -> 0.1
+        0.1                     -> 0.1
+
+    Label shift:
+        label_shift#0.1-1.0_sudden -> 0.1-1.0
+        0.1-1.0                   -> 0.1-1.0
+
+    The function intentionally returns ONLY the configuration
+    values, because the table should display:
+
+        Concept drift | 0.1
+        Label shift   | 0.1-1.0
+    """
+
+    if pd.isna(configuration):
+        return "N/A"
+
+    configuration = str(
+        configuration
+    ).strip()
+
+    # ------------------------------------------------------------
+    # Remove experiment prefix
+    #
+    # concept_drift#0.1_sudden
+    #        -> 0.1_sudden
+    #
+    # label_shift#0.1-1.0_sudden
+    #        -> 0.1-1.0_sudden
+    # ------------------------------------------------------------
+
+    if "#" in configuration:
+
+        configuration = configuration.split(
+            "#",
+            1
+        )[1]
+
+    # ------------------------------------------------------------
+    # Remove temporal suffix
+    #
+    # 0.1_sudden
+    #        -> 0.1
+    #
+    # 0.1-1.0_sudden
+    #        -> 0.1-1.0
+    # ------------------------------------------------------------
+
+    if "_" in configuration:
+
+        configuration = configuration.split(
+            "_",
+            1
+        )[0]
+
+    configuration = configuration.strip()
+
+    # ------------------------------------------------------------
+    # Normalize numeric representation
+    #
+    # 0.10 -> 0.1
+    # 1.00 -> 1
+    # ------------------------------------------------------------
+
+    if "-" in configuration:
+
+        parts = configuration.split(
+            "-",
+            1
+        )
+
+        try:
+
+            first = float(
+                parts[0]
+            )
+
+            second = float(
+                parts[1]
+            )
+
+            return (
+                f"{first:g}-{second:g}"
+            )
+
+        except (
+            ValueError,
+            TypeError
+        ):
+
+            pass
+
+    else:
+
+        try:
+
+            value = float(
+                configuration
+            )
+
+            return f"{value:g}"
+
+        except (
+            ValueError,
+            TypeError
+        ):
+
+            pass
+
+    # ------------------------------------------------------------
+    # Fallback
+    # ------------------------------------------------------------
+
+    return configuration.replace(
+        "_",
+        r"\_"
+    )
+
+def format_shift_type(shift_type):
+    """
+    Normalize all representations of shift type.
+
+    Concept-drift representations:
+        CONCEPT_DRIFT
+        concept_drift
+        Concept
+        Concept Drift
+
+    become:
+
+        Concept drift
+
+    Label-shift representations:
+        LABEL_SHIFT
+        label_shift
+        Label
+        Label Shift
+
+    become:
+
+        Label shift
+    """
+
+    if pd.isna(shift_type):
+        return "N/A"
+
+    shift_type = str(
+        shift_type
+    ).strip()
+
+    normalized = (
+        shift_type
+        .lower()
+        .replace("_", " ")
+        .replace("-", " ")
+    )
+
+    # ------------------------------------------------------------
+    # Concept drift
+    # ------------------------------------------------------------
+
+    if (
+        "concept" in normalized
+        or "concept drift" in normalized
+    ):
+
+        return "Concept drift"
+
+    # ------------------------------------------------------------
+    # Label shift
+    # ------------------------------------------------------------
+
+    if (
+        "label" in normalized
+        or "label shift" in normalized
+    ):
+
+        return "Label shift"
+
+    # ------------------------------------------------------------
+    # Unknown type
+    # ------------------------------------------------------------
+
+    return shift_type
+
+def generate_latex_table(
+    df_table,
+    filename,
+    caption,
+    label,
+    column_format,
 ):
     """
-    Gera duas tabelas de comparação da qualidade da detecção.
+    Generate the final LaTeX table.
 
-    Tabela 1:
-        Shift Type × Shift Configuration × Detector
+    The dataframe already contains the desired LaTeX markup,
+    including \\textbf{...}. Therefore escape=False is mandatory.
+    """
 
-    Tabela 2:
-        Shift Type × Detector
+    latex = df_table.to_latex(
+        index=False,                 # REMOVE 0, 1, 2, ...
+        escape=False,
+        caption=caption,
+        label=label,
+        column_format=column_format,
+    )
 
-    Métricas:
+    # ============================================================
+    # RESTORE / PRESERVE EXISTING LATEX REPLACEMENTS
+    # ============================================================
+
+    latex = (
+        latex
+        .replace(
+            "MFP\\_v2\\_dh",
+            "$\\textit{MFP}_{\\textit{DDH}}$"
+        )
+        .replace(
+            "MFP\\_v2\\_iti",
+            "$\\textit{MFP}_{\\textit{ITI}}$"
+        )
+        .replace(
+            "MFP\\_v2",
+            "$\\textit{MFP}$"
+        )
+    )
+
+    # ============================================================
+    # NORMALIZE SHIFT TYPE
+    # ============================================================
+
+    latex = (
+        latex
+        .replace(
+            "CONCEPT_DRIFT",
+            "Concept drift"
+        )
+        .replace(
+            "concept_drift",
+            "Concept drift"
+        )
+        .replace(
+            "Concept",
+            "Concept drift"
+        )
+        .replace(
+            "LABEL_SHIFT",
+            "Label shift"
+        )
+        .replace(
+            "label_shift",
+            "Label shift"
+        )
+        .replace(
+            "Label",
+            "Label shift"
+        )
+    )
+
+    # ============================================================
+    # REMOVE ACCIDENTAL DUPLICATED TOPRULE
+    # ============================================================
+
+    latex = latex.replace(
+        "\\toprule\n\\toprule",
+        "\\toprule"
+    )
+
+    # ============================================================
+    # RESTORE AMPERSANDS
+    # ============================================================
+
+    latex = latex.replace(
+        r"\&",
+        "&"
+    )
+
+    # ============================================================
+    # WRITE FILE
+    # ============================================================
+
+    with open(
+        filename,
+        "w",
+        encoding="utf-8",
+    ) as f:
+
+        f.write(
+            latex
+        )
+
+def table_detection_quality_combined(
+    df_final,
+    write_path,
+    solutions,
+    metrics,
+    higher_is_better_metrics,
+    ci=0.95,
+):
+    """
+    Generate the combined detection-quality table.
+
+    Grouping:
+        Shift Type × Configuration
+
+    The comparison is performed independently for:
+
+        Concept drift
+        Label shift
+
+    For each:
+        Shift Type × Configuration × Metric
+
+    the best mean is identified according to the metric direction.
+
+    Higher is better:
         Precision
         Recall
         F1
+
+    Lower is better:
         Detection Delay
         Undetected Shift Rate
         False Alarms
 
-    Detection Delay:
-        média somente dos shifts detectados.
+    Bold criterion
+    --------------
+    A method is bold when its MEAN lies inside the confidence
+    interval of the BEST MEAN.
 
-        Se nenhum shift for detectado para uma determinada
-        combinação, o valor apresentado é N/A.
+    IMPORTANT
+    ---------
+    The confidence interval of the competing method is NOT used.
 
-    Critério para negrito:
-        Precision, Recall e F1:
-            maior média é melhor.
+    Example:
 
-        Detection Delay, Undetected Shift Rate e False Alarms:
-            menor média é melhor.
+        Best = 0.50 ± 0.06
+        Best interval = [0.44, 0.56]
 
-        Quando os intervalos de confiança do resultado e do
-        melhor resultado se sobrepõem, ambos são considerados
-        estatisticamente indistinguíveis e ficam em negrito.
+        0.50 -> bold
+        0.30 -> normal
+        0.18 -> normal
+        0.21 -> normal
 
-    A agregação é feita sobre:
-        datasets × models × folds
-
-    Para a tabela agregada por tipo de shift,
-    as diferentes configurações são agregadas conjuntamente.
+    Concept drift and Label shift are always evaluated independently.
     """
 
     # ============================================================
-    # CONFIGURAÇÕES
+    # 1. COPY DATAFRAME
     # ============================================================
 
-    metrics = [
-        "Precision",
-        "Recall",
-        "F1",
-        "Detection Delay",
-        "Undetected Shift Rate",
-        "False Alarms"
-    ]
-
-    higher_is_better_metrics = {
-        "Precision",
-        "Recall",
-        "F1"
-    }
-
-    Path(write_path).mkdir(
-        parents=True,
-        exist_ok=True
-    )
-
-    # ============================================================
-    # 1. SELECIONAR SOMENTE A ÚLTIMA RODADA
-    # ============================================================
-
-    df_final = select_final_detection_results(
-        df
-    )
+    df_final = df_final.copy()
 
     if df_final.empty:
+
         print(
-            "\nNenhum resultado final de detecção disponível."
+            "\nWARNING: "
+            "table_detection_quality_combined received "
+            "an empty dataframe."
         )
+
         return
 
-    print(
-        "\n=============================================="
-    )
-    print(
-        "RESULTADOS FINAIS PARA AS TABELAS"
-    )
-    print(
-        "=============================================="
-    )
-
-    print(
-        df_final[
-            [
-                "Detector",
-                "Dataset",
-                "Fold ID",
-                "Model",
-                "Shift Type",
-                "Shift Configuration",
-                "Round"
-            ]
-        ].to_string(index=False)
-    )
-
     # ============================================================
-    # 2. NORMALIZAR SHIFT TYPE
+    # 2. NORMALIZE SHIFT TYPE
+    #
+    # This MUST happen BEFORE grouping.
     # ============================================================
 
     df_final["Shift Type"] = (
         df_final["Shift Type"]
-        .astype(str)
-        .str.strip()
+        .apply(format_shift_type)
     )
 
     # ============================================================
-    # 3. NORMALIZAR SHIFT CONFIGURATION
+    # 3. NORMALIZE CONFIGURATION
+    #
+    # This MUST happen BEFORE grouping.
     # ============================================================
 
     df_final["Shift Configuration"] = (
         df_final["Shift Configuration"]
-        .astype(str)
-        .str.strip()
+        .apply(
+            lambda value:
+                format_configuration(
+                    None,
+                    value
+                )
+        )
     )
 
     # ============================================================
-    # 4. SOLUÇÕES EXISTENTES
+    # 4. REMOVE INVALID SHIFT TYPES
     # ============================================================
 
-    solutions = [
-        solution
-        for solution in solutions_order
-        if solution in df_final["Detector"].unique()
-    ]
-
-    if not solutions:
-        print(
-            "\nNenhuma das soluções especificadas foi encontrada."
+    df_final = df_final[
+        df_final["Shift Type"].isin(
+            [
+                "Concept drift",
+                "Label shift",
+            ]
         )
-        return
+    ].copy()
 
-    # ============================================================
-    # FUNÇÃO AUXILIAR
-    # ============================================================
+    if df_final.empty:
 
-    def format_configuration(shift_type, config):
-        """
-        Format the shift configuration for LaTeX tables.
-
-        The formatting is normalized across all detectors so that
-        equivalent representations of Label Shift / Concept Drift
-        produce the same LaTeX output.
-        """
-
-        # ---------------------------------------------------------
-        # Normalize shift type
-        # ---------------------------------------------------------
-        shift_type_normalized = str(shift_type).strip().lower()
-        shift_type_normalized = (
-            shift_type_normalized
-            .replace("_", " ")
-            .replace("-", " ")
+        raise RuntimeError(
+            "No valid Concept drift or Label shift "
+            "records remain after normalization."
         )
 
-        # ---------------------------------------------------------
-        # Normalize configuration
-        # ---------------------------------------------------------
-        config = str(config).strip()
-
-        # ---------------------------------------------------------
-        # Label Shift
-        # ---------------------------------------------------------
-        if shift_type_normalized in {
-            "label",
-            "label shift",
-        }:
-            # Expected format:
-            #     alpha1->alpha2
-            #
-            # Examples:
-            #     0.1->1.0
-            #     1.0->0.1
-            #
-            # Convert to:
-            #     $0.1 \rightarrow 1.0$
-
-            if "->" in config:
-                parts = config.split("->", 1)
-
-                if len(parts) == 2:
-                    before = parts[0].strip()
-                    after = parts[1].strip()
-
-                    return (
-                        f"${before} \\rightarrow {after}$"
-                    )
-
-            # If the configuration does not contain the expected
-            # transition notation, preserve it while escaping
-            # LaTeX-sensitive underscores.
-            return config.replace("_", "\\_")
-
-        # ---------------------------------------------------------
-        # Concept Drift
-        # ---------------------------------------------------------
-        if shift_type_normalized in {
-            "concept",
-            "concept drift",
-        }:
-            # Preserve the existing concept-drift representation.
-            #
-            # Expected examples may contain:
-            #     0.1->1.0
-            #     1.0->0.1
-            #
-            # and should be displayed as:
-            #     $0.1 \rightarrow 1.0$
-
-            if "->" in config:
-                parts = config.split("->", 1)
-
-                if len(parts) == 2:
-                    before = parts[0].strip()
-                    after = parts[1].strip()
-
-                    return (
-                        f"${before} \\rightarrow {after}$"
-                    )
-
-            return config.replace("_", "\\_")
-
-        # ---------------------------------------------------------
-        # Combined Shift
-        # ---------------------------------------------------------
-        if shift_type_normalized in {
-            "combined",
-            "combined shift",
-        }:
-            return config.replace("_", "\\_")
-
-        # ---------------------------------------------------------
-        # Generic fallback
-        # ---------------------------------------------------------
-        return config.replace("_", "\\_")
-
     # ============================================================
-    # FUNÇÃO PARA CALCULAR MÉTRICAS
+    # 5. DEBUG CANONICAL DATA
     # ============================================================
 
-    def calculate_rows(
-        filtered_df,
-        group_column
-    ):
+    print(
+        "\n"
+        + "=" * 90
+    )
 
-        rows_raw = {}
+    print(
+        "DEBUG - CANONICAL DATA USED BY "
+        "TABLE_DETECTION_QUALITY_COMBINED"
+    )
 
-        for group_value in (
-            filtered_df[group_column]
+    print(
+        "=" * 90
+    )
+
+    debug_groups = (
+        df_final[
+            [
+                "Shift Type",
+                "Shift Configuration",
+                "Detector",
+            ]
+        ]
+        .drop_duplicates()
+        .sort_values(
+            [
+                "Shift Type",
+                "Shift Configuration",
+                "Detector",
+            ]
+        )
+    )
+
+    print(
+        debug_groups.to_string(
+            index=False
+        )
+    )
+
+    print(
+        "\nRows by Shift Type:"
+    )
+
+    print(
+        df_final[
+            "Shift Type"
+        ]
+        .value_counts()
+        .to_string()
+    )
+
+    print(
+        "\nConfigurations by Shift Type:"
+    )
+
+    for current_shift_type in [
+        "Concept drift",
+        "Label shift",
+    ]:
+
+        configs = (
+            df_final.loc[
+                df_final["Shift Type"]
+                == current_shift_type,
+                "Shift Configuration",
+            ]
             .dropna()
             .unique()
-        ):
-
-            df_group = filtered_df[
-                filtered_df[group_column]
-                == group_value
-            ]
-
-            rows_raw[group_value] = {}
-
-            for solution in solutions:
-
-                df_solution = df_group[
-                    df_group["Detector"]
-                    == solution
-                ]
-
-                if df_solution.empty:
-                    continue
-
-                rows_raw[
-                    group_value
-                ][solution] = {}
-
-                for metric in metrics:
-
-                    if (
-                        metric !=
-                        "Undetected Shift Rate"
-                        and metric
-                        not in df_solution.columns
-                    ):
-
-                        rows_raw[
-                            group_value
-                        ][solution][metric] = {
-                            "mean": np.nan,
-                            "ci": np.nan
-                        }
-
-                        continue
-
-                    mean, margin = (
-                        calculate_detection_metric(
-                            df_solution,
-                            metric,
-                            ci=ci
-                        )
-                    )
-
-                    rows_raw[
-                        group_value
-                    ][solution][metric] = {
-                        "mean": mean,
-                        "ci": margin
-                    }
-
-        return rows_raw
-
-    # ============================================================
-    # FUNÇÃO PARA DEFINIR NEGRITO
-    # ============================================================
-
-    def add_best_flags(rows_raw):
-
-        for group_value in rows_raw:
-
-            for metric in metrics:
-
-                # ------------------------------------------------
-                # Precision / Recall / F1:
-                # maior é melhor.
-                #
-                # Demais métricas:
-                # menor é melhor.
-                # ------------------------------------------------
-
-                higher_is_better = (
-                    metric in higher_is_better_metrics
-                )
-
-                valid_solutions = []
-
-                for solution in solutions:
-
-                    if (
-                        solution
-                        not in rows_raw[group_value]
-                    ):
-                        continue
-
-                    if (
-                        metric
-                        not in rows_raw[
-                            group_value
-                        ][solution]
-                    ):
-                        continue
-
-                    mean_value = rows_raw[
-                        group_value
-                    ][solution][metric]["mean"]
-
-                    # N/A não participa da comparação.
-                    if pd.isna(mean_value):
-                        continue
-
-                    valid_solutions.append(
-                        solution
-                    )
-
-                if not valid_solutions:
-                    continue
-
-                # ------------------------------------------------
-                # Identificar melhor média
-                # ------------------------------------------------
-
-                if higher_is_better:
-
-                    best_solution = max(
-                        valid_solutions,
-                        key=lambda solution:
-                            rows_raw[
-                                group_value
-                            ][solution][metric]["mean"]
-                    )
-
-                else:
-
-                    best_solution = min(
-                        valid_solutions,
-                        key=lambda solution:
-                            rows_raw[
-                                group_value
-                            ][solution][metric]["mean"]
-                    )
-
-                best_mean = rows_raw[
-                    group_value
-                ][best_solution][metric]["mean"]
-
-                best_ci = rows_raw[
-                    group_value
-                ][best_solution][metric]["ci"]
-
-                best_lower = (
-                    best_mean - best_ci
-                )
-
-                best_upper = (
-                    best_mean + best_ci
-                )
-
-                # ------------------------------------------------
-                # Verificar sobreposição dos ICs
-                # ------------------------------------------------
-
-                for solution in valid_solutions:
-
-                    mean_value = rows_raw[
-                        group_value
-                    ][solution][metric]["mean"]
-
-                    ci_value = rows_raw[
-                        group_value
-                    ][solution][metric]["ci"]
-
-                    lower = (
-                        mean_value - ci_value
-                    )
-
-                    upper = (
-                        mean_value + ci_value
-                    )
-
-                    overlap = not (
-                        upper < best_lower
-                        or
-                        lower > best_upper
-                    )
-
-                    rows_raw[
-                        group_value
-                    ][solution][metric]["bold"] = (
-                        overlap
-                    )
-
-    # ============================================================
-    # FUNÇÃO PARA GERAR UMA TABELA LATEX
-    # ============================================================
-
-    def generate_latex_table(
-            df_table,
-            filename,
-            caption,
-            label,
-            column_format
-    ):
-        # ------------------------------------------------------------
-        # Normalizar Configuration somente quando essa coluna existir.
-        #
-        # A tabela by_configuration possui essa coluna.
-        # A tabela by_shift_type não possui.
-        # ------------------------------------------------------------
-        if "Configuration" in df_table.columns:
-            df_table["Configuration"] = (
-                df_table["Configuration"].apply(
-                    normalize_configuration_for_table
-                )
-            )
-
-        # ------------------------------------------------------------
-        # Gerar conteúdo LaTeX
-        # ------------------------------------------------------------
-        latex = df_table.to_latex(
-            escape=False,
-            column_format=column_format,
-            index_names=False
+            .tolist()
         )
 
-        # ------------------------------------------------------------
-        # Adicionar caption e label
-        # ------------------------------------------------------------
-        latex = (
-            "\\begin{table}[htbp]\n"
-            "\\centering\n"
-            f"\\caption{{{caption}}}\n"
-            f"\\label{{{label}}}\n"
-            f"{latex}"
-            "\\end{table}\n"
-        ).replace(" Concept &", " Concept drift &").replace(" Label &", " Label shift &").replace(" Concept Drift &", " Concept drift &").replace(" Label Shift &", " Label shift &")
-
-        # ------------------------------------------------------------
-        # Garantir que o diretório exista
-        # ------------------------------------------------------------
-        output_dir = os.path.dirname(
-            os.path.abspath(filename)
-        )
-
-        if output_dir:
-            os.makedirs(
-                output_dir,
-                exist_ok=True
-            )
-
-        # ------------------------------------------------------------
-        # Salvar arquivo
-        # ------------------------------------------------------------
-        with open(
-                filename,
-                "w",
-                encoding="utf-8"
-        ) as f:
-            f.write(latex)
-
-        # ------------------------------------------------------------
-        # Confirmar salvamento
-        # ------------------------------------------------------------
         print(
-            f"LaTeX table saved to: {filename}"
+            f"  {current_shift_type}: "
+            f"{configs}"
         )
 
-        return latex
+    print(
+        "=" * 90
+        + "\n"
+    )
 
     # ============================================================
-    # TABELA 1
-    #
-    # Shift Type × Configuration × Detector
+    # 6. INITIALIZE TABLE
     # ============================================================
 
     detailed_rows = []
 
-    shift_types = sorted(
-        df_final["Shift Type"]
-        .dropna()
-        .unique()
-    )
+    # ============================================================
+    # 7. FIXED SHIFT TYPE ORDER
+    #
+    # This guarantees Concept drift appears before Label shift.
+    # ============================================================
+
+    shift_types = [
+        "Concept drift",
+        "Label shift",
+    ]
+
+    shift_types = [
+        shift_type
+        for shift_type in shift_types
+        if shift_type in
+        df_final["Shift Type"].unique()
+    ]
+
+    # ============================================================
+    # 8. PROCESS EACH SHIFT TYPE
+    # ============================================================
 
     for shift_type in shift_types:
 
@@ -1674,6 +1663,13 @@ def table_detection_quality_combined(
             df_final["Shift Type"]
             == shift_type
         ].copy()
+
+        if df_shift.empty:
+            continue
+
+        # ========================================================
+        # 9. GET CONFIGURATIONS
+        # ========================================================
 
         configurations = (
             df_shift[
@@ -1684,15 +1680,54 @@ def table_detection_quality_combined(
             .tolist()
         )
 
-        def configuration_sort_key(value):
+        # --------------------------------------------------------
+        # Configuration sorting
+        # --------------------------------------------------------
 
-            value_str = str(value)
+        def configuration_sort_key(
+            value
+        ):
+
+            value = str(
+                value
+            ).strip()
+
+            # --------------------------------------------
+            # Label shift: 0.1-1.0
+            # --------------------------------------------
+
+            if "-" in value:
+
+                try:
+
+                    parts = value.split(
+                        "-",
+                        1
+                    )
+
+                    return (
+                        0,
+                        float(parts[0]),
+                        float(parts[1]),
+                    )
+
+                except (
+                    ValueError,
+                    TypeError
+                ):
+
+                    pass
+
+            # --------------------------------------------
+            # Concept drift: 0.1
+            # --------------------------------------------
 
             try:
 
                 return (
                     0,
-                    float(value_str)
+                    float(value),
+                    0.0,
                 )
 
             except (
@@ -1702,7 +1737,8 @@ def table_detection_quality_combined(
 
                 return (
                     1,
-                    value_str
+                    value,
+                    0.0,
                 )
 
         configurations = sorted(
@@ -1710,16 +1746,25 @@ def table_detection_quality_combined(
             key=configuration_sort_key
         )
 
+        # ========================================================
+        # 10. PROCESS EACH CONFIGURATION
+        # ========================================================
+
         for configuration in configurations:
 
             df_config = df_shift[
                 df_shift[
                     "Shift Configuration"
-                ] == configuration
+                ]
+                == configuration
             ].copy()
 
             if df_config.empty:
                 continue
+
+            # ====================================================
+            # 11. CALCULATE RAW METRICS
+            # ====================================================
 
             rows_raw = {}
 
@@ -1733,27 +1778,41 @@ def table_detection_quality_combined(
                 if df_solution.empty:
                     continue
 
-                rows_raw[solution] = {}
+                rows_raw[
+                    solution
+                ] = {}
 
                 for metric in metrics:
 
+                    # ------------------------------------------------
+                    # Metric existence
+                    # ------------------------------------------------
+
                     if (
-                        metric !=
+                        metric
+                        !=
                         "Undetected Shift Rate"
-                        and metric
-                        not in df_solution.columns
+                        and
+                        metric
+                        not in
+                        df_solution.columns
                     ):
 
                         rows_raw[
                             solution
                         ][metric] = {
                             "mean": np.nan,
-                            "ci": np.nan
+                            "ci": np.nan,
+                            "bold": False,
                         }
 
                         continue
 
-                    mean, margin = (
+                    # ------------------------------------------------
+                    # Calculate metric
+                    # ------------------------------------------------
+
+                    mean_value, ci_value = (
                         calculate_detection_metric(
                             df_solution,
                             metric,
@@ -1764,38 +1823,60 @@ def table_detection_quality_combined(
                     rows_raw[
                         solution
                     ][metric] = {
-                        "mean": mean,
-                        "ci": margin
+                        "mean": mean_value,
+                        "ci": ci_value,
+                        "bold": False,
                     }
 
-            # ----------------------------------------------------
-            # Melhor solução para cada métrica
-            # ----------------------------------------------------
+            # ====================================================
+            # 12. DETERMINE BOLD VALUES
+            # ====================================================
 
             for metric in metrics:
 
-                valid_solutions = [
-                    solution
-                    for solution in solutions
-                    if (
-                        solution in rows_raw
-                        and metric in rows_raw[
-                            solution
-                        ]
-                        and not pd.isna(
-                            rows_raw[
-                                solution
-                            ][metric]["mean"]
-                        )
+                valid_solutions = []
+
+                # ------------------------------------------------
+                # Collect valid methods
+                # ------------------------------------------------
+
+                for solution in solutions:
+
+                    if solution not in rows_raw:
+                        continue
+
+                    if metric not in rows_raw[
+                        solution
+                    ]:
+                        continue
+
+                    mean_value = rows_raw[
+                        solution
+                    ][metric]["mean"]
+
+                    if pd.isna(mean_value):
+                        continue
+
+                    valid_solutions.append(
+                        solution
                     )
-                ]
 
                 if not valid_solutions:
                     continue
 
+                # ------------------------------------------------
+                # Determine metric direction
+                # ------------------------------------------------
+
                 higher_is_better = (
-                    metric in higher_is_better_metrics
+                    metric
+                    in
+                    higher_is_better_metrics
                 )
+
+                # ------------------------------------------------
+                # Find BEST MEAN
+                # ------------------------------------------------
 
                 if higher_is_better:
 
@@ -1825,13 +1906,97 @@ def table_detection_quality_combined(
                     best_solution
                 ][metric]["ci"]
 
+                # ------------------------------------------------
+                # Safety
+                # ------------------------------------------------
+
+                if pd.isna(best_mean):
+                    continue
+
+                # ------------------------------------------------
+                # If CI unavailable:
+                # only exact best mean is bold.
+                # ------------------------------------------------
+
+                if pd.isna(best_ci):
+
+                    for solution in valid_solutions:
+
+                        mean_value = rows_raw[
+                            solution
+                        ][metric]["mean"]
+
+                        rows_raw[
+                            solution
+                        ][metric]["bold"] = (
+                            np.isclose(
+                                mean_value,
+                                best_mean,
+                                rtol=1e-12,
+                                atol=1e-12,
+                            )
+                        )
+
+                    continue
+
+                # ------------------------------------------------
+                # BEST METHOD CI
+                # ------------------------------------------------
+
                 best_lower = (
-                    best_mean - best_ci
+                    best_mean
+                    - best_ci
                 )
 
                 best_upper = (
-                    best_mean + best_ci
+                    best_mean
+                    + best_ci
                 )
+
+                # ------------------------------------------------
+                # DEBUG
+                # ------------------------------------------------
+
+                print(
+                    f"\nShift Type: {shift_type}"
+                )
+
+                print(
+                    f"Configuration: "
+                    f"{configuration}"
+                )
+
+                print(
+                    f"Metric: {metric}"
+                )
+
+                print(
+                    f"Best solution: "
+                    f"{best_solution}"
+                )
+
+                print(
+                    f"Best mean: "
+                    f"{best_mean:.6f}"
+                )
+
+                print(
+                    f"Best CI: "
+                    f"{best_ci:.6f}"
+                )
+
+                print(
+                    f"Best interval: "
+                    f"[{best_lower:.6f}, "
+                    f"{best_upper:.6f}]"
+                )
+
+                # ------------------------------------------------
+                # FINAL BOLD RULE
+                #
+                # Compare ONLY the competing MEAN against
+                # the BEST METHOD'S confidence interval.
+                # ------------------------------------------------
 
                 for solution in valid_solutions:
 
@@ -1839,33 +2004,27 @@ def table_detection_quality_combined(
                         solution
                     ][metric]["mean"]
 
-                    ci_value = rows_raw[
-                        solution
-                    ][metric]["ci"]
-
-                    lower = (
-                        mean_value - ci_value
-                    )
-
-                    upper = (
-                        mean_value + ci_value
-                    )
-
-                    overlap = not (
-                        upper < best_lower
-                        or
-                        lower > best_upper
+                    is_bold = (
+                        best_lower
+                        <= mean_value
+                        <= best_upper
                     )
 
                     rows_raw[
                         solution
-                    ][metric]["bold"] = (
-                        overlap
+                    ][metric]["bold"] = bool(
+                        is_bold
                     )
 
-            # ----------------------------------------------------
-            # Criar uma linha por detector
-            # ----------------------------------------------------
+                    print(
+                        f"    {solution}: "
+                        f"mean={mean_value:.6f}, "
+                        f"bold={is_bold}"
+                    )
+
+            # ====================================================
+            # 13. BUILD FINAL ROWS
+            # ====================================================
 
             for solution in solutions:
 
@@ -1880,22 +2039,22 @@ def table_detection_quality_combined(
                 )
 
                 row = {
-                    "Shift Type": (
-                        shift_type
-                        .replace(
-                            "_",
-                            " "
-                        )
-                        .title()
-                    ),
+                    "Shift Type":
+                        shift_type,
+
                     "Configuration":
                         format_configuration(
                             shift_type,
                             configuration
                         ),
+
                     "Detector":
-                        safe_solution
+                        safe_solution,
                 }
+
+                # =================================================
+                # Metrics
+                # =================================================
 
                 for metric in metrics:
 
@@ -1903,7 +2062,10 @@ def table_detection_quality_combined(
                         solution
                     ]:
 
-                        row[metric] = "--"
+                        row[
+                            metric
+                        ] = "--"
+
                         continue
 
                     mean_value = rows_raw[
@@ -1914,390 +2076,181 @@ def table_detection_quality_combined(
                         solution
                     ][metric]["ci"]
 
-                    bold = rows_raw[
+                    is_bold = rows_raw[
                         solution
                     ][metric].get(
                         "bold",
                         False
                     )
 
-                    # ------------------------------------------------
-                    # Nenhum shift detectado
-                    # ------------------------------------------------
+                    # ---------------------------------------------
+                    # N/A
+                    # ---------------------------------------------
 
-                    if pd.isna(mean_value):
+                    if pd.isna(
+                        mean_value
+                    ):
 
-                        if metric == "Detection Delay":
+                        if (
+                            metric
+                            ==
+                            "Detection Delay"
+                        ):
+
                             value_str = "N/A"
+
                         else:
+
                             value_str = "--"
 
                     else:
 
-                        value_str = (
-                            f"{mean_value:.2f}"
-                            f"$\\pm$"
-                            f"{ci_value:.2f}"
-                        )
+                        # -----------------------------------------
+                        # Mean ± CI
+                        # -----------------------------------------
 
-                        if bold:
+                        if pd.isna(
+                            ci_value
+                        ):
 
                             value_str = (
-                                f"\\textbf{{"
-                                f"{value_str}"
-                                f"}}"
+                                f"{mean_value:.2f}"
                             )
 
-                    row[metric] = value_str
+                        else:
+
+                            value_str = (
+                                f"{mean_value:.2f}"
+                                f"$\\pm$"
+                                f"{ci_value:.2f}"
+                            )
+
+                        # -----------------------------------------
+                        # Bold
+                        # -----------------------------------------
+
+                        if is_bold:
+
+                            value_str = (
+                                "\\textbf{"
+                                + value_str
+                                + "}"
+                            )
+
+                    row[
+                        metric
+                    ] = value_str
 
                 detailed_rows.append(
                     row
                 )
 
-    # ------------------------------------------------------------
-    # Gerar tabela detalhada
-    # ------------------------------------------------------------
+    # ============================================================
+    # 14. SAFETY CHECK
+    # ============================================================
 
-    if detailed_rows:
+    if not detailed_rows:
 
-        df_detailed = pd.DataFrame(
-            detailed_rows
-        )
-
-        latex_columns = [
-            "Shift Type",
-            "Configuration",
-            "Detector",
-            "Precision",
-            "Recall",
-            "F1",
-            "Detection Delay",
-            "Undetected Shift Rate",
-            "False Alarms"
-        ]
-
-        df_detailed = df_detailed[
-            latex_columns
-        ]
-
-        filename_detailed = (
-            f"{write_path}"
-            "latex_table_detection_quality_"
-            "by_configuration.tex"
-        )
-
-        print("salvar: ", filename_detailed)
-
-        generate_latex_table(
-            df_table=df_detailed,
-            filename=filename_detailed,
-            caption=(
-                "Quantitative comparison of "
-                "data-shift detection quality "
-                "under different shift "
-                "configurations. Values are "
-                "reported as mean $\\pm$ 95\\% "
-                "confidence interval across "
-                "datasets, models, and folds."
-            ),
-            label=(
-                "tab:detection_quality_"
-                "by_configuration"
-            ),
-            column_format=(
-                "lll"
-                + "cccccc"
-            )
+        raise RuntimeError(
+            "No rows were generated for the "
+            "detection-quality table."
         )
 
     # ============================================================
-    # TABELA 2
-    #
-    # Shift Type × Detector
+    # 15. CREATE DATAFRAME
     # ============================================================
 
-    aggregated_rows = []
+    df_detailed = pd.DataFrame(
+        detailed_rows
+    )
 
-    for shift_type in shift_types:
+    # ============================================================
+    # 16. FORCE EXPECTED COLUMN ORDER
+    # ============================================================
 
-        df_shift = df_final[
-            df_final["Shift Type"]
-            == shift_type
-        ].copy()
+    latex_columns = [
+        "Shift Type",
+        "Configuration",
+        "Detector",
+        "Precision",
+        "Recall",
+        "F1",
+        "Detection Delay",
+        "Undetected Shift Rate",
+        "False Alarms",
+    ]
 
-        if df_shift.empty:
-            continue
+    df_detailed = df_detailed[
+        latex_columns
+    ]
 
-        rows_raw = {}
+    # ============================================================
+    # 17. FINAL DEBUG
+    # ============================================================
 
-        for solution in solutions:
+    print(
+        "\n"
+        + "=" * 90
+    )
 
-            df_solution = df_shift[
-                df_shift["Detector"]
-                == solution
-            ]
+    print(
+        "FINAL DETECTION QUALITY TABLE"
+    )
 
-            if df_solution.empty:
-                continue
+    print(
+        "=" * 90
+    )
 
-            rows_raw[solution] = {}
-
-            for metric in metrics:
-
-                if (
-                    metric !=
-                    "Undetected Shift Rate"
-                    and metric
-                    not in df_solution.columns
-                ):
-
-                    rows_raw[
-                        solution
-                    ][metric] = {
-                        "mean": np.nan,
-                        "ci": np.nan
-                    }
-
-                    continue
-
-                mean, margin = (
-                    calculate_detection_metric(
-                        df_solution,
-                        metric,
-                        ci=ci
-                    )
-                )
-
-                rows_raw[
-                    solution
-                ][metric] = {
-                    "mean": mean,
-                    "ci": margin
-                }
-
-        # --------------------------------------------------------
-        # Melhor solução por métrica
-        # --------------------------------------------------------
-
-        for metric in metrics:
-
-            valid_solutions = [
-                solution
-                for solution in solutions
-                if (
-                    solution in rows_raw
-                    and metric in rows_raw[
-                        solution
-                    ]
-                    and not pd.isna(
-                        rows_raw[
-                            solution
-                        ][metric]["mean"]
-                    )
-                )
-            ]
-
-            if not valid_solutions:
-                continue
-
-            higher_is_better = (
-                metric in higher_is_better_metrics
-            )
-
-            if higher_is_better:
-
-                best_solution = max(
-                    valid_solutions,
-                    key=lambda solution:
-                        rows_raw[
-                            solution
-                        ][metric]["mean"]
-                )
-
-            else:
-
-                best_solution = min(
-                    valid_solutions,
-                    key=lambda solution:
-                        rows_raw[
-                            solution
-                        ][metric]["mean"]
-                )
-
-            best_mean = rows_raw[
-                best_solution
-            ][metric]["mean"]
-
-            best_ci = rows_raw[
-                best_solution
-            ][metric]["ci"]
-
-            best_lower = (
-                best_mean - best_ci
-            )
-
-            best_upper = (
-                best_mean + best_ci
-            )
-
-            for solution in valid_solutions:
-
-                mean_value = rows_raw[
-                    solution
-                ][metric]["mean"]
-
-                ci_value = rows_raw[
-                    solution
-                ][metric]["ci"]
-
-                lower = (
-                    mean_value - ci_value
-                )
-
-                upper = (
-                    mean_value + ci_value
-                )
-
-                overlap = not (
-                    upper < best_lower
-                    or
-                    lower > best_upper
-                )
-
-                rows_raw[
-                    solution
-                ][metric]["bold"] = (
-                    overlap
-                )
-
-        # --------------------------------------------------------
-        # Criar linhas
-        # --------------------------------------------------------
-
-        for solution in solutions:
-
-            if solution not in rows_raw:
-                continue
-
-            safe_solution = (
-                solution.replace(
-                    "_",
-                    r"\_"
-                )
-            )
-
-            row = {
-                "Shift Type": (
-                    shift_type
-                    .replace(
-                        "_",
-                        " "
-                    )
-                    .title()
-                ),
-                "Detector":
-                    safe_solution
-            }
-
-            for metric in metrics:
-
-                mean_value = rows_raw[
-                    solution
-                ][metric]["mean"]
-
-                ci_value = rows_raw[
-                    solution
-                ][metric]["ci"]
-
-                bold = rows_raw[
-                    solution
-                ][metric].get(
-                    "bold",
-                    False
-                )
-
-                if pd.isna(mean_value):
-
-                    if metric == "Detection Delay":
-                        value_str = "N/A"
-                    else:
-                        value_str = "--"
-
-                else:
-
-                    value_str = (
-                        f"{mean_value:.2f}"
-                        f"$\\pm$"
-                        f"{ci_value:.2f}"
-                    )
-
-                    if bold:
-
-                        value_str = (
-                            f"\\textbf{{"
-                            f"{value_str}"
-                            f"}}"
-                        )
-
-                row[metric] = value_str
-
-            aggregated_rows.append(
-                row
-            )
-
-    # ------------------------------------------------------------
-    # Gerar tabela agregada
-    # ------------------------------------------------------------
-
-    if aggregated_rows:
-
-        df_aggregated = pd.DataFrame(
-            aggregated_rows
+    print(
+        df_detailed.to_string(
+            index=True
         )
+    )
 
-        latex_columns = [
-            "Shift Type",
-            "Detector",
-            "Precision",
-            "Recall",
-            "F1",
-            "Detection Delay",
-            "Undetected Shift Rate",
-            "False Alarms"
-        ]
+    print(
+        "=" * 90
+        + "\n"
+    )
 
-        df_aggregated = df_aggregated[
-            latex_columns
-        ]
+    # ============================================================
+    # 18. GENERATE LATEX
+    # ============================================================
 
-        filename_aggregated = (
-            f"{write_path}"
-            "latex_table_detection_quality_"
-            "by_shift_type.tex"
-        )
+    filename_detailed = (
+        f"{write_path}"
+        "latex_table_detection_quality_"
+        "by_configuration.tex"
+    )
 
-        print("salvar 2: ", filename_aggregated)
+    generate_latex_table(
+        df_table=df_detailed,
+        filename=filename_detailed,
+        caption=(
+            "Quantitative comparison of "
+            "data-shift detection quality "
+            "under different shift "
+            "configurations. Values are "
+            "reported as mean $\\pm$ 95\\% "
+            "confidence interval across "
+            "datasets, models, and folds."
+        ),
+        label=(
+            "tab:detection_quality_"
+            "by_configuration"
+        ),
+        column_format=(
+            "lll"
+            + "c" * len(metrics)
+        ),
+    )
 
-        generate_latex_table(
-            df_table=df_aggregated,
-            filename=filename_aggregated,
-            caption=(
-                "Overall comparison of data-shift "
-                "detection quality by shift type. "
-                "Values are reported as mean "
-                "$\\pm$ 95\\% confidence interval "
-                "across datasets, models, folds, "
-                "and shift configurations."
-            ),
-            label=(
-                "tab:detection_quality_"
-                "by_shift_type"
-            ),
-            column_format=(
-                "ll"
-                + "cccccc"
-            )
-        )
+    print(
+        "\nTabela salva em:"
+    )
+
+    print(
+        filename_detailed
+    )
 
 def table_per_dataset(df, write_path, metric, solutions_order, ci=0.95):
 
@@ -2915,9 +2868,26 @@ if __name__ == "__main__":
     # TABELA PRINCIPAL
     # ============================================================
 
+    metrics = [
+        "Precision",
+        "Recall",
+        "F1",
+        "Detection Delay",
+        "Undetected Shift Rate",
+        "False Alarms",
+    ]
+
+    higher_is_better_metrics = {
+        "Precision",
+        "Recall",
+        "F1",
+    }
+
     table_detection_quality_combined(
-        df=df_all,
+        df_final=df_all,
         write_path=write_path,
-        solutions_order=solutions,
+        solutions=solutions,
+        metrics=metrics,
+        higher_is_better_metrics=higher_is_better_metrics,
         ci=0.95
     )
