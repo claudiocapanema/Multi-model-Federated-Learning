@@ -54,48 +54,6 @@ torch.manual_seed(0)
 max_len=200
 emb_dim=32
 
-# def _init_shift_detection_files(self):
-#
-#     result_path = self.get_result_path("test")
-#
-#     metrics_file = (
-#             result_path
-#             + f"shift_detection_metrics_{self.strategy_name}.csv"
-#     )
-#
-#     curve_file = (
-#             result_path
-#             + f"shift_detection_curve_{self.strategy_name}.csv"
-#     )
-#
-#     self._write_header(
-#         metrics_file,
-#         [
-#             "Fold ID",
-#             "Model",
-#             "Precision",
-#             "Recall",
-#             "F1",
-#             "Detection Delay",
-#             "False Alarms",
-#             "Detection Rounds",
-#             "Shift Rounds"
-#         ],
-#         mode="w"
-#     )
-#
-#     self._write_header(
-#         curve_file,
-#         [
-#             "Fold ID",
-#             "Round",
-#             "Model",
-#             "Drift Rate",
-#             "Ground Truth"
-#         ],
-#         mode="w"
-#     )
-
 def load_model(model_name, dataset, strategy, device):
     try:
         num_classes = {'EMNIST': 47, 'MNIST': 10, 'F-MNIST': 10, 'CIFAR10': 10, "CINIC10": 10, 'SVHN': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'Tiny-ImageNet': 200,
@@ -319,7 +277,7 @@ def run(args):
                 "FedConD",
                 "FedDCA",
                 "CDA-FedAvg"
-            ]:
+            ] and fold_id == 1:
 
                 server._init_shift_detection_files()
 
@@ -332,7 +290,7 @@ def run(args):
                 fold_id
             )
 
-            if args.strategy in ["MultiFedAvg+MFP_v2"]:
+            if args.strategy in ["MultiFedAvg+MFP_v2"] and fold_id == 1:
                 server._init_shift_detection_files()
 
         # ---------------------------------------------------------

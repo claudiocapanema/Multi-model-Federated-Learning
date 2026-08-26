@@ -211,18 +211,6 @@ class FedConD(MultiFedAvg):
                                        "# training clients", "training clients and models", "Model size", "Alpha",
                                        "Fold ID", "Data shift", "Drift clients", "Drift rate", "Ground truth shift"]
 
-            # ========================================================
-            # IMPORTANT:
-            #
-            # Initialize the FedConD detection CSV files here.
-            #
-            # This guarantees that the header is written BEFORE
-            # _save_shift_detection_metrics() and
-            # _save_shift_detection_curve() append rows.
-            # ========================================================
-
-            self._init_shift_detection_files()
-
         except Exception as e:
 
             print(

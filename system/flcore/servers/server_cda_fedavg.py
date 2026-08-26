@@ -16,6 +16,13 @@ class CDAFedAvg(MultiFedAvg):
             fold_id
         )
 
+        self.MIN_TRAINING_CLIENTS = 3
+
+        self.cda_update_buffer = {
+            me: []
+            for me in range(self.ME)
+        }
+
         self.train_metrics_names = [
             "Accuracy",
             "Balanced accuracy",
@@ -167,7 +174,6 @@ class CDAFedAvg(MultiFedAvg):
             results,
             failures,
     ):
-
         try:
 
             print("entrou aggregate_fit")
@@ -185,7 +191,7 @@ class CDAFedAvg(MultiFedAvg):
             # Separate:
             #
             # 1. all results -> detection
-            # 2. training results -> FedAvg aggregation
+            # 2. training results -> update buffer
             # ========================================================
 
             all_results_mefl = {
@@ -198,6 +204,7 @@ class CDAFedAvg(MultiFedAvg):
                 for me in range(self.ME)
             }
 
+            # Models that receive at least one new local update
             trained_models = []
 
             # ========================================================
@@ -234,7 +241,8 @@ class CDAFedAvg(MultiFedAvg):
                 )
 
                 # ----------------------------------------------------
-                # Only actual training results participate in FedAvg.
+                # Only clients that actually trained participate in
+                # the CDA-FedAvg update buffer.
                 # ----------------------------------------------------
 
                 if (
@@ -250,15 +258,33 @@ class CDAFedAvg(MultiFedAvg):
                         )
                     )
 
-                    if me not in trained_models:
-                        trained_models.append(me)
-
                     self.selected_clients_m[me].append(
                         client_id
                     )
 
+                    # ------------------------------------------------
+                    # Add local update to persistent buffer.
+                    #
+                    # The update is NOT immediately aggregated.
+                    # ------------------------------------------------
+
+                    self.cda_update_buffer[me].append(
+                        (
+                            parameters,
+                            num_examples,
+                            result
+                        )
+                    )
+
+                    if me not in trained_models:
+                        trained_models.append(me)
+
             # ========================================================
             # Aggregate independently for each MEFL model
+            #
+            # IMPORTANT:
+            # A single client is NEVER sufficient to update the
+            # global model.
             # ========================================================
 
             aggregated_ndarrays_mefl = {
@@ -266,7 +292,43 @@ class CDAFedAvg(MultiFedAvg):
                 for me in range(self.ME)
             }
 
-            for me in trained_models:
+            models_updated_this_round = []
+
+            for me in range(self.ME):
+
+                buffered_results = self.cda_update_buffer[me]
+
+                n_buffered_updates = len(
+                    buffered_results
+                )
+
+                print(
+                    f"[CDA-FedAvg] Model {me}: "
+                    f"{n_buffered_updates} buffered updates "
+                    f"(minimum = {self.MIN_TRAINING_CLIENTS})"
+                )
+
+                # ----------------------------------------------------
+                # Not enough accumulated updates.
+                #
+                # Keep them in the buffer and preserve the current
+                # global model.
+                # ----------------------------------------------------
+
+                if n_buffered_updates < self.MIN_TRAINING_CLIENTS:
+                    print(
+                        f"[CDA-FedAvg] Model {me}: "
+                        f"not enough clients for aggregation. "
+                        f"Keeping current global model."
+                    )
+
+                    continue
+
+                # ----------------------------------------------------
+                # Enough clients accumulated.
+                #
+                # Perform weighted FedAvg over the buffered updates.
+                # ----------------------------------------------------
 
                 weights_results = [
                     (
@@ -277,28 +339,32 @@ class CDAFedAvg(MultiFedAvg):
                         parameters,
                         num_examples,
                         _
-                    ) in training_results_mefl[me]
+                    ) in buffered_results
                 ]
 
-                if len(weights_results) > 1:
+                aggregated_ndarrays_mefl[me] = aggregate(
+                    weights_results
+                )
 
-                    aggregated_ndarrays_mefl[me] = (
-                        aggregate(
-                            weights_results
-                        )
-                    )
+                models_updated_this_round.append(me)
 
-                elif len(weights_results) == 1:
+                # ----------------------------------------------------
+                # Clear buffer ONLY after successful aggregation.
+                # ----------------------------------------------------
 
-                    aggregated_ndarrays_mefl[me] = (
-                        weights_results[0][0]
-                    )
+                self.cda_update_buffer[me] = []
+
+                print(
+                    f"[CDA-FedAvg] Model {me}: "
+                    f"global model updated using "
+                    f"{len(weights_results)} accumulated clients."
+                )
 
             # ========================================================
-            # Update only models that actually received a local update.
+            # Update only models for which enough clients accumulated
             # ========================================================
 
-            for me in trained_models:
+            for me in models_updated_this_round:
                 self.parameters_aggregated_mefl[me] = (
                     aggregated_ndarrays_mefl[me]
                 )
@@ -340,9 +406,7 @@ class CDAFedAvg(MultiFedAvg):
                     ) in model_all_results
                 )
 
-                self.drift_clients[me] = (
-                    n_drift
-                )
+                self.drift_clients[me] = n_drift
 
                 self.drift_rate[me] = (
                     n_drift
@@ -364,7 +428,7 @@ class CDAFedAvg(MultiFedAvg):
 
                 # ====================================================
                 # Aggregate normal training metrics only from clients
-                # that actually trained.
+                # that actually trained THIS round.
                 # ====================================================
 
                 model_training_results = (
@@ -414,6 +478,28 @@ class CDAFedAvg(MultiFedAvg):
                 metrics_aggregated_mefl[me][
                     "Data shift"
                 ] = self.data_shift_type[me]
+
+                # ====================================================
+                # Additional CDA-FedAvg aggregation information
+                # ====================================================
+
+                metrics_aggregated_mefl[me][
+                    "Training clients"
+                ] = len(
+                    training_results_mefl[me]
+                )
+
+                metrics_aggregated_mefl[me][
+                    "Buffered training clients"
+                ] = len(
+                    self.cda_update_buffer[me]
+                )
+
+                metrics_aggregated_mefl[me][
+                    "Global model updated"
+                ] = int(
+                    me in models_updated_this_round
+                )
 
                 # ====================================================
                 # Data-shift ground truth
@@ -536,7 +622,7 @@ class CDAFedAvg(MultiFedAvg):
                 )
 
             # ========================================================
-            # Keep the existing CSV / metric writing infrastructure.
+            # Keep existing CSV / metric writing infrastructure
             # ========================================================
 
             self._save_data_metrics()
@@ -551,6 +637,9 @@ class CDAFedAvg(MultiFedAvg):
 
             # ========================================================
             # Save current aggregated state
+            #
+            # If the minimum number of clients was NOT reached,
+            # self.parameters_aggregated_mefl remains unchanged.
             # ========================================================
 
             self.parameters_aggregated_mefl = (
