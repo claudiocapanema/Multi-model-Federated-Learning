@@ -283,40 +283,70 @@ class MultiFedAvgWithFedPredictDynamic(MultiFedAvgWithMultiFedPredict):
     #         print("_weighted_average error")
     #         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def aggregate(self, results: list[tuple[NDArrays, int]], heterogeneity_degree: float,
-                  current_parameters: list[tuple[NDArrays, int]], t: int, me: int) -> NDArrays:
+    def aggregate_fit(
+        self,
+        server_round: int,
+        results,
+        failures,
+    ):
+        """Aggregate fit results using weighted average."""
         try:
-            """Compute weighted average."""
-            # Calculate the total number of examples used during training
-            num_examples_total = sum(num_examples for (_, num_examples) in results)
 
-            # Create a list of weights, each multiplied by the related number of examples
-            weighted_parameters_update_list = [
-                [layer * num_examples for layer in weights] for weights, num_examples in results
-            ]
-            weighted_parameters_update_list = []
-            for i, r in enumerate(results):
-                weights, num_examples = r
-                client_update = []
-                for j, layer in enumerate(weights):
-                    original_layer = current_parameters[j]
-                    update = layer - original_layer
-                    client_update.append(update * num_examples)
+            self.selected_clients_m = [[] for me in range(self.ME)]
 
-                weighted_parameters_update_list.append(client_update)
+            trained_models = []
 
-            # Compute average weights of each layer
-            weighted_parameters_update: NDArrays = [
-                reduce(np.add, layer_updates) / num_examples_total
-                for layer_updates in zip(*weighted_parameters_update_list)
-            ]
+            results_mefl = {me: [] for me in range(self.ME)}
+            for i in range(len(results)):
+                parameter, num_examples, result = results[i]
+                me = result["me"]
+                if me not in trained_models:
+                    trained_models.append(me)
+                client_id = result["client_id"]
+                self.selected_clients_m[me].append(client_id)
+                results_mefl[me].append(results[i])
 
-            weighted_parameters_update_list = [np.array(original_layer + (1) * layer) for original_layer, layer in
-                                               zip(current_parameters, weighted_parameters_update)]
 
-            return weighted_parameters_update_list
+            aggregated_ndarrays_mefl = {me: None for me in range(self.ME)}
+            aggregated_ndarrays_mefl = {me: [] for me in range(self.ME)}
+            weights_results_mefl = {me: [] for me in range(self.ME)}
+            # parameters_aggregated_mefl = {me: [] for me in range(self.ME)}
+
+            for me in trained_models:
+                # Convert results
+                weights_results = [
+                    (parameters, num_examples)
+                    for parameters, num_examples, fit_res in results_mefl[me]
+                ]
+                aggregated_ndarrays_mefl[me] = aggregate(weights_results)
+                if len(weights_results) > 1:
+                    aggregated_ndarrays_mefl[me] = aggregate(weights_results)
+                elif len(weights_results) == 1:
+                    aggregated_ndarrays_mefl[me] = results_mefl[me][0][0]
+
+            for me in trained_models:
+                self.parameters_aggregated_mefl[me] = aggregated_ndarrays_mefl[me]
+
+            # Aggregate custom metrics if aggregation fn was provided
+            metrics_aggregated_mefl = {me: [] for me in range(self.ME)}
+            for me in trained_models:
+                if self.fit_metrics_aggregation_fn:
+                    fit_metrics = [(num_examples, metrics) for _, num_examples, metrics in results_mefl[me]]
+                    metrics_aggregated_mefl[me] = self.fit_metrics_aggregation_fn(fit_metrics)
+
+            if server_round > 10:
+                self._save_data_metrics()
+
+            # print("""finalizou aggregated fit""")
+
+            self.parameters_aggregated_mefl = self.parameters_aggregated_mefl
+            self.metrics_aggregated_mefl = metrics_aggregated_mefl
+
+            print(f"rodada {server_round} metricas agregadas de treino {self.metrics_aggregated_mefl}")
+
+            return self.parameters_aggregated_mefl, metrics_aggregated_mefl
         except Exception as e:
-            print("aggregate error")
+            print("aggregate_fit error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def evaluate(self, t, parameters_aggregated_mefl):

@@ -569,3 +569,202 @@ class MultiFedAvg:
                     e,
                 )
             )
+
+    def _build_global_concept_drift_config(self):
+        """
+        Create the GLOBAL concept-drift configuration.
+
+        The server is the only component responsible for defining the
+        concept-drift pattern.
+
+        The same class transition pattern is sent to every client.
+
+        Concept drift preserves P(Y) because labels are never changed.
+        Instead, clients use this mapping to determine which class
+        supplies X for another class.
+
+        Example for 3 classes:
+
+            0 -> 1
+            1 -> 2
+            2 -> 0
+
+        Example for 10 classes:
+
+            0 -> 1
+            1 -> 2
+            ...
+            8 -> 9
+            9 -> 0
+
+        No client-specific information is used to create the pattern.
+        """
+
+        try:
+
+            concept_drift_config = {}
+
+            for me, dataset_name in enumerate(
+                    self.args.dataset
+            ):
+                n_classes = {
+                    "EMNIST": 47,
+                    "MNIST": 10,
+                    "F-MNIST": 10,
+                    "SVHN": 10,
+                    "CIFAR10": 10,
+                    "CINIC10": 10,
+                    "GTSRB": 43,
+                    "WISDM-W": 12,
+                    "WISDM-P": 12,
+                    "ImageNet": 15,
+                    "ImageNet10": 10,
+                    "ImageNet_v2": 15,
+                    "Gowalla": 7,
+                    "wikitext": 25,
+                    "Foursquare": 10
+                }[dataset_name]
+
+                # ------------------------------------------------------------
+                # Global cyclic class mapping.
+                #
+                # source class -> target class
+                #
+                # Example:
+                #     0 -> 1
+                #     1 -> 2
+                #     ...
+                #     C-1 -> 0
+                # ------------------------------------------------------------
+
+                class_mapping = {
+                    class_id:
+                        (class_id + 1) % n_classes
+                    for class_id in range(n_classes)
+                }
+
+                # ------------------------------------------------------------
+                # Concept drift occurs once at the predefined round.
+                #
+                # Keep the same round definition already used by the
+                # existing sudden configuration.
+                # ------------------------------------------------------------
+
+                drift_round = int(
+                    self.args.number_of_rounds * (
+                            0.3 + 0.2 * me
+                    )
+                )
+
+                concept_drift_config[me] = {
+                    "type": "concept_drift",
+
+                    "data_shift_rounds": [
+                        drift_round
+                    ],
+
+                    "class_mapping": class_mapping,
+
+                    "n_classes": n_classes,
+
+                    # 1 means that the new concept is active.
+                    "concept_drift_window": 1
+                }
+
+                print(
+                    f"[SERVER - CONCEPT DRIFT CONFIG] "
+                    f"model={me} "
+                    f"dataset={dataset_name} "
+                    f"drift_round={drift_round} "
+                    f"n_classes={n_classes} "
+                    f"class_mapping={class_mapping}"
+                )
+
+            return concept_drift_config
+
+        except Exception as e:
+
+            print(
+                "_build_global_concept_drift_config error"
+            )
+
+            print(
+                "Error on line {} {} {}".format(
+                    sys.exc_info()[-1].tb_lineno,
+                    type(e).__name__,
+                    e
+                )
+            )
+
+            raise
+
+    def _get_concept_drift_config_for_round(
+            self,
+            server_round,
+            me
+    ):
+        """
+        Return the global concept-drift configuration for a given
+        server round and model.
+
+        The server is responsible for determining whether the global
+        concept drift is active.
+
+        Returns:
+            None
+                if concept drift is not active.
+
+            dict
+                containing the global concept-drift pattern otherwise.
+        """
+
+        try:
+
+            if not hasattr(
+                    self,
+                    "concept_drift_config"
+            ):
+                return None
+
+            if me not in self.concept_drift_config:
+                return None
+
+            config = (
+                self.concept_drift_config[me]
+            )
+
+            drift_rounds = config.get(
+                "data_shift_rounds",
+                []
+            )
+
+            if server_round not in drift_rounds:
+                return None
+
+            return {
+                "type": "concept_drift",
+                "concept_drift_window": 1,
+                "class_mapping": dict(
+                    config["class_mapping"]
+                ),
+                "n_classes": config[
+                    "n_classes"
+                ]
+            }
+
+        except Exception as e:
+
+            print(
+                "_get_concept_drift_config_for_round error"
+            )
+
+            print(
+                "Error on line {} {} {}".format(
+                    sys.exc_info()[-1].tb_lineno,
+                    type(e).__name__,
+                    e
+                )
+            )
+
+            raise
+

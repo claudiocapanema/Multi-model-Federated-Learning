@@ -66,7 +66,7 @@ DATASET_INPUT_MAP = {"CIFAR10": "img", "CINIC10": "img", "MNIST": "image", "EMNI
 def load_model(model_name, dataset, strategy, device):
     try:
         num_classes = {'EMNIST': 47, 'MNIST': 10, "F-MNIST": 10, "SVHN": 10, 'CIFAR10': 10, 'CINIC10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'Tiny-ImageNet': 200,
-         'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30, "Fourquare": 100}[dataset]
+         'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 25, "Fourquare": 100}[dataset]
         if model_name == 'CNN':
             if dataset in ['MNIST']:
                 input_shape = 1
@@ -346,7 +346,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                              "MNIST": "ylecun/mnist", "F-MNIST": "zalando-datasets/fashion_mnist", "SVHN": "ufldl-stanford/svhn",
                          "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
-                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-1-Words-3743',
+                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-10-Words-25',
                              "Foursquare": "claudiogsc/foursquare-us-sequences-highlevel-40000-samples-10-seq-len-8-classes"}[dataset_name],
                     partitioners={"train": partitioner},
                     seed=1
@@ -362,7 +362,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                              "MNIST": "ylecun/mnist", "F-MNIST": "zalando-datasets/fashion_mnist", "SVHN": "ufldl-stanford/svhn",
                          "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
-                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-1-Words-3743',
+                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-10-Words-25',
                              "Foursquare": "claudiogsc/foursquare-us-sequences-highlevel-40000-samples-10-seq-len-8-classes"}[
                     dataset_name],
                 partitioners={"train": partitioner},
@@ -469,7 +469,6 @@ def train(
     t,
     dataset_name,
     n_classes,
-    concept_drift_window=0,
     global_params=None,
     mu=0.0
 ):
@@ -491,8 +490,6 @@ def train(
                 # logger.info("""tamanho images {} tamanho labels {}""".format(images.shape, labels.shape))
                 x = x.to(device)
                 labels = labels.to(device)
-                if concept_drift_window > 0:
-                    labels = (labels + concept_drift_window) % n_classes
 
                 optimizer.zero_grad()
                 outputs = model(x)
@@ -628,7 +625,7 @@ def train_fedkd(model, trainloader, valloader, epochs, learning_rate, device, cl
         print('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
 
-def test(model, testloader, device, client_id, t, dataset_name, n_classes, concept_drift_window=0):
+def test(model, testloader, device, client_id, t, dataset_name, n_classes):
     try:
         """Validate the utils on the test set."""
         g = torch.Generator()
@@ -647,8 +644,6 @@ def test(model, testloader, device, client_id, t, dataset_name, n_classes, conce
                 labels = batch["label"]
                 x = x.to(device)
                 labels = labels.to(device)
-                if concept_drift_window > 0:
-                    labels = (labels + concept_drift_window) % n_classes
                 y_true.append(label_binarize(labels.detach().cpu().numpy(), classes=np.arange(n_classes)))
                 outputs = model(x)
                 y_prob.append(outputs.detach().cpu().numpy())
@@ -715,7 +710,7 @@ def test_fedkd(model, testloader, device, client_id, t, dataset_name, n_classes)
             print("Error test_fedkd")
             print('Error on line {} {} {}'.format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-def test_fedpredict(model, testloader, device, client_id, t, dataset_name, n_classes, s, p, concept_drift_window=0):
+def test_fedpredict(model, testloader, device, client_id, t, dataset_name, n_classes, s, p):
     try:
         """Validate the utils on the test set."""
         g = torch.Generator()
@@ -734,8 +729,6 @@ def test_fedpredict(model, testloader, device, client_id, t, dataset_name, n_cla
                 labels = batch["label"]
                 x = x.to(device)
                 labels = labels.to(device)
-                if concept_drift_window > 0:
-                    labels = (labels + concept_drift_window) % n_classes
                 y_true.append(label_binarize(labels.detach().cpu().numpy(), classes=np.arange(n_classes)))
                 outputs = model(x).to(device)
                 if round(s, 2) != 1:

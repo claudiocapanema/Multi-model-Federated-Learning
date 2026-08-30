@@ -130,14 +130,15 @@ if __name__ == "__main__":
     # experiment_id = "label_shift#3"
     # experiment_id = "label_shift#3_gradual"
     # experiment_id = "label_shift#1_sudden"
+    experiment_id = "label_shift#0.1-1.0_sudden"
     # experiment_id = "label_shift#1_recurrent"
     # experiment_id = "label_shift#2_sudden"
     # experiment_id = "label_shift#2_recurrent"
-    experiment_id = "label_shift#3_sudden"
-    experiment_id = "label_shift#4_sudden"
+    # experiment_id = "label_shift#3_sudden"
+    # experiment_id = "label_shift#4_sudden"
     # experiment_id = "label_shift#4"
     # experiment_id = "label_shift#4_gradual"
-    experiment_id = "concept_drift#0.1_sudden"
+    # experiment_id = "concept_drift#0.1_sudden"
     # experiment_id = "concept_drift#1.0_sudden"
     # experiment_id = "concept_drift#10.0_sudden"
     # experiment_id = "label_shift#6"
@@ -154,8 +155,9 @@ if __name__ == "__main__":
     # total_clients = 60
     # alphas = [10.0, 10.0]
     alphas = [0.1, 0.1, 0.1]
-    # alphas = [10.0, 10.0, 10.0]
     # alphas = [1.0, 1.0, 1.0]
+    # alphas = [10.0, 10.0, 10.0]
+
     # alphas = [0.1, 0.1]
     # alphas = [10.0]
     # alphas = [0.1]
@@ -191,6 +193,8 @@ if __name__ == "__main__":
     # solutions = ["MultiFedAvg+MFP_v2", "MultiFedAvg+MFP_v2_iti", "MultiFedAvg+MFP_v2_dh", "MultiFedAvg"]
     solutions = [
                 "MultiFedAvg+MFP_v2",
+                "MultiFedAvg+MFP_v2_dh",
+                "MultiFedAvg+MFP_v2_iti",
                  "MultiFedAvg+FP",
                  "MultiFedAvg"]
 

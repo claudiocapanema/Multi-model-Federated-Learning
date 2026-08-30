@@ -338,7 +338,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                              "MNIST": "ylecun/mnist", "F-MNIST": "zalando-datasets/fashion_mnist", "SVHN": "ufldl-stanford/svhn",
                          "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
-                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-1-Words-3743',
+                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-10-Words-25',
                              "Foursquare": "claudiogsc/foursquare-us-sequences-highlevel-40000-samples-10-seq-len-8-classes"}[dataset_name],
                     partitioners={"train": partitioner},
                     seed=42
@@ -354,7 +354,7 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
                              "MNIST": "ylecun/mnist", "F-MNIST": "zalando-datasets/fashion_mnist", "SVHN": "ufldl-stanford/svhn",
                          "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
                          "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
-                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-1-Words-3743',
+                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-10-Words-25',
                              "Foursquare": "claudiogsc/foursquare-us-sequences-highlevel-40000-samples-10-seq-len-8-classes"}[
                     dataset_name],
                 partitioners={"train": partitioner},

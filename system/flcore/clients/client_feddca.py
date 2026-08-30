@@ -297,8 +297,7 @@ class ClientFedDCA(MultiFedAvgClient):
                 self.client_id,
                 t,
                 self.args.dataset[me],
-                self.n_classes[me],
-                self.concept_drift_window_test[me],
+                self.n_classes[me]
             )
 
             metrics["Model size"] = self.models_size[me]

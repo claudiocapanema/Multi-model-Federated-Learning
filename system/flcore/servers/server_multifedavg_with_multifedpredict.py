@@ -1352,14 +1352,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             global_lr = 1 - heterogeneity_degree
 
             weighted_parameters_update_list = [
-                np.array(
-                    original_layer
-                    + (
-                            1
-                            - heterogeneity_degree
-                    )
-                    * layer
-                )
+                np.array(original_layer + (1 - heterogeneity_degree) * layer)
                 for original_layer, layer
                 in zip(
                     current_parameters,

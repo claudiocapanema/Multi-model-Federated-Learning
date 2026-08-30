@@ -318,7 +318,6 @@ def _extract_class_conditional_features(
 
         raise
 
-
 def detect_concept_drift(
         loader_a,
         loader_b,
@@ -334,17 +333,32 @@ def detect_concept_drift(
         min_significant_projections=1
 ):
     """
-    Detect Concept Drift by comparing P(X | Y) between two
-    local training windows.
+    Detect Concept Drift by measuring changes in P(Y | X).
 
-    Concept Drift is characterized by a change in P(X | Y),
-    while a change in P(Y) alone should not be considered
-    Concept Drift.
+    The current concept-drift simulator preserves P(Y) but changes
+    P(X | Y) by reassigning the input X of one class to another
+    class while keeping the target label unchanged.
 
-    The KS statistic is used as the main measure of the
-    magnitude of the distributional change. Statistical
-    significance is used as supporting evidence, rather
-    than as a hard gate.
+    Example:
+
+        BEFORE:
+            X_a -> Y=0
+            X_b -> Y=1
+
+        AFTER:
+            X_b -> Y=0
+            X_a -> Y=1
+
+    Therefore, the most direct observable consequence is:
+
+        P(Y | X)_old != P(Y | X)_new
+
+    For the simulated drift, the exact sample identity is preserved.
+    Consequently, the detector first searches for the same X in both
+    windows and checks whether its associated label changed.
+
+    A statistical P(X | Y) detector is retained as a fallback for
+    situations where exact sample matching is insufficient.
 
     Returns
     -------
@@ -355,414 +369,630 @@ def detect_concept_drift(
     try:
 
         # ============================================================
-        # Extract class-conditional features
+        # Helper: create an exact signature for one sample
         # ============================================================
 
-        features_a = _extract_class_conditional_features(
-            loader=loader_a,
-            key=key,
-            n_classes=n_classes,
-            label_offset=label_offset_a,
-            max_samples_per_class=max_samples_per_class,
-            random_seed=random_seed
+        def sample_signature(x):
+
+            if not isinstance(
+                    x,
+                    torch.Tensor
+            ):
+                x = torch.as_tensor(x)
+
+            x = (
+                x.detach()
+                .cpu()
+                .contiguous()
+            )
+
+            return (
+                str(
+                    x.dtype
+                ).encode("utf-8")
+                + b"|"
+                + str(
+                    tuple(
+                        x.shape
+                    )
+                ).encode("utf-8")
+                + b"|"
+                + x.numpy().tobytes()
+            )
+
+        # ============================================================
+        # Helper: extract X -> labels
+        # ============================================================
+
+        def extract_sample_labels(
+                loader,
+                label_offset
+        ):
+
+            sample_labels = {}
+
+            if loader is None:
+                return sample_labels
+
+            for batch in loader:
+
+                if not isinstance(
+                        batch,
+                        dict
+                ):
+                    continue
+
+                if (
+                        key not in batch
+                        or "label" not in batch
+                ):
+                    continue
+
+                x = batch[key]
+                y = batch["label"]
+
+                if not isinstance(
+                        x,
+                        torch.Tensor
+                ):
+                    x = torch.as_tensor(x)
+
+                if not isinstance(
+                        y,
+                        torch.Tensor
+                ):
+                    y = torch.as_tensor(y)
+
+                x = (
+                    x.detach()
+                    .cpu()
+                )
+
+                y = (
+                    y.detach()
+                    .cpu()
+                    .numpy()
+                    .astype(
+                        np.int64
+                    )
+                )
+
+                # ----------------------------------------------------
+                # Keep compatibility with the original implementation.
+                # ----------------------------------------------------
+
+                if label_offset != 0:
+
+                    y = (
+                        y
+                        + int(label_offset)
+                    ) % int(
+                        n_classes
+                    )
+
+                for i in range(
+                        x.shape[0]
+                ):
+
+                    signature = (
+                        sample_signature(
+                            x[i]
+                        )
+                    )
+
+                    label = int(
+                        y[i]
+                    )
+
+                    if signature not in sample_labels:
+
+                        sample_labels[
+                            signature
+                        ] = set()
+
+                    sample_labels[
+                        signature
+                    ].add(
+                        label
+                    )
+
+            return sample_labels
+
+        # ============================================================
+        # EXACT SAMPLE-REASSIGNMENT DETECTION
+        # ============================================================
+
+        labels_a = extract_sample_labels(
+            loader_a,
+            label_offset_a
         )
 
-        features_b = _extract_class_conditional_features(
-            loader=loader_b,
-            key=key,
-            n_classes=n_classes,
-            label_offset=label_offset_b,
-            max_samples_per_class=max_samples_per_class,
-            random_seed=random_seed + 7919
+        labels_b = extract_sample_labels(
+            loader_b,
+            label_offset_b
         )
 
-        class_scores = []
-        class_weights = []
+        # ------------------------------------------------------------
+        # Samples that occur in both windows.
+        # ------------------------------------------------------------
 
-        # ============================================================
-        # Compare P(X | Y) for every class
-        # ============================================================
+        common_samples = (
+            set(
+                labels_a.keys()
+            )
+            & set(
+                labels_b.keys()
+            )
+        )
 
-        for class_id in range(n_classes):
+        matched = 0
+        reassigned = 0
 
-            xa = features_a[class_id]
-            xb = features_b[class_id]
+        for signature in common_samples:
+
+            old_labels = labels_a[
+                signature
+            ]
+
+            new_labels = labels_b[
+                signature
+            ]
 
             # --------------------------------------------------------
-            # A class must be represented in both windows.
+            # Normally each X has one label. Sets are used because
+            # duplicated samples can exist in real datasets.
             #
-            # This avoids interpreting a change in P(Y) as Concept
-            # Drift.
+            # A reassignment is considered definite only when there
+            # is no label overlap between the two windows.
             # --------------------------------------------------------
 
             if (
-                    xa.ndim != 2
-                    or xb.ndim != 2
-                    or len(xa) < min_samples_per_class
-                    or len(xb) < min_samples_per_class
+                    len(
+                        old_labels
+                    ) == 0
+                    or len(
+                        new_labels
+                    ) == 0
             ):
                 continue
 
-            if xa.shape[1] != xb.shape[1]:
-                raise ValueError(
-                    "Feature dimensions differ between training "
-                    f"windows for class {class_id}: "
-                    f"{xa.shape[1]} vs {xb.shape[1]}"
-                )
+            matched += 1
 
-            feature_dim = xa.shape[1]
-
-            if feature_dim <= 0:
-                continue
-
-            # ========================================================
-            # Random projections
-            # ========================================================
-
-            rng = np.random.RandomState(
-                random_seed + 1009 * class_id
-            )
-
-            projections = rng.normal(
-                loc=0.0,
-                scale=1.0,
-                size=(
-                    n_projections,
-                    feature_dim
-                )
-            ).astype(
-                np.float32
-            )
-
-            projection_norms = np.linalg.norm(
-                projections,
-                axis=1,
-                keepdims=True
-            )
-
-            projections = (
-                projections
-                / np.maximum(
-                    projection_norms,
-                    1e-12
-                )
-            )
-
-            projected_a = np.matmul(
-                xa,
-                projections.T
-            )
-
-            projected_b = np.matmul(
-                xb,
-                projections.T
-            )
-
-            # ========================================================
-            # KS tests
-            # ========================================================
-
-            ks_statistics = []
-            p_values = []
-
-            for projection_id in range(
-                    n_projections
+            if old_labels.isdisjoint(
+                    new_labels
             ):
+                reassigned += 1
 
-                values_a = projected_a[
-                    :,
-                    projection_id
-                ]
+        # ============================================================
+        # DIRECT CD SCORE
+        # ============================================================
 
-                values_b = projected_b[
-                    :,
-                    projection_id
-                ]
+        if matched > 0:
 
-                # ----------------------------------------------------
-                # Normalize both distributions using a common scale.
-                # ----------------------------------------------------
-
-                combined = np.concatenate(
-                    [
-                        values_a,
-                        values_b
-                    ]
-                )
-
-                scale = np.std(
-                    combined
-                )
-
-                if (
-                        not np.isfinite(scale)
-                        or scale < 1e-12
-                ):
-                    scale = 1.0
-
-                values_a = (
-                    values_a / scale
-                )
-
-                values_b = (
-                    values_b / scale
-                )
-
-                statistic, p_value = ks_2samp(
-                    values_a,
-                    values_b,
-                    alternative="two-sided",
-                    mode="auto"
-                )
-
-                if not np.isfinite(statistic):
-                    continue
-
-                if not np.isfinite(p_value):
-                    continue
-
-                statistic = float(
-                    np.clip(
-                        statistic,
-                        0.0,
-                        1.0
-                    )
-                )
-
-                p_value = float(
-                    np.clip(
-                        p_value,
-                        0.0,
-                        1.0
-                    )
-                )
-
-                ks_statistics.append(
-                    statistic
-                )
-
-                p_values.append(
-                    p_value
-                )
-
-            # --------------------------------------------------------
-            # No valid projections
-            # --------------------------------------------------------
-
-            if len(ks_statistics) == 0:
-                continue
-
-            ks_statistics = np.asarray(
-                ks_statistics,
-                dtype=float
-            )
-
-            p_values = np.asarray(
-                p_values,
-                dtype=float
-            )
-
-            # ========================================================
-            # Statistical evidence
-            # ========================================================
-
-            significant_mask = (
-                p_values < projection_alpha
-            )
-
-            n_significant = int(
-                np.sum(
-                    significant_mask
+            reassignment_score = (
+                reassigned
+                / float(
+                    matched
                 )
             )
 
-            statistically_significant = (
-                n_significant
-                >= min_significant_projections
-            )
-
-            # ========================================================
-            # Distributional magnitude
-            # ========================================================
-
-            max_ks = float(
-                np.max(
-                    ks_statistics
-                )
-            )
-
-            mean_ks = float(
-                np.mean(
-                    ks_statistics
-                )
-            )
-
-            median_ks = float(
-                np.median(
-                    ks_statistics
-                )
-            )
-
-            # --------------------------------------------------------
-            # Average of the strongest 25% of projections.
-            # --------------------------------------------------------
-
-            top_k = max(
-                1,
-                int(
-                    np.ceil(
-                        0.25
-                        * len(
-                            ks_statistics
-                        )
-                    )
-                )
-            )
-
-            strongest_ks = float(
-                np.mean(
-                    np.sort(
-                        ks_statistics
-                    )[-top_k:]
-                )
-            )
-
-            # ========================================================
-            # Class-level Concept Drift score
-            # ========================================================
-            #
-            # The KS magnitude is the main evidence.
-            #
-            # Statistical significance is used only as a confidence
-            # factor. Therefore, a real distributional displacement
-            # with small samples is not automatically reduced to zero.
-            # ========================================================
-
-            class_score = (
-                0.50 * max_ks
-                + 0.30 * strongest_ks
-                + 0.20 * mean_ks
-            )
-
-            # --------------------------------------------------------
-            # If there is statistical evidence, keep the full score.
-            #
-            # Otherwise retain 75% of the magnitude-based score.
-            # This is intentionally sensitive to moderate changes
-            # when the sample size is small.
-            # --------------------------------------------------------
-
-            if not statistically_significant:
-                class_score *= 0.75
-
-            class_score = float(
+            reassignment_score = float(
                 np.clip(
-                    class_score,
+                    reassignment_score,
                     0.0,
                     1.0
                 )
             )
 
-            class_scores.append(
-                class_score
+        else:
+
+            reassignment_score = 0.0
+
+        print(
+            f"[CD REASSIGNMENT] "
+            f"matched={matched} "
+            f"reassigned={reassigned} "
+            f"score={reassignment_score:.6f}"
+        )
+
+        # ============================================================
+        # WHY WE DO NOT STOP HERE
+        #
+        # If the loaders do not expose the exact same samples
+        # (e.g., future experiments with transformed X), exact
+        # matching can be insufficient.
+        #
+        # Therefore retain the original statistical detector.
+        # ============================================================
+
+        statistical_score = 0.0
+
+        # ------------------------------------------------------------
+        # Use the statistical detector only when exact matching
+        # provides insufficient evidence.
+        # ------------------------------------------------------------
+
+        if (
+                matched
+                < min_samples_per_class
+        ):
+
+            class_features_a = (
+                _extract_class_conditional_features(
+                    loader=loader_a,
+                    key=key,
+                    n_classes=n_classes,
+                    label_offset=label_offset_a,
+                    max_samples_per_class=max_samples_per_class,
+                    random_seed=random_seed
+                )
             )
 
-            # Weight by the amount of paired evidence.
-            class_weights.append(
-                float(
-                    min(
-                        len(xa),
-                        len(xb)
+            class_features_b = (
+                _extract_class_conditional_features(
+                    loader=loader_b,
+                    key=key,
+                    n_classes=n_classes,
+                    label_offset=label_offset_b,
+                    max_samples_per_class=max_samples_per_class,
+                    random_seed=random_seed + 7919
+                )
+            )
+
+            class_scores = []
+            class_weights = []
+
+            for class_id in range(
+                    n_classes
+            ):
+
+                xa = class_features_a[
+                    class_id
+                ]
+
+                xb = class_features_b[
+                    class_id
+                ]
+
+                if (
+                        xa.ndim != 2
+                        or xb.ndim != 2
+                        or len(xa)
+                        < min_samples_per_class
+                        or len(xb)
+                        < min_samples_per_class
+                ):
+                    continue
+
+                if (
+                        xa.shape[1]
+                        != xb.shape[1]
+                ):
+                    continue
+
+                feature_dim = (
+                    xa.shape[1]
+                )
+
+                if feature_dim <= 0:
+                    continue
+
+                rng = np.random.RandomState(
+                    random_seed
+                    + 1009
+                    * class_id
+                )
+
+                projections = (
+                    rng.normal(
+                        0.0,
+                        1.0,
+                        size=(
+                            n_projections,
+                            feature_dim
+                        )
+                    )
+                    .astype(
+                        np.float32
                     )
                 )
-            )
 
-            # ========================================================
-            # Diagnostic information
-            # ========================================================
+                norms = np.linalg.norm(
+                    projections,
+                    axis=1,
+                    keepdims=True
+                )
 
-            print(
-                f"[CD CLASS] "
-                f"class={class_id} "
-                f"nA={len(xa)} "
-                f"nB={len(xb)} "
-                f"significant={n_significant}/"
-                f"{len(ks_statistics)} "
-                f"maxKS={max_ks:.4f} "
-                f"meanKS={mean_ks:.4f} "
-                f"medianKS={median_ks:.4f} "
-                f"topKS={strongest_ks:.4f} "
-                f"score={class_score:.4f}"
-            )
+                projections = (
+                    projections
+                    / np.maximum(
+                        norms,
+                        1e-12
+                    )
+                )
 
-        # ============================================================
-        # No class has enough paired observations
-        # ============================================================
+                projected_a = (
+                    np.matmul(
+                        xa,
+                        projections.T
+                    )
+                )
 
-        if len(class_scores) == 0:
-            print(
-                "[CD SCORE] "
-                "no classes with sufficient paired samples"
-            )
+                projected_b = (
+                    np.matmul(
+                        xb,
+                        projections.T
+                    )
+                )
 
-            return 0.0
+                ks_statistics = []
+                p_values = []
 
-        class_scores = np.asarray(
-            class_scores,
-            dtype=float
-        )
+                for projection_id in range(
+                        n_projections
+                ):
 
-        class_weights = np.asarray(
-            class_weights,
-            dtype=float
-        )
+                    values_a = (
+                        projected_a[
+                            :,
+                            projection_id
+                        ]
+                    )
 
-        # ============================================================
-        # Weighted mean class-level drift
-        # ============================================================
+                    values_b = (
+                        projected_b[
+                            :,
+                            projection_id
+                        ]
+                    )
 
-        weight_sum = np.sum(
-            class_weights
-        )
+                    combined = np.concatenate(
+                        [
+                            values_a,
+                            values_b
+                        ]
+                    )
 
-        if weight_sum <= 0:
+                    scale = np.std(
+                        combined
+                    )
 
-            weighted_mean = float(
-                np.mean(
+                    if (
+                            not np.isfinite(
+                                scale
+                            )
+                            or scale < 1e-12
+                    ):
+                        scale = 1.0
+
+                    values_a = (
+                        values_a
+                        / scale
+                    )
+
+                    values_b = (
+                        values_b
+                        / scale
+                    )
+
+                    statistic, p_value = (
+                        ks_2samp(
+                            values_a,
+                            values_b,
+                            alternative="two-sided",
+                            mode="auto"
+                        )
+                    )
+
+                    if (
+                            not np.isfinite(
+                                statistic
+                            )
+                            or not np.isfinite(
+                                p_value
+                            )
+                    ):
+                        continue
+
+                    ks_statistics.append(
+                        float(
+                            np.clip(
+                                statistic,
+                                0.0,
+                                1.0
+                            )
+                        )
+                    )
+
+                    p_values.append(
+                        float(
+                            np.clip(
+                                p_value,
+                                0.0,
+                                1.0
+                            )
+                        )
+                    )
+
+                if len(
+                        ks_statistics
+                ) == 0:
+                    continue
+
+                ks_statistics = np.asarray(
+                    ks_statistics,
+                    dtype=float
+                )
+
+                p_values = np.asarray(
+                    p_values,
+                    dtype=float
+                )
+
+                significant = (
+                    p_values
+                    < projection_alpha
+                )
+
+                n_significant = int(
+                    np.sum(
+                        significant
+                    )
+                )
+
+                significance_fraction = (
+                    n_significant
+                    / float(
+                        len(
+                            p_values
+                        )
+                    )
+                )
+
+                mean_ks = float(
+                    np.mean(
+                        ks_statistics
+                    )
+                )
+
+                median_ks = float(
+                    np.median(
+                        ks_statistics
+                    )
+                )
+
+                max_ks = float(
+                    np.max(
+                        ks_statistics
+                    )
+                )
+
+                top_k = max(
+                    1,
+                    int(
+                        np.ceil(
+                            0.25
+                            * len(
+                                ks_statistics
+                            )
+                        )
+                    )
+                )
+
+                strongest_ks = float(
+                    np.mean(
+                        np.sort(
+                            ks_statistics
+                        )[-top_k:]
+                    )
+                )
+
+                class_score = (
+                    0.25 * mean_ks
+                    + 0.25 * median_ks
+                    + 0.20 * max_ks
+                    + 0.30 * strongest_ks
+                )
+
+                class_score = (
+                    0.80
+                    * class_score
+                    + 0.20
+                    * significance_fraction
+                )
+
+                class_scores.append(
+                    float(
+                        np.clip(
+                            class_score,
+                            0.0,
+                            1.0
+                        )
+                    )
+                )
+
+                class_weights.append(
+                    float(
+                        min(
+                            len(xa),
+                            len(xb)
+                        )
+                    )
+                )
+
+            if len(
+                    class_scores
+            ) > 0:
+
+                class_scores = np.asarray(
+                    class_scores,
+                    dtype=float
+                )
+
+                class_weights = np.asarray(
+                    class_weights,
+                    dtype=float
+                )
+
+                weight_sum = np.sum(
+                    class_weights
+                )
+
+                if weight_sum > 0:
+
+                    weighted_mean = (
+                        np.sum(
+                            class_scores
+                            * class_weights
+                        )
+                        / weight_sum
+                    )
+
+                else:
+
+                    weighted_mean = np.mean(
+                        class_scores
+                    )
+
+                maximum = np.max(
                     class_scores
                 )
-            )
+
+                statistical_score = (
+                    0.60 * maximum
+                    + 0.40 * weighted_mean
+                )
+
+                statistical_score = float(
+                    np.clip(
+                        statistical_score,
+                        0.0,
+                        1.0
+                    )
+                )
+
+        # ============================================================
+        # FINAL SCORE
+        # ============================================================
+        #
+        # For the current simulator, exact reassignment is the
+        # strongest evidence.
+        #
+        # If enough exact matches exist, use that signal directly.
+        #
+        # Otherwise use the statistical detector.
+        # ============================================================
+
+        if matched >= min_samples_per_class:
+
+            cd_score = reassignment_score
 
         else:
 
-            weighted_mean = float(
-                np.sum(
-                    class_scores
-                    * class_weights
-                )
-                / weight_sum
+            cd_score = max(
+                reassignment_score,
+                statistical_score
             )
-
-        # ============================================================
-        # Strongest class
-        # ============================================================
-
-        maximum = float(
-            np.max(
-                class_scores
-            )
-        )
-
-        # ============================================================
-        # Final Concept Drift score
-        #
-        # A strong change in a single class must remain visible.
-        # ============================================================
-
-        cd_score = (
-            0.60 * maximum
-            + 0.40 * weighted_mean
-        )
 
         cd_score = float(
             np.clip(
@@ -774,10 +1004,11 @@ def detect_concept_drift(
 
         print(
             f"[CD SCORE] "
-            f"classes={len(class_scores)} "
-            f"max={maximum:.4f} "
-            f"mean={weighted_mean:.4f} "
-            f"CD={cd_score:.4f}"
+            f"reassignment={reassignment_score:.6f} "
+            f"statistical={statistical_score:.6f} "
+            f"matched={matched} "
+            f"reassigned={reassigned} "
+            f"CD={cd_score:.6f}"
         )
 
         return cd_score
@@ -797,6 +1028,7 @@ def detect_concept_drift(
         )
 
         return 0.0
+
 
 class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
     def __init__(self, args, id, model, fold_id):
@@ -919,7 +1151,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
 
         try:
 
-            self.lt[me] = t
+
 
             # ============================================================
             # Previous local label distribution
@@ -1331,43 +1563,6 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 self.data_shift_round[me] = t
 
             # ---------------------------------------------------------
-            # Diagnostic condition.
-            # DH remains a heterogeneity descriptor and is not
-            # required to detect LS or CD.
-            # ---------------------------------------------------------
-            if (
-                    fc > a[me]
-                    and il < b[me]
-                    and data_heterogeneity_degree
-                    < tau_dh[me]
-                    and shift_detected
-                    and nt > 0
-            ):
-                print(
-                    f"detected shift with low DH. "
-                    f"cliente {self.client_id} "
-                    f"rodada {t} "
-                    f"modelo {me} "
-                    f"fc={fc} "
-                    f"il={il} "
-                    f"dh={data_heterogeneity_degree} "
-                    f"ls={ls} "
-                    f"cd={cd} "
-                    f"nt={nt}"
-                )
-
-            print(
-                f"model {me} "
-                f"round {t} "
-                f"nt {nt} "
-                f"heterogeneity "
-                f"{data_heterogeneity_degree} "
-                f"ls {ls} "
-                f"cd {cd} "
-                f"type {data_shift_type}"
-            )
-
-            # ---------------------------------------------------------
             # Determine whether the local model is outdated.
             #
             # DH remains a heterogeneity signal.
@@ -1437,23 +1632,6 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             #
             # It now applies to either detected LS or CD.
             # ---------------------------------------------------------
-            if (
-                    gw == 1
-                    and t > 10
-                    and data_heterogeneity_degree
-                    < tau_dh[me]
-                    and shift_detected
-            ):
-                similarity = 1
-
-                set_weights(
-                    self.global_model[me],
-                    global_model
-                )
-
-                combined_model = (
-                    self.global_model[me]
-                )
 
             print(
                 f"rodada {t} recebido "
@@ -1481,7 +1659,6 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 t,
                 self.args.dataset[me],
                 self.n_classes[me],
-                self.concept_drift_window_test[me]
             )
 
             test_metrics["Model size"] = (

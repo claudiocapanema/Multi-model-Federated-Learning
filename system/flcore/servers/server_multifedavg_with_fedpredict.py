@@ -53,6 +53,9 @@ class MultiFedAvgWithFedPredict(MultiFedAvgWithMultiFedPredict):
     def set_clients(self):
 
         try:
+
+            super().set_clients()
+            self.clients = []
             client_class = ClientMultiFedAvgWithFedPredict
             for i in range(self.total_clients):
                 client = client_class(self.args,
