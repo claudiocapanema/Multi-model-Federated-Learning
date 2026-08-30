@@ -60,7 +60,7 @@ def fedpredict_client_weight_predictions_torch(output: torch.Tensor, t: int, cur
         print("FedPredict client weight prediction")
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-DATASET_INPUT_MAP = {"CIFAR10": "img", "CINIC10": "img", "MNIST": "image", "EMNIST": "image", "F-MNIST": "image", "SVHN": "image", "GTSRB": "image", "Gowalla": "sequence",
+DATASET_INPUT_MAP = {"CIFAR10": "img", "CINIC10": "image", "MNIST": "image", "EMNIST": "image", "F-MNIST": "image", "SVHN": "image", "GTSRB": "image", "Gowalla": "sequence",
                      "WISDM-W": "sequence", "ImageNet": "image", "ImageNet10": "image", "wikitext": "sequence", "Foursquare": "sequence"}
 
 def load_model(model_name, dataset, strategy, device):
