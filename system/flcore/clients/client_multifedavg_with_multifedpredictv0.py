@@ -130,8 +130,7 @@ class ClientMultiFedAvgWithMultiFedPredictv0(MultiFedAvgClient):
             print(f"rodada {t} recebido fc{fc} il{il} homogeneity degree {data_heterogeneity_degree} ps {ps} nt {nt}")
 
             loss, metrics = test_fedpredict(combined_model, self.valloader[me], self.device, self.client_id, t,
-                                            self.args.dataset[me], self.n_classes[me], s, p_ME[me],
-                                            self.concept_drift_window_test[me])
+                                            self.args.dataset[me], self.n_classes[me], s, p_ME[me])
 
             metrics["Model size"] = self.models_size[me]
             metrics["Dataset size"] = len(self.valloader[me].dataset)

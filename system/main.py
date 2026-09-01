@@ -86,6 +86,13 @@ def load_model(model_name, dataset, strategy, device):
                 input_shape = 3
                 mid_dim = 400*4
                 logger.info("""leu cifar com {} {} {}""".format(input_shape, mid_dim, num_classes))
+
+            print(
+                f"[MODEL DEBUG] model={model_name} "
+                f"dataset={dataset} "
+                f"input_shape={input_shape} "
+                f"mid_dim={mid_dim}"
+            )
             return CNN(input_shape=input_shape, out_channel=out_channel, num_classes=num_classes, mid_dim=mid_dim)
         elif model_name == 'CNN_3':
             if dataset in ['MNIST']:

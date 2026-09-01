@@ -1336,8 +1336,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 heterogeneity_degree = 0
 
             elif (
-                    heterogeneity_degree > threshold[me]
-                    and heterogeneity_degree < 0.8
+                    heterogeneity_degree > threshold[me] and heterogeneity_degree < 0.8
             ):
                 heterogeneity_degree = (
                     heterogeneity_degree
@@ -1662,6 +1661,16 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
             # ============================================================
             # Classify current round
+            #
+            # IMPORTANT:
+            #
+            # self.ls and self.cd contain the scalar signals produced by
+            # the clients that participated in the previous training
+            # round.
+            #
+            # Therefore, when a shift is detected here, those clients
+            # have already trained with the new data and must NOT be
+            # selected again as part of the adaptation.
             # ============================================================
 
             for me in range(self.ME):
@@ -1684,15 +1693,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
                 # ========================================================
                 # LABEL SHIFT
-                #
-                # IMPORTANT:
-                #
-                # LS is already a distance between the current and
-                # previous label distributions.
-                #
-                # Therefore, applying another temporal KS test over
-                # self.ls_list is unnecessary and can distort the
-                # detection semantics.
                 # ========================================================
 
                 ls_detected[me] = (
@@ -1702,19 +1702,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
                 # ========================================================
                 # CONCEPT DRIFT
-                #
-                # IMPORTANT:
-                #
-                # The client-side detector already compares:
-                #
-                #       P(X | Y)_reference
-                #
-                # against
-                #
-                #       P(X | Y)_current
-                #
-                # Therefore, the server must NOT apply another KS test
-                # to the temporal sequence of CD scores.
                 # ========================================================
 
                 cd_detected[me] = (
@@ -1781,23 +1768,28 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 )
 
             # ============================================================
-            # Existing adaptation logic
+            # Determine whether a NEW adaptation must be started
             #
-            # The remainder of the method keeps the existing
-            # MultiFedPredict client-selection/adaptation mechanism.
+            # IMPORTANT:
+            #
+            # The clients responsible for detecting the shift are the
+            # clients that trained in the previous round. They have
+            # already processed the new data.
+            #
+            # Therefore, detection at round t only initializes the
+            # adaptation state. It does NOT cause those same clients to
+            # be selected again.
             # ============================================================
 
-            for me in range(self.ME):
+            newly_detected_model = -1
 
-                # --------------------------------------------------------
-                # No shift
-                # --------------------------------------------------------
+            for me in range(self.ME):
 
                 if not shift_detected[me]:
                     continue
 
                 # --------------------------------------------------------
-                # Respect minimum interval between adaptations
+                # Do not start another adaptation too soon.
                 # --------------------------------------------------------
 
                 if (
@@ -1808,7 +1800,10 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     continue
 
                 # --------------------------------------------------------
-                # Start adaptation
+                # Start a NEW adaptation phase.
+                #
+                # The actual adaptation selection below excludes the
+                # clients that generated the current shift evidence.
                 # --------------------------------------------------------
 
                 self.last_drift_round[me] = t
@@ -1821,157 +1816,240 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
                 self.data_drift_model = me
 
+                newly_detected_model = me
+
+                print(
+                    f"[ADAPTATION START] "
+                    f"round={t} "
+                    f"model={me} "
+                    f"detected_clients="
+                    f"{self.selected_clients_m[me]}"
+                )
+
                 break
 
             # ============================================================
-            # Existing client-selection mechanism
+            # If there is no active adaptation, use the normal
+            # MultiFedPredict selection mechanism.
             # ============================================================
 
             if (
-                    self.data_drift_model >= 0
-                    and self.in_adaptation[
+                    self.data_drift_model < 0
+                    or not self.in_adaptation[
                 self.data_drift_model
             ]
             ):
-
-                selected_clients = []
-
-                # --------------------------------------------------------
-                # Preserve the existing uniform-selection pool
-                # --------------------------------------------------------
-
-                available_clients = list(
-                    copy.deepcopy(
-                        self.clients_ids_uniform_selection
-                    )
-                )
-
-                if len(available_clients) > 0:
-                    remaining = min(
-                        self.num_training_clients,
-                        len(available_clients)
-                    )
-
-                    selected_clients = sorted(
-                        random.sample(
-                            available_clients,
-                            remaining
-                        )
-                    )
-
-                    self.clients_ids_uniform_selection = [
-                        i
-                        for i in self.clients_ids_uniform_selection
-                        if i not in selected_clients
-                    ]
-
-                # --------------------------------------------------------
-                # Fill remaining positions if necessary
-                # --------------------------------------------------------
-
-                if (
-                        len(selected_clients)
-                        < self.num_training_clients
-                        or len(
-                    self.clients_ids_uniform_selection
-                ) == 0
-                ):
-
-                    remaining = (
-                            self.num_training_clients
-                            - len(selected_clients)
-                    )
-
-                    available_clients = list(
-                        set(
-                            copy.deepcopy(
-                                self.clients_ids
-                            )
-                        )
-                        - set(
-                            selected_clients
-                        )
-                    )
-
-                    remaining = min(
-                        remaining,
-                        len(available_clients)
-                    )
-
-                    if remaining > 0:
-                        additional_clients = sorted(
-                            random.sample(
-                                available_clients,
-                                remaining
-                            )
-                        )
-
-                        selected_clients += (
-                            additional_clients
-                        )
-
-                # --------------------------------------------------------
-                # Select clients only for the drifted model
-                # --------------------------------------------------------
-
-                sc = []
-
-                for me in range(self.ME):
-
-                    if (
-                            me
-                            == self.data_drift_model
-                    ):
-
-                        sc.append(
-                            selected_clients
-                        )
-
-                    else:
-
-                        sc.append([])
-
-                # --------------------------------------------------------
-                # End adaptation if selection cannot be maintained.
-                # --------------------------------------------------------
-
-                if (
-                        len(selected_clients)
-                        < self.num_training_clients
-                        or len(
-                    self.clients_ids_uniform_selection
-                ) == 0
-                ):
-
-                    self.increased_training_intensity[
-                        self.data_drift_model
-                    ] = 0
-
-                    self.in_adaptation[
-                        self.data_drift_model
-                    ] = False
-
-                    self.clients_ids_uniform_selection = [
-                        i
-                        for i in copy.deepcopy(
-                            self.clients_ids
-                        )
-                    ]
-
-                    self.data_drift_model = -1
-
-                    if len(selected_clients) == 0:
-                        return super().select_clients(
-                            t
-                        )
-
-            else:
-
-                sc = super().select_clients(
+                return super().select_clients(
                     t
                 )
 
-                return sc
+            # ============================================================
+            # Active adaptation
+            # ============================================================
+
+            adaptation_model = (
+                self.data_drift_model
+            )
+
+            # ============================================================
+            # Clients that already participated in the round that
+            # produced the shift detection.
+            #
+            # These clients already trained with the new data and must
+            # NOT be selected again for adaptation.
+            # ============================================================
+
+            already_adapted_clients = set(
+                self.selected_clients_m[
+                    adaptation_model
+                ]
+            )
+
+            print(
+                f"[ADAPTATION] "
+                f"round={t} "
+                f"model={adaptation_model} "
+                f"already_adapted="
+                f"{sorted(already_adapted_clients)}"
+            )
+
+            # ============================================================
+            # Build the pool of clients that are still available for
+            # adaptation.
+            #
+            # IMPORTANT:
+            #
+            # Do not use the complete client set here because that could
+            # select again the clients that detected the shift.
+            # ============================================================
+
+            available_clients = [
+                client_id
+                for client_id in self.clients_ids
+                if client_id not in already_adapted_clients
+            ]
+
+            # ============================================================
+            # Also respect the existing uniform-selection pool when
+            # possible.
+            # ============================================================
+
+            uniform_available_clients = [
+                client_id
+                for client_id in self.clients_ids_uniform_selection
+                if client_id not in already_adapted_clients
+            ]
+
+            # ============================================================
+            # Prefer clients still present in the uniform-selection pool.
+            # ============================================================
+
+            if len(uniform_available_clients) > 0:
+
+                candidate_clients = (
+                    uniform_available_clients
+                )
+
+            else:
+
+                candidate_clients = (
+                    available_clients
+                )
+
+            # ============================================================
+            # Select clients for the current adaptation round.
+            # ============================================================
+
+            selected_clients = []
+
+            if len(candidate_clients) > 0:
+                remaining = min(
+                    self.num_training_clients,
+                    len(candidate_clients)
+                )
+
+                selected_clients = sorted(
+                    random.sample(
+                        candidate_clients,
+                        remaining
+                    )
+                )
+
+            # ============================================================
+            # Remove selected clients from the uniform-selection pool.
+            # ============================================================
+
+            self.clients_ids_uniform_selection = [
+                client_id
+                for client_id in self.clients_ids_uniform_selection
+                if client_id not in selected_clients
+            ]
+
+            # ============================================================
+            # Select clients only for the model undergoing adaptation.
+            # ============================================================
+
+            sc = []
+
+            for me in range(self.ME):
+
+                if me == adaptation_model:
+
+                    sc.append(
+                        selected_clients
+                    )
+
+                else:
+
+                    sc.append([])
+
+            # ============================================================
+            # Diagnostics
+            # ============================================================
+
+            print(
+                f"[ADAPTATION SELECTION] "
+                f"round={t} "
+                f"model={adaptation_model} "
+                f"selected={selected_clients} "
+                f"remaining="
+                f"{len(available_clients) - len(selected_clients)}"
+            )
+
+            # ============================================================
+            # Adaptation completion
+            #
+            # The adaptation phase finishes when there are no more
+            # clients available for adaptation or when the configured
+            # adaptation interval has elapsed.
+            # ============================================================
+
+            adaptation_finished = False
+
+            if (
+                    t >= self.adaptation_until[
+                adaptation_model
+            ]
+            ):
+
+                adaptation_finished = True
+
+                print(
+                    f"[ADAPTATION END] "
+                    f"round={t} "
+                    f"model={adaptation_model} "
+                    f"reason=interval_elapsed"
+                )
+
+            elif len(available_clients) == 0:
+
+                adaptation_finished = True
+
+                print(
+                    f"[ADAPTATION END] "
+                    f"round={t} "
+                    f"model={adaptation_model} "
+                    f"reason=no_available_clients"
+                )
+
+            # ============================================================
+            # Reset adaptation state.
+            # ============================================================
+
+            if adaptation_finished:
+                self.increased_training_intensity[
+                    adaptation_model
+                ] = 0
+
+                self.in_adaptation[
+                    adaptation_model
+                ] = False
+
+                self.data_drift_model = -1
+
+                self.clients_ids_uniform_selection = [
+                    client_id
+                    for client_id in copy.deepcopy(
+                        self.clients_ids
+                    )
+                ]
+
+            # ============================================================
+            # If there are no clients to train in this adaptation round,
+            # fall back to the normal selection mechanism.
+            # ============================================================
+
+            if len(selected_clients) == 0:
+                print(
+                    f"[ADAPTATION] "
+                    f"round={t} "
+                    f"model={adaptation_model} "
+                    f"no_clients_available"
+                )
+
+                return super().select_clients(
+                    t
+                )
 
             return sc
 
@@ -1988,6 +2066,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     e
                 )
             )
+
+            raise
 
     def evaluate(
             self,

@@ -23,7 +23,7 @@ import torch
 import numpy as np
 from .utils.models_utils import load_model, get_weights, load_data, set_weights, test, train
 
-DATASET_INPUT_MAP = {"CIFAR10": "img", "CINIC10": "img", "MNIST": "image", "EMNIST": "image", "F-MNIST": "image", "SVHN": "image", "GTSRB": "image", "Gowalla": "sequence",
+DATASET_INPUT_MAP = {"CIFAR10": "img", "CINIC10": "image", "MNIST": "image", "EMNIST": "image", "F-MNIST": "image", "SVHN": "image", "GTSRB": "image", "Gowalla": "sequence",
                      "WISDM-W": "sequence", "ImageNet": "image", "ImageNet10": "image", "wikitext": "sequence", "Foursquare": "sequence"}
 
 
@@ -1321,17 +1321,7 @@ class MultiFedAvgClient:
                             )
                         )
 
-                        (
-                            self.p_ME[me],
-                            self.fc_ME[me],
-                            self.il_ME[me]
-                        ) = self._get_datasets_metrics(
-                            self.trainloader,
-                            self.ME,
-                            self.client_id,
-                            self.n_classes,
-                            me=me
-                        )
+                        (self.p_ME[me], self.fc_ME[me], self.il_ME[me]) = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id, self.n_classes, me=me)
 
                     else:
 
@@ -1362,17 +1352,7 @@ class MultiFedAvgClient:
                             )
                         )
 
-                        (
-                            self.p_ME[me],
-                            self.fc_ME[me],
-                            self.il_ME[me]
-                        ) = self._get_datasets_metrics(
-                            self.trainloader,
-                            self.ME,
-                            self.client_id,
-                            self.n_classes,
-                            me=me
-                        )
+                        (self.p_ME[me], self.fc_ME[me], self.il_ME[me]) = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id, self.n_classes, me=me)
 
                 # =====================================================
                 # CONCEPT DRIFT
@@ -1443,6 +1423,12 @@ class MultiFedAvgClient:
                             f"original training data restored"
                         )
 
+                        (self.p_ME[me], self.fc_ME[me], self.il_ME[me]) = self._get_datasets_metrics(self.trainloader,
+                                                                                                     self.ME,
+                                                                                                     self.client_id,
+                                                                                                     self.n_classes,
+                                                                                                     me=me)
+
                     else:
 
                         (
@@ -1466,17 +1452,7 @@ class MultiFedAvgClient:
                             )
                         )
 
-                    (
-                        self.p_ME[me],
-                        self.fc_ME[me],
-                        self.il_ME[me]
-                    ) = self._get_datasets_metrics(
-                        self.trainloader,
-                        self.ME,
-                        self.client_id,
-                        self.n_classes,
-                        me=me
-                    )
+                    (self.p_ME[me], self.fc_ME[me], self.il_ME[me]) = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id, self.n_classes, me=me)
 
             self.num_examples[me] = (
                 len(

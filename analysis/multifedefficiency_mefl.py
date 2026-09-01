@@ -131,6 +131,7 @@ if __name__ == "__main__":
     # experiment_id = "label_shift#3_gradual"
     # experiment_id = "label_shift#1_sudden"
     experiment_id = "label_shift#0.1-1.0_sudden"
+    experiment_id = "label_shift#0.1-10.0_sudden"
     # experiment_id = "label_shift#1_recurrent"
     # experiment_id = "label_shift#2_sudden"
     # experiment_id = "label_shift#2_recurrent"
@@ -152,11 +153,15 @@ if __name__ == "__main__":
     # experiment_id = "concept_drift#2_sudden"
     # experiment_id = ""
     total_clients = 40
+    # total_clients = 100
     # total_clients = 60
+    # total_clients = 100
     # alphas = [10.0, 10.0]
     alphas = [0.1, 0.1, 0.1]
     # alphas = [1.0, 1.0, 1.0]
     # alphas = [10.0, 10.0, 10.0]
+
+    # alphas = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
 
     # alphas = [0.1, 0.1]
     # alphas = [10.0]
@@ -169,6 +174,7 @@ if __name__ == "__main__":
     # dataset = ["CIFAR10", "WISDM-W"]
     # dataset = ["WISDM-W"]
     dataset = ["WISDM-W", "ImageNet10", "Foursquare"]
+    # dataset = ['MNIST', 'EMNIST', 'F-MNIST', 'SVHN', 'CIFAR10', 'CINIC10', 'ImageNet10', 'WISDM-W', 'wikitext', 'Foursquare']
     # dataset = ["Foursquare"]
     # dataset = ["CIFAR10"]
     # dataset = ["WISDM-W", "ImageNet10", "wikitext"]
@@ -177,11 +183,13 @@ if __name__ == "__main__":
     # models_names = ["cnn_c"]
     # model_name = [ "CNN", "gru", "lstm"]
     model_name = ["gru", "CNN", "lstm"]
+    # model_name = ['CNN', 'CNN', 'CNN', 'CNN', 'CNN', 'CNN', 'CNN', 'gru', 'lstm', 'lstm']
     # model_name = ["lstm"]
     # model_name = ["gru"]
     # model_name = ["CNN", "gru"]
     # model_name = ["CNN"]
     fraction_fit = 0.375
+    # fraction_fit = 0.4
     number_of_rounds = 100
     local_epochs = 1
     round_new_clients = 0
@@ -195,8 +203,12 @@ if __name__ == "__main__":
                 "MultiFedAvg+MFP_v2",
                 "MultiFedAvg+MFP_v2_dh",
                 "MultiFedAvg+MFP_v2_iti",
-                 "MultiFedAvg+FP",
-                 "MultiFedAvg"]
+                "MultiFedAvg+FPD",
+                "MultiFedAvg+FP",
+                 "MultiFedAvg"
+                ]
+
+    # solutions = ["MultiFedAvg"]
 
     read_solutions = {solution: [] for solution in solutions}
     read_dataset_order = []

@@ -20,6 +20,12 @@ python main.py --total_clients=40 --number_of_rounds=100 --strategy="DMA-FL" --d
 
 python main.py --total_clients=40 --number_of_rounds=100 --strategy="MultiFedAvgRR" --dataset="WISDM-W" --dataset="ImageNet10" --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=0.1 --alpha=0.1 --alpha=0.1 --k_fold=5 --experiment_id="concept_drift#0.1_sudden"
 
+python main.py --total_clients=40 --number_of_rounds=100 --strategy="FedConD" --dataset="WISDM-W" --dataset="ImageNet10" --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=0.1 --alpha=0.1 --alpha=0.1 --k_fold=5 --experiment_id="concept_drift#0.1_sudden"
+
+python main.py --total_clients=40 --number_of_rounds=100 --strategy="FedDCA" --dataset="WISDM-W" --dataset="ImageNet10" --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=0.1 --alpha=0.1 --alpha=0.1 --k_fold=5 --experiment_id="concept_drift#0.1_sudden"
+
+python main.py --total_clients=40 --number_of_rounds=100 --strategy="CDA-FedAvg" --dataset="WISDM-W" --dataset="ImageNet10" --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=0.1 --alpha=0.1 --alpha=0.1 --k_fold=5 --experiment_id="concept_drift#0.1_sudden"
+
 
 
 1.0_sudden
@@ -44,6 +50,14 @@ python main.py --total_clients=40 --number_of_rounds=100 --strategy="DMA-FL" --d
 
 python main.py --total_clients=40 --number_of_rounds=100 --strategy="MultiFedAvgRR" --dataset="WISDM-W" --dataset="ImageNet10" --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=1.0 --alpha=1.0 --alpha=1.0 --k_fold=5 --experiment_id="concept_drift#1.0_sudden"
 
+python main.py --total_clients=40 --number_of_rounds=100 --strategy="FedConD" --dataset="WISDM-W" --dataset="ImageNet10" --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=1.0 --alpha=1.0 --alpha=1.0 --k_fold=5 --experiment_id="concept_drift#1.0_sudden"
+
+python main.py --total_clients=40 --number_of_rounds=100 --strategy="FedDCA" --dataset="WISDM-W" --dataset="ImageNet10" --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=1.0 --alpha=1.0 --alpha=1.0 --k_fold=5 --experiment_id="concept_drift#1.0_sudden"
+
+python main.py --total_clients=40 --number_of_rounds=100 --strategy="CDA-FedAvg" --dataset="WISDM-W" --dataset="ImageNet10" --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=1.0 --alpha=1.0 --alpha=1.0 --k_fold=5 --experiment_id="concept_drift#1.0_sudden"
+
+
+
 
 10.0_sudden
 
@@ -66,3 +80,9 @@ python main.py --total_clients=40 --number_of_rounds=100 --strategy="AdaptiveFed
 python main.py --total_clients=40 --number_of_rounds=100 --strategy="DMA-FL" --dataset="WISDM-W" --dataset="ImageNet10"  --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=10.0 --alpha=10.0 --alpha=10.0 --k_fold=5 --experiment_id="concept_drift#10.0_sudden"
 
 python main.py --total_clients=40 --number_of_rounds=100 --strategy="MultiFedAvgRR" --dataset="WISDM-W" --dataset="ImageNet10" --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=10.0 --alpha=10.0 --alpha=10.0 --k_fold=5 --experiment_id="concept_drift#10.0_sudden"
+
+python main.py --total_clients=40 --number_of_rounds=100 --strategy="FedConD" --dataset="WISDM-W" --dataset="ImageNet10" --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=10.0 --alpha=10.0 --alpha=10.0 --k_fold=5 --experiment_id="concept_drift#10.0_sudden"
+
+python main.py --total_clients=40 --number_of_rounds=100 --strategy="FedDCA" --dataset="WISDM-W" --dataset="ImageNet10" --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=10.0 --alpha=10.0 --alpha=10.0 --k_fold=5 --experiment_id="concept_drift#10.0_sudden"
+
+python main.py --total_clients=40 --number_of_rounds=100 --strategy="CDA-FedAvg" --dataset="WISDM-W" --dataset="ImageNet10" --dataset="Foursquare" --model="gru" --model="CNN" --model="lstm" --fraction_fit=0.375 --alpha=10.0 --alpha=10.0 --alpha=10.0 --k_fold=5 --experiment_id="concept_drift#10.0_sudden"

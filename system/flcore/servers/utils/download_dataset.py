@@ -32,7 +32,7 @@ def download_datasets(datasets_name: list, alphas: list, num_partitions: int):
             "WISDM-W": "claudiogsc/WISDM-W",
             "ImageNet": "claudiogsc/ImageNet-15_household_objects",
             "ImageNet10": "claudiogsc/ImageNet-10_household_objects",
-            "wikitext": "claudiogsc/wikitext-Window-10-Words-30",
+            "wikitext": "claudiogsc/wikitext-Window-10-Words-25",
             "Foursquare": "claudiogsc/foursquare-us-sequences-highlevel-40000-samples-10-seq-len-8-classes"
         }
 

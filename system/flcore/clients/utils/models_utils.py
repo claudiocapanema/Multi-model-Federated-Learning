@@ -237,10 +237,18 @@ def get_transform(dataset_name, train_test):
                                           Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
                                       "test": Compose(
                                           [ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])},
-                          "CINIC10": {"train":
-                                          Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
-                                      "test": Compose(
-                                          [ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])},
+                          "CINIC10": {
+                                    "train": Compose([
+                                        Grayscale(num_output_channels=3),
+                                        ToTensor(),
+                                        Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                                    ]),
+                                    "test": Compose([
+                                        Grayscale(num_output_channels=3),
+                                        ToTensor(),
+                                        Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                                    ])
+                                },
                           "SVHN": {"train":
                                           Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
                                       "test": Compose(
