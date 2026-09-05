@@ -348,7 +348,6 @@ class ClientFedDCA(MultiFedAvgClient):
                 t=t,
                 dataset_name=self.args.dataset[me],
                 n_classes=self.n_classes[me],
-                concept_drift_window=self.concept_drift_window_train[me],
             )
 
             # FedDCA profiling happens AFTER local training.
