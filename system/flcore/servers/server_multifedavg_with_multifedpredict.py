@@ -157,17 +157,29 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             }
 
             # ============================================================
-            # CONCEPT DRIFT
+            # GENERIC DATA SHIFT
             #
             # Scalar CD values received from participating clients.
             # The server never receives X, Y, P(Y), or P(X|Y).
             # ============================================================
 
-            self.cd = [
+            self.gds = [
                           0.0
                       ] * self.ME
 
-            self.cd_list = {
+            self.gds_pvalue = [
+                               1.0
+                           ] * self.ME
+
+            self.gds_pvalue_list = {
+                me: [] for me in range(self.ME)
+            }
+
+            self.gds_evidence_streak = [
+                                         0
+                                     ] * self.ME
+
+            self.gds_list = {
                 me: [] for me in range(self.ME)
             }
 
@@ -189,9 +201,22 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             # DETECTOR STATE
             # ============================================================
 
-            self.data_shift_type = [
-                                       "NO_SHIFT"
+            self.data_shift_detected = [
+                                         False
+                                     ] * self.ME
+
+            self.data_shift_score = [
+                                       0.0
                                    ] * self.ME
+
+            self.data_shift_score_list = {
+                me: [] for me in range(self.ME)
+            }
+
+            # Unified operational detector threshold. LS and CD are
+            # complementary evidence only; the operational state is
+            # exclusively DATA_SHIFT or NO_SHIFT.
+            self.data_shift_threshold = 0.10
 
             # ============================================================
             # DATA-SHIFT ADAPTATION
@@ -251,39 +276,39 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             # Shift detector state
             # ============================================================
 
-            self.data_shift_type = {
-                me: "NO_SHIFT"
+            self.data_shift_detected = {
+                me: False
+                for me in range(self.ME)
+            }
+
+            self.data_shift_score = {
+                me: 0.0
+                for me in range(self.ME)
+            }
+
+            self.data_shift_score_list = {
+                me: []
                 for me in range(self.ME)
             }
 
             # ============================================================
-            # Client-level concept-drift information
+            # Client-level generic-data-shift information
             # ============================================================
 
-            self.drift_clients = {
+            self.gds_clients = {
                 me: 0
                 for me in range(self.ME)
             }
 
-            self.drift_rate = {
+            self.gds_rate = {
                 me: 0.0
                 for me in range(self.ME)
             }
 
-            self.max_cd = {
+            self.max_gds = {
                 me: 0.0
                 for me in range(self.ME)
             }
-
-            # Threshold for classifying an individual client
-            # as showing concept-drift evidence.
-
-            self.cd_client_threshold = 0.15
-
-            # Fraction of participating clients that must show
-            # concept-drift evidence.
-
-            self.cd_drift_rate_threshold = 0.20
 
             # ============================================================
             # Shift history
@@ -304,7 +329,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 for me in range(self.ME)
             }
 
-            self.drift_rate_history = {
+            self.gds_rate_history = {
                 me: []
                 for me in range(self.ME)
             }
@@ -324,7 +349,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             # ============================================================
 
             self.previous_detector_state = {
-                me: "NO_SHIFT"
+                me: False
                 for me in range(self.ME)
             }
 
@@ -388,7 +413,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 for me in range(self.ME)
             }
 
-            self.cd = {
+            self.gds = {
                 me: 0.0
                 for me in range(self.ME)
             }
@@ -427,7 +452,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 for me in range(self.ME)
             }
 
-            self.cd_list = {
+            self.gds_list = {
                 me: []
                 for me in range(self.ME)
             }
@@ -681,8 +706,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                         f"Teste data shift "
                         f"modelo {me} "
                         f"rodada {server_round} "
-                        f"teste "
-                        f"{self.data_shift_type[me]}"
+                        f"data shift="
+                        f"{'DATA_SHIFT' if self.data_shift_detected[me] else 'NO_SHIFT'}"
                     )
 
                 else:
@@ -747,17 +772,27 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 for me in range(self.ME)
             }
 
-            cd_list = {
+            gds_list = {
                 me: []
                 for me in range(self.ME)
             }
 
-            drift_client_ids = {
+            data_shift_score_list = {
                 me: []
                 for me in range(self.ME)
             }
 
-            drift_client_scores = {
+            gds_client_ids = {
+                me: []
+                for me in range(self.ME)
+            }
+
+            gds_client_scores = {
+                me: []
+                for me in range(self.ME)
+            }
+
+            gds_client_pvalues = {
                 me: []
                 for me in range(self.ME)
             }
@@ -849,35 +884,48 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 # CD
                 # ========================================================
 
-                cd = float(
+                gds = float(
                     non_iid.get(
-                        "cd",
+                        "gds",
                         0.0
                     )
                 )
 
-                cd = float(
+                gds = float(np.clip(gds, 0.0, 1.0))
+
+                gds_pvalue = float(
+                    non_iid.get(
+                        "gds_pvalue",
+                        1.0
+                    )
+                )
+                gds_pvalue = float(np.clip(gds_pvalue, 0.0, 1.0))
+
+                data_shift_score = float(
+                    non_iid.get(
+                        "data_shift_score",
+                        max(ls, gds)
+                    )
+                )
+                data_shift_score = float(
                     np.clip(
-                        cd,
+                        data_shift_score,
                         0.0,
                         1.0
                     )
                 )
 
                 # ========================================================
-                # Client-level concept-drift evidence
+                # Client-level generic-data-shift evidence
                 # ========================================================
 
                 num_participating_clients[me] += 1
 
-                drift_client_scores[me].append(
-                    cd
-                )
+                gds_client_scores[me].append(gds)
+                gds_client_pvalues[me].append(gds_pvalue)
 
-                if cd >= self.cd_client_threshold:
-                    drift_client_ids[me].append(
-                        client_id
-                    )
+                if gds_pvalue < 0.05:
+                    gds_client_ids[me].append(client_id)
 
                 # ========================================================
                 # Client metric history
@@ -897,7 +945,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                         "il": None,
                         "similarity": None,
                         "ls": None,
-                        "cd": None
+                        "gds": None
                     }
 
                 self.client_metrics[
@@ -920,7 +968,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
                 self.client_metrics[
                     client_id
-                ][me][alpha]["cd"] = cd
+                ][me][alpha]["gds"] = gds
 
                 # ========================================================
                 # Per-model lists
@@ -934,7 +982,11 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
                 ls_list[me].append(ls)
 
-                cd_list[me].append(cd)
+                gds_list[me].append(gds)
+
+                data_shift_score_list[me].append(
+                    data_shift_score
+                )
 
                 similarity_list[
                     me
@@ -980,8 +1032,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             )
 
             print(
-                "cd_list",
-                cd_list
+                "gds_list",
+                gds_list
             )
 
             print(
@@ -1030,43 +1082,77 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 # Aggregate CD
                 # ========================================================
 
-                self.cd[me] = (
+                self.gds[me] = (
                     self._weighted_average(
-                        cd_list[me],
+                        gds_list[me],
                         num_samples_list[me]
                     )
                 )
 
                 # ========================================================
+                # GENERAL DATA-SHIFT SCORE
+                #
+                # LS and CD remain available only as diagnostics.  The
+                # adaptation policy uses this single aggregated score.
+                # ========================================================
+
+                self.data_shift_score[me] = (
+                    self._weighted_average(
+                        data_shift_score_list[me],
+                        num_samples_list[me]
+                    )
+                )
+
+                self.data_shift_score_list[me].append(
+                    self.data_shift_score[me]
+                )
+
+                # Combine independent client-level p-values using Simes.
+                # The server receives only scalar evidence, never P(X|Y).
+                valid_pvalues = [
+                    p for p in gds_client_pvalues[me]
+                    if np.isfinite(p)
+                ]
+                if valid_pvalues:
+                    p_sorted = np.sort(np.asarray(valid_pvalues, dtype=float))
+                    m = float(len(p_sorted))
+                    self.gds_pvalue[me] = float(np.clip(
+                        np.min((m / np.arange(1.0, m + 1.0)) * p_sorted),
+                        0.0, 1.0))
+                else:
+                    self.gds_pvalue[me] = 1.0
+
+
+                # ========================================================
                 # Client-level CD statistics
                 # ========================================================
 
-                self.drift_clients[me] = len(
-                    drift_client_ids[me]
+                self.gds_clients[me] = len(
+                    gds_client_ids[me]
                 )
 
                 if num_participating_clients[me] > 0:
 
-                    self.drift_rate[me] = round(
-                        self.drift_clients[me]
+                    self.gds_rate[me] = round(
+                        self.gds_clients[me]
                         / num_participating_clients[me],
                         3
                     )
 
                 else:
 
-                    self.drift_rate[me] = 0.0
+                    self.gds_rate[me] = 0.0
 
                 # ========================================================
                 # Maximum client-level CD score
                 # ========================================================
 
-                if len(drift_client_scores[me]) > 0:
+                if len(gds_client_scores[me]) > 0:
 
-                    self.max_cd[me] = round(
+                    self.max_gds[me] = round(
                         float(
                             np.max(
-                                drift_client_scores[me]
+                                gds_client_scores[me]
                             )
                         ),
                         3
@@ -1074,14 +1160,14 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
                 else:
 
-                    self.max_cd[me] = 0.0
+                    self.max_gds[me] = 0.0
 
                 # ========================================================
                 # Historical drift rate
                 # ========================================================
 
-                self.drift_rate_history[me].append(
-                    self.drift_rate[me]
+                self.gds_rate_history[me].append(
+                    self.gds_rate[me]
                 )
 
                 self.similarity[me] = (
@@ -1119,9 +1205,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     self.ls[me]
                 )
 
-                self.cd_list[me].append(
-                    self.cd[me]
-                )
+                self.gds_list[me].append(self.gds[me])
+                self.gds_pvalue_list[me].append(self.gds_pvalue[me])
 
                 self.heterogeneity_degree_list[
                     me
@@ -1137,7 +1222,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     f"{self.similarity[me]} "
                     f"ps {self.ps[me]} "
                     f"ls {self.ls[me]} "
-                    f"cd {self.cd[me]} "
+                    f"gds {self.gds[me]} "
+                    f"data_shift_score {self.data_shift_score[me]} "
                     f"heterogeneity_degree "
                     f"{self.heterogeneity_degree[me]}"
                 )
@@ -1373,208 +1459,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 )
             )
 
-    def detect_shift_score(
-            self,
-            score_history,
-            threshold,
-            window=5,
-            persistence=2,
-            strong_factor=1.5
-    ):
-        """
-        Detect a data shift using the scalar shift score produced
-        locally by the participating clients.
-
-        IMPORTANT:
-        - This method does NOT use loss.
-        - This method does NOT access client data.
-        - This method does NOT access client labels.
-        - This method does NOT access client class distributions.
-        - It operates exclusively on the scalar LS or CD scores
-          received from participating clients.
-
-        Args:
-            score_history (list[float]):
-                Historical aggregated LS or CD scores.
-
-            threshold (float):
-                Absolute threshold for the corresponding detector.
-
-            window (int):
-                Number of recent rounds considered when evaluating
-                persistence.
-
-            persistence (int):
-                Minimum number of recent scores above threshold
-                required for persistence-based detection.
-
-            strong_factor (float):
-                Factor used to identify a strong isolated shift.
-                A current score above threshold * strong_factor is
-                sufficient to trigger detection even without
-                persistence.
-
-        Returns:
-            bool:
-                True if the current score provides sufficient evidence
-                of a shift, otherwise False.
-        """
-
-        try:
-
-            if score_history is None:
-                return False
-
-            if len(score_history) == 0:
-                return False
-
-            scores = np.asarray(
-                score_history,
-                dtype=float
-            )
-
-            scores = scores[
-                np.isfinite(scores)
-            ]
-
-            if len(scores) == 0:
-                return False
-
-            scores = np.clip(
-                scores,
-                0.0,
-                1.0
-            )
-
-            current = float(
-                scores[-1]
-            )
-
-            threshold = float(
-                np.clip(
-                    threshold,
-                    0.0,
-                    1.0
-                )
-            )
-
-            # ---------------------------------------------------------
-            # No shift if the current score is below the detector
-            # threshold.
-            # ---------------------------------------------------------
-
-            if current < threshold:
-                return False
-
-            # ---------------------------------------------------------
-            # Strong isolated shift.
-            #
-            # This allows a single strong LS/CD signal to be detected
-            # immediately, without requiring several rounds of evidence.
-            # ---------------------------------------------------------
-
-            strong_threshold = min(
-                threshold * strong_factor,
-                1.0
-            )
-
-            if current >= strong_threshold:
-                return True
-
-            # ---------------------------------------------------------
-            # Persistence-based detection.
-            #
-            # We count recent LS/CD scores above the absolute threshold.
-            # This is preferable to applying KS to a sequence of scalar
-            # scores because LS/CD are already statistical distances/
-            # change scores computed from the local training data.
-            # ---------------------------------------------------------
-
-            recent_start = max(
-                0,
-                len(scores) - window
-            )
-
-            recent_scores = scores[
-                recent_start:
-            ]
-
-            exceedances = int(
-                np.sum(
-                    recent_scores >= threshold
-                )
-            )
-
-            required_persistence = max(
-                1,
-                int(persistence)
-            )
-
-            if exceedances >= required_persistence:
-                return True
-
-            # ---------------------------------------------------------
-            # Baseline comparison.
-            #
-            # Detect a substantial increase relative to the recent
-            # normal behavior without assuming that every shift must
-            # produce a monotonically increasing score.
-            # ---------------------------------------------------------
-
-            if len(recent_scores) >= 2:
-
-                baseline_scores = recent_scores[:-1]
-
-                baseline_median = float(
-                    np.median(
-                        baseline_scores
-                    )
-                )
-
-                baseline_mad = float(
-                    np.median(
-                        np.abs(
-                            baseline_scores
-                            - baseline_median
-                        )
-                    )
-                )
-
-                # Robust scale estimate.
-                robust_scale = max(
-                    1.4826 * baseline_mad,
-                    1e-6
-                )
-
-                robust_limit = (
-                        baseline_median
-                        + 3.0 * robust_scale
-                )
-
-                if (
-                        current >= threshold
-                        and current > robust_limit
-                ):
-                    return True
-
-            return False
-
-        except Exception as e:
-
-            print(
-                "detect_shift_score server error"
-            )
-
-            print(
-                "Error on line {} {} {}".format(
-                    sys.exc_info()[-1].tb_lineno,
-                    type(e).__name__,
-                    e
-                )
-            )
-
-            return False
-
     def binomial(self, sucessos, n_treinados):
 
         try:
@@ -1628,143 +1512,49 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 )
 
             # ============================================================
-            # Detection state for current round
+            # GENERAL DATA-SHIFT DETECTION
+            #
+            # The client computes a single scalar data-shift score from
+            # complementary local signals.  The server does not classify
+            # the shift as LABEL_SHIFT, CONCEPT_DRIFT, or COMBINED_SHIFT.
+            #
+            # A shift is detected when the aggregated score reaches the
+            # common threshold.  This same decision drives adaptation for
+            # every simulated shift scenario.
             # ============================================================
-
-            ls_detected = [
-                              False
-                          ] * self.ME
-
-            cd_detected = [
-                              False
-                          ] * self.ME
 
             shift_detected = [
-                                 False
-                             ] * self.ME
+                False
+            ] * self.ME
 
-            # ============================================================
-            # Detector thresholds
-            #
-            # LS:
-            # Total Variation Distance between consecutive local label
-            # distributions.
-            #
-            # CD:
-            # class-conditional distribution-change score returned by
-            # detect_concept_drift().
-            # ============================================================
-
-            ls_threshold = 0.10
-
-            cd_threshold = 0.1
-
-            # ============================================================
-            # Classify current round
-            #
-            # IMPORTANT:
-            #
-            # self.ls and self.cd contain the scalar signals produced by
-            # the clients that participated in the previous training
-            # round.
-            #
-            # Therefore, when a shift is detected here, those clients
-            # have already trained with the new data and must NOT be
-            # selected again as part of the adaptation.
-            # ============================================================
+            data_shift_threshold = float(self.data_shift_threshold)
 
             for me in range(self.ME):
 
-                current_ls = float(
+                current_score = float(
                     np.clip(
-                        self.ls[me],
+                        self.data_shift_score[me],
                         0.0,
                         1.0
                     )
                 )
-
-                current_cd = float(
-                    np.clip(
-                        self.cd[me],
-                        0.0,
-                        1.0
-                    )
-                )
-
-                # ========================================================
-                # LABEL SHIFT
-                # ========================================================
-
-                ls_detected[me] = (
-                        current_ls
-                        >= ls_threshold
-                )
-
-                # ========================================================
-                # CONCEPT DRIFT
-                # ========================================================
-
-                cd_detected[me] = (
-                        current_cd
-                        >= cd_threshold
-                )
-
-                # ========================================================
-                # Combined state
-                # ========================================================
 
                 shift_detected[me] = (
-                        ls_detected[me]
-                        or cd_detected[me]
+                    current_score >= data_shift_threshold
                 )
 
-                # ========================================================
-                # Final shift classification
-                # ========================================================
-
-                if (
-                        ls_detected[me]
-                        and cd_detected[me]
-                ):
-
-                    self.data_shift_type[me] = (
-                        "COMBINED_SHIFT"
-                    )
-
-                elif ls_detected[me]:
-
-                    self.data_shift_type[me] = (
-                        "LABEL_SHIFT"
-                    )
-
-                elif cd_detected[me]:
-
-                    self.data_shift_type[me] = (
-                        "CONCEPT_DRIFT"
-                    )
-
-                else:
-
-                    self.data_shift_type[me] = (
-                        "NO_SHIFT"
-                    )
-
-                # ========================================================
-                # Diagnostics
-                # ========================================================
+                self.data_shift_detected[me] = (
+                    shift_detected[me]
+                )
 
                 print(
-                    f"[SHIFT DETECTOR] "
+                    f"[DATA SHIFT DETECTOR] "
                     f"round={t} "
                     f"model={me} "
-                    f"LS={current_ls:.6f} "
-                    f"CD={current_cd:.6f} "
-                    f"LS_detected="
-                    f"{ls_detected[me]} "
-                    f"CD_detected="
-                    f"{cd_detected[me]} "
+                    f"score={current_score:.6f} "
+                    f"threshold={data_shift_threshold:.6f} "
                     f"state="
-                    f"{self.data_shift_type[me]}"
+                    f"{'DATA_SHIFT' if shift_detected[me] else 'NO_SHIFT'}"
                 )
 
             # ============================================================
@@ -1786,6 +1576,36 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             for me in range(self.ME):
 
                 if not shift_detected[me]:
+                    continue
+
+                # --------------------------------------------------------
+                # A persistent significant CD test is not a new event.
+                # A new adaptation is started only on the transition
+                # from NO_SHIFT to a shift state.
+                # --------------------------------------------------------
+                previous_state = bool(
+                    self.previous_detector_state.get(
+                        me, False
+                    )
+                )
+
+                current_state = bool(
+                    self.data_shift_detected[me]
+                )
+
+                new_shift_event = (
+                    not previous_state
+                    and current_state
+                )
+
+                if not new_shift_event:
+                    print(
+                        f"[SHIFT EVENT IGNORED] "
+                        f"round={t} model={me} "
+                        f"state={'DATA_SHIFT' if current_state else 'NO_SHIFT'} "
+                        f"previous={'DATA_SHIFT' if previous_state else 'NO_SHIFT'} "
+                        f"reason=persistent_shift"
+                    )
                     continue
 
                 # --------------------------------------------------------
@@ -2114,27 +1934,34 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     "ls": self.ls[me],
 
                     # ----------------------------------------------------
-                    # Concept Drift
+                    # Generic Data Shift
                     # ----------------------------------------------------
 
-                    "cd": self.cd[me],
+                    "gds": self.gds[me],
+
+                    "gds_pvalue": self.gds_pvalue[me],
 
                     # ----------------------------------------------------
-                    # Final detector state
+                    # Final general detector state
                     # ----------------------------------------------------
 
-                    "data_shift_type": (
-                        self.data_shift_type[me]
+                    "data_shift": (
+                        self.data_shift_detected[me]
+                    ),
+
+                    "data_shift_score": (
+                        self.data_shift_score[me]
                     )
                 }
 
                 print(
-                    f"data shift type "
+                    f"data shift "
                     f"na rodada {t} "
                     f"no modelo {me} "
-                    f"{metrics['data_shift_type']} "
+                    f"{'DATA_SHIFT' if self.data_shift_detected[me] else 'NO_SHIFT'} "
+                    f"score={self.data_shift_score[me]:.6f} "
                     f"LS={self.ls[me]:.6f} "
-                    f"CD={self.cd[me]:.6f}"
+                    f"GDS={self.gds[me]:.6f}"
                 )
 
                 for i in range(
@@ -2308,8 +2135,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
             metrics_aggregated[
                 me
-            ]["cd"] = (
-                self.cd[me]
+            ]["gds"] = (
+                self.gds[me]
             )
 
             metrics_aggregated[
@@ -2337,19 +2164,21 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             metrics_aggregated[
                 me
             ]["Data shift"] = (
-                self.data_shift_type[me]
+                "DATA_SHIFT"
+                if self.data_shift_detected[me]
+                else "NO_SHIFT"
             )
 
             metrics_aggregated[
                 me
             ]["Drift clients"] = (
-                self.drift_clients[me]
+                self.gds_clients[me]
             )
 
             metrics_aggregated[
                 me
             ]["Drift rate"] = (
-                self.drift_rate[me]
+                self.gds_rate[me]
             )
 
             metrics_aggregated[
@@ -2366,15 +2195,17 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 f"[Metrics] "
                 f"model={me} | "
                 f"Data shift="
-                f"{self.data_shift_type[me]} | "
+                f"{'DATA_SHIFT' if self.data_shift_detected[me] else 'NO_SHIFT'} | "
+                f"score="
+                f"{self.data_shift_score[me]:.6f} | "
                 f"LS="
                 f"{self.ls[me]:.6f} | "
-                f"CD="
-                f"{self.cd[me]:.6f} | "
+                f"GDS="
+                f"{self.gds[me]:.6f} | "
                 f"Drift clients="
-                f"{self.drift_clients[me]} | "
+                f"{self.gds_clients[me]} | "
                 f"Drift rate="
-                f"{self.drift_rate[me]}"
+                f"{self.gds_rate[me]}"
             )
 
             # ============================================================
@@ -2546,6 +2377,9 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 "False Alarms",
                 "First Detection Round",
                 "Shift Round",
+                "TP",
+                "FN",
+                "TN",
             ],
             mode="w",
         )
@@ -2571,344 +2405,90 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             mode="w",
         )
 
-    def _save_shift_detection_metrics(
-            self,
-            server_round
-    ):
+    def _save_shift_detection_metrics(self, server_round):
+        """Save conventional round-level shift detection metrics.
 
+        A prediction is the detector state for the current round and the
+        ground truth is the configured shift state for that round. This
+        avoids counting only the first detection event as TP and therefore
+        produces standard TP/FP/FN/TN based Precision, Recall and F1.
         """
-        Evaluate the data-shift decision already produced by
-        MultiFedPredict.
-
-        This method DOES NOT perform shift detection.
-
-        Detection has already been performed in select_clients().
-
-        A detection event occurs only when entering a shift state:
-
-            NO_SHIFT
-                ->
-            LABEL_SHIFT
-
-            NO_SHIFT
-                ->
-            CONCEPT_DRIFT
-
-            NO_SHIFT
-                ->
-            COMBINED_SHIFT
-
-        Consecutive rounds inside the same shift state are not counted
-        as new detection events.
-        """
-
         try:
-
-            result_path = (
-                self.get_result_path("test")
-            )
-
-            os.makedirs(
-                result_path,
-                exist_ok=True
-            )
-
+            result_path = self.get_result_path("test")
+            os.makedirs(result_path, exist_ok=True)
             file_path = os.path.join(
                 result_path,
-                f"shift_detection_metrics_"
-                f"{self.strategy_name}.csv"
+                f"shift_detection_metrics_{self.strategy_name}.csv"
             )
 
-            # ------------------------------------------------------------
-            # All states considered as actual detector shift states.
-            # ------------------------------------------------------------
-
-            SHIFT_STATES = {
-                "label shift",
-                "concept drift",
-                "combined shift"
-            }
-
             for me in range(self.ME):
-
-                # ========================================================
-                # Current detector state
-                # ========================================================
-
-                current_state = str(
-                    self.data_shift_type[me]
-                ).strip()
-
-                current_normalized = (
-                    current_state
-                    .lower()
-                    .replace("_", " ")
-                    .strip()
+                predicted = int(
+                    self.data_shift_detected[me]
                 )
 
-                # ========================================================
-                # Previous detector state
-                # ========================================================
+                shift_rounds = sorted(self.shift_rounds.get(me, []))
+                ground_truth = int(any(
+                    server_round >= r for r in shift_rounds
+                ))
+                ground_truth_event = int(server_round in shift_rounds)
 
-                previous_state = str(
-                    self.previous_detector_state[me]
-                ).strip()
+                history = getattr(self, "_round_confusion", None)
+                if history is None:
+                    self._round_confusion = {
+                        m: {"tp": 0, "fp": 0, "fn": 0, "tn": 0}
+                        for m in range(self.ME)
+                    }
+                cm = self._round_confusion[me]
+                if predicted and ground_truth:
+                    cm["tp"] += 1
+                elif predicted and not ground_truth:
+                    cm["fp"] += 1
+                elif not predicted and ground_truth:
+                    cm["fn"] += 1
+                else:
+                    cm["tn"] += 1
 
-                previous_normalized = (
-                    previous_state
-                    .lower()
-                    .replace("_", " ")
-                    .strip()
-                )
+                tp, fp, fn = cm["tp"], cm["fp"], cm["fn"]
+                precision = tp / (tp + fp) if (tp + fp) else 0.0
+                recall = tp / (tp + fn) if (tp + fn) else 0.0
+                f1 = (2.0 * precision * recall / (precision + recall)
+                      if (precision + recall) else 0.0)
 
-                # ========================================================
-                # Shift state
-                # ========================================================
+                if ground_truth_event and self.true_detection_round[me] is None and predicted:
+                    self.true_detection_round[me] = server_round
+                    self.detection_delay[me] = server_round - shift_rounds[0]
+                if predicted and not ground_truth:
+                    self.false_alarm_rounds[me].append(server_round)
 
-                is_shift_state = (
-                        current_normalized
-                        in SHIFT_STATES
-                )
-
-                was_shift_state = (
-                        previous_normalized
-                        in SHIFT_STATES
-                )
-
-                # ========================================================
-                # Detection event
-                #
-                # Entering any shift state counts as one event.
-                #
-                # Example:
-                #
-                # NO_SHIFT
-                # LABEL_SHIFT
-                # LABEL_SHIFT
-                # LABEL_SHIFT
-                #
-                # => only the first LABEL_SHIFT is an event.
-                # ========================================================
-
-                detection_event = int(
-                    is_shift_state
-                    and not was_shift_state
-                )
-
-                self.detection_event[
-                    me
-                ] = detection_event
-
-                # ========================================================
-                # Ground truth
-                # ========================================================
-
-                shift_rounds = sorted(
-                    self.shift_rounds.get(
-                        me,
-                        []
-                    )
-                )
-
-                ground_truth_state = int(
-                    any(
-                        server_round >= shift_round
-                        for shift_round
-                        in shift_rounds
-                    )
-                )
-
-                ground_truth_event = int(
-                    server_round
-                    in shift_rounds
-                )
-
-                # ========================================================
-                # Evaluate detection event
-                # ========================================================
-
-                if detection_event:
-
-                    # ----------------------------------------------------
-                    # First detector event, regardless of whether it is
-                    # a false alarm or a true detection.
-                    # ----------------------------------------------------
-
-                    if (
-                            self.first_data_shift_round[
-                                me
-                            ]
-                            is None
-                    ):
-                        self.first_data_shift_round[
-                            me
-                        ] = server_round
-
-                    if shift_rounds:
-
-                        shift_round = (
-                            shift_rounds[0]
-                        )
-
-                        # ------------------------------------------------
-                        # False alarm before ground truth.
-                        # ------------------------------------------------
-
-                        if (
-                                server_round
-                                < shift_round
-                        ):
-
-                            self.false_alarm_rounds[
-                                me
-                            ].append(
-                                server_round
-                            )
-
-                        # ------------------------------------------------
-                        # First true detection.
-                        # ------------------------------------------------
-
-                        elif (
-                                self.true_detection_round[
-                                    me
-                                ]
-                                is None
-                        ):
-
-                            self.true_detection_round[
-                                me
-                            ] = server_round
-
-                            self.detection_delay[
-                                me
-                            ] = (
-                                    server_round
-                                    - shift_round
-                            )
-
-                # ========================================================
-                # Save current detector state
-                # ========================================================
-
-                self.previous_detector_state[
-                    me
-                ] = current_state
-
-                # ========================================================
-                # Save curve histories
-                # ========================================================
-
-                self.shift_ground_truth_state[
-                    me
-                ].append(
-                    ground_truth_state
-                )
-
-                self.shift_ground_truth_event[
-                    me
-                ].append(
-                    ground_truth_event
-                )
-
-                self.shift_detected[
-                    me
-                ].append(
-                    detection_event
-                )
-
-                # ========================================================
-                # Accumulated metrics
-                # ========================================================
-
-                tp = int(
-                    self.true_detection_round[
-                        me
-                    ]
-                    is not None
-                )
-
-                fp = len(
-                    self.false_alarm_rounds[
-                        me
-                    ]
-                )
-
-                precision = (
-                    tp / (tp + fp)
-                    if (tp + fp) > 0
-                    else 0.0
-                )
-
-                # One configured ground-truth event per model.
-                recall = float(
-                    tp
-                )
-
-                f1 = (
-                    2.0
-                    * precision
-                    * recall
-                    / (
-                            precision
-                            + recall
-                    )
-                    if (
-                               precision
-                               + recall
-                       ) > 0
-                    else 0.0
-                )
+                if self.first_data_shift_round[me] is None and predicted:
+                    self.first_data_shift_round[me] = server_round
 
                 first_detection_round = (
-                    self.first_data_shift_round[
-                        me
-                    ]
-                    if (
-                            self.first_data_shift_round[
-                                me
-                            ]
-                            is not None
-                    )
-                    else -1
+                    self.first_data_shift_round[me]
+                    if self.first_data_shift_round[me] is not None else -1
                 )
-
                 true_detection_round = (
-                    self.true_detection_round[
-                        me
-                    ]
-                    if (
-                            self.true_detection_round[
-                                me
-                            ]
-                            is not None
-                    )
-                    else -1
+                    self.true_detection_round[me]
+                    if self.true_detection_round[me] is not None else -1
                 )
-
-                # --------------------------------------------------------
-                # Keep -1 internally when no detection occurred.
-                #
-                # The analysis code can represent this as N/A.
-                # --------------------------------------------------------
-
                 detection_delay = (
-                    self.detection_delay[
-                        me
-                    ]
-                    if (
-                            self.true_detection_round[
-                                me
-                            ]
-                            is not None
-                    )
-                    else -1
+                    self.detection_delay[me]
+                    if self.detection_delay[me] >= 0 else -1
                 )
+                shift_round = shift_rounds[0] if shift_rounds else -1
 
-                shift_round = (
-                    shift_rounds[0]
-                    if shift_rounds
-                    else -1
+                self.detection_event[me] = int(
+                    predicted and not getattr(self, "_previous_shift_prediction", {}).get(me, 0)
+                )
+                if not hasattr(self, "_previous_shift_prediction"):
+                    self._previous_shift_prediction = {m: 0 for m in range(self.ME)}
+                self._previous_shift_prediction[me] = predicted
+
+                self.shift_ground_truth_state[me].append(ground_truth)
+                self.shift_ground_truth_event[me].append(ground_truth_event)
+                self.shift_detected[me].append(predicted)
+                self.previous_detector_state[me] = bool(
+                    self.data_shift_detected[me]
                 )
 
                 row = [[
@@ -2926,26 +2506,17 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     fp,
                     first_detection_round,
                     shift_round,
+                    tp,
+                    fn,
+                    cm["tn"],
                 ]]
 
-                self._write_rows(
-                    file_path,
-                    row
-                )
+                self._write_rows(file_path, row)
 
         except Exception as e:
-
-            print(
-                "_save_shift_detection_metrics error"
-            )
-
-            print(
-                "Error on line {} {} {}".format(
-                    sys.exc_info()[-1].tb_lineno,
-                    type(e).__name__,
-                    e
-                )
-            )
+            print("_save_shift_detection_metrics error")
+            print("Error on line {} {} {}".format(
+                sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def _save_shift_detection_curve(
             self,
@@ -2969,12 +2540,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 f"{self.strategy_name}.csv"
             )
 
-            SHIFT_STATES = {
-                "label shift",
-                "concept drift",
-                "combined shift"
-            }
-
             for me in range(self.ME):
                 ground_truth = (
                     self.shift_ground_truth_state[
@@ -2986,21 +2551,9 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     else 0
                 )
 
-                current_state = str(
-                    self.data_shift_type[me]
-                ).strip()
-
-                normalized_state = (
-                    current_state
-                    .lower()
-                    .replace("_", " ")
-                    .strip()
-                )
-
                 detector_state = (
                     "DATA_SHIFT"
-                    if normalized_state
-                       in SHIFT_STATES
+                    if self.data_shift_detected[me]
                     else "NO_SHIFT"
                 )
 
@@ -3013,8 +2566,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     ground_truth,
                     self.detection_event[me],
                     detector_state,
-                    self.drift_clients[me],
-                    self.drift_rate[me],
+                    self.gds_clients[me],
+                    self.gds_rate[me],
                 ]]
 
                 self._write_rows(

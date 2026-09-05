@@ -31,9 +31,6 @@ import pickle
 from scipy.stats import ks_2samp
 from scipy.stats import chi2_contingency
 import pandas as pd
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score
-from scipy.stats import binomtest
 import copy
 
 def cosine_similarity(p_1, p_2):
@@ -74,8 +71,7 @@ def extract_labels(loader, label_key="label"):
 
 import torch
 import numpy as np
-from collections import Counter
-from scipy.stats import chisquare, ks_2samp
+from scipy.stats import ks_2samp
 
 
 def extract_from_loader(loader, key="image"):
@@ -98,927 +94,490 @@ def extract_from_loader(loader, key="image"):
 
 
 def detect_label_shift(y1, y2):
+    """
+    Detect label shift from the change in P(Y) between two local windows.
 
-    c1 = Counter(y1)
-    c2 = Counter(y2)
+    The returned statistic is the chi-square statistic from a 2 x C
+    contingency table. The p-value is used as statistical evidence; the
+    magnitude used by MultiFedPredict remains the Total Variation distance
+    computed from the class proportions.
+    """
+    y1 = np.asarray(y1).reshape(-1)
+    y2 = np.asarray(y2).reshape(-1)
 
-    classes = sorted(set(y1) | set(y2))
+    classes = sorted(set(y1.tolist()) | set(y2.tolist()))
+    if len(classes) < 2 or len(y1) == 0 or len(y2) == 0:
+        return 0.0, 1.0
 
-    f1 = np.array([c1.get(c, 0) for c in classes])
-    f2 = np.array([c2.get(c, 0) for c in classes])
+    table = np.asarray([
+        [np.sum(y1 == c) for c in classes],
+        [np.sum(y2 == c) for c in classes],
+    ], dtype=np.int64)
 
-    stat, p = chisquare(f1, f2)
+    if np.any(table.sum(axis=0) == 0):
+        table = table[:, table.sum(axis=0) > 0]
 
-    return stat, p
+    if table.shape[1] < 2:
+        return 0.0, 1.0
+
+    try:
+        stat, p, _, _ = chi2_contingency(table, correction=False)
+    except ValueError:
+        return 0.0, 1.0
+
+    return float(stat), float(p)
 
 
-def _extract_class_conditional_features(
+def label_distribution_from_loader(loader, n_classes):
+    """Return the local empirical P(Y) for one temporal data window."""
+    counts = np.zeros(int(n_classes), dtype=np.float64)
+    total = 0
+    if loader is None:
+        return counts
+    for batch in loader:
+        if not isinstance(batch, dict) or "label" not in batch:
+            continue
+        y = batch["label"]
+        if isinstance(y, torch.Tensor):
+            y = y.detach().cpu().numpy()
+        y = np.asarray(y).reshape(-1).astype(int)
+        valid = y[(y >= 0) & (y < int(n_classes))]
+        if valid.size:
+            counts += np.bincount(valid, minlength=int(n_classes))[:int(n_classes)]
+            total += int(valid.size)
+    if total == 0:
+        return counts
+    return counts / float(total)
+
+
+def _rbf_kernel_matrix(x, y, sigma):
+    """Compute an RBF kernel matrix using squared Euclidean distances."""
+    x = np.asarray(x, dtype=np.float32)
+    y = np.asarray(y, dtype=np.float32)
+    if x.ndim != 2 or y.ndim != 2 or x.shape[1] != y.shape[1]:
+        return np.empty((0, 0), dtype=np.float64)
+    x2 = np.sum(x * x, axis=1, keepdims=True)
+    y2 = np.sum(y * y, axis=1, keepdims=True).T
+    dist2 = np.maximum(x2 + y2 - 2.0 * np.dot(x, y.T), 0.0)
+    return np.exp(-dist2 / (2.0 * max(float(sigma) ** 2, 1e-12)))
+
+
+def _median_heuristic_sigma(x, y):
+    """Robust RBF bandwidth selected from pooled pairwise distances."""
+    from scipy.spatial.distance import pdist
+    pooled = np.concatenate([x, y], axis=0)
+    if len(pooled) < 2:
+        return 1.0
+    distances = pdist(pooled, metric="euclidean")
+    distances = distances[np.isfinite(distances) & (distances > 1e-12)]
+    if len(distances) == 0:
+        return 1.0
+    sigma = float(np.median(distances))
+    return max(sigma, 1e-6)
+
+
+def _mmd2_unbiased(x, y, sigma):
+    """Unbiased squared MMD with an RBF kernel."""
+    x = np.asarray(x, dtype=np.float32)
+    y = np.asarray(y, dtype=np.float32)
+    nx, ny = len(x), len(y)
+    if nx < 2 or ny < 2 or x.shape[1] != y.shape[1]:
+        return 0.0
+
+    kxx = _rbf_kernel_matrix(x, x, sigma)
+    kyy = _rbf_kernel_matrix(y, y, sigma)
+    kxy = _rbf_kernel_matrix(x, y, sigma)
+
+    np.fill_diagonal(kxx, 0.0)
+    np.fill_diagonal(kyy, 0.0)
+
+    term_xx = np.sum(kxx) / (nx * (nx - 1))
+    term_yy = np.sum(kyy) / (ny * (ny - 1))
+    term_xy = 2.0 * np.mean(kxy)
+    return float(max(term_xx + term_yy - term_xy, 0.0))
+
+
+def _mmd_effect_and_pvalue(xa, xb, random_seed=42, n_permutations=100):
+    """Generic distribution-shift evidence using RBF-MMD.
+
+    The effect is normalized to [0,1] and the p-value is obtained from a
+    permutation null distribution. No labels or shift type are required.
+    """
+    xa = np.asarray(xa, dtype=np.float32)
+    xb = np.asarray(xb, dtype=np.float32)
+    if xa.ndim != 2 or xb.ndim != 2 or len(xa) < 10 or len(xb) < 10:
+        return 0.0, 1.0
+    if xa.shape[1] != xb.shape[1]:
+        return 0.0, 1.0
+
+    sigma = _median_heuristic_sigma(xa, xb)
+    observed = _mmd2_unbiased(xa, xb, sigma)
+
+    # Convert MMD^2 to a bounded effect-size-like score.  Under an RBF
+    # kernel, MMD^2 is naturally bounded by a small multiple of one; this
+    # transformation preserves ordering while avoiding dataset-specific
+    # raw-distance scales.
+    effect = float(np.clip(np.sqrt(max(observed, 0.0)), 0.0, 1.0))
+
+    rng = np.random.RandomState(random_seed)
+    pooled = np.concatenate([xa, xb], axis=0)
+    n_a = len(xa)
+    observed_count = 0
+    n_total = len(pooled)
+
+    for _ in range(int(n_permutations)):
+        idx = rng.permutation(n_total)
+        perm_a = pooled[idx[:n_a]]
+        perm_b = pooled[idx[n_a:]]
+        stat = _mmd2_unbiased(perm_a, perm_b, sigma)
+        if stat >= observed - 1e-12:
+            observed_count += 1
+
+    p_value = float((observed_count + 1.0) / (int(n_permutations) + 1.0))
+    return effect, p_value
+
+
+def extract_features_from_loader(
         loader,
-        key,
+        key="image",
+        max_samples=512,
+        random_seed=42
+):
+    """Extract an unlabeled sample of X from a temporal local data window."""
+    if loader is None:
+        return np.empty((0, 0), dtype=np.float32)
+
+    features = []
+    total = 0
+    for batch in loader:
+        if not isinstance(batch, dict) or key not in batch:
+            continue
+        x = batch[key]
+        if not isinstance(x, torch.Tensor):
+            x = torch.as_tensor(x)
+        x = x.detach().cpu().numpy()
+        if x.ndim == 0:
+            continue
+        x = x.reshape(x.shape[0], -1).astype(np.float32, copy=False)
+        features.append(x)
+        total += len(x)
+
+    if not features:
+        return np.empty((0, 0), dtype=np.float32)
+
+    x = np.concatenate(features, axis=0)
+    if len(x) > int(max_samples):
+        rng = np.random.RandomState(random_seed)
+        idx = rng.choice(len(x), size=int(max_samples), replace=False)
+        x = x[idx]
+    return x
+
+
+def _compact_features(x, n_components=32, random_seed=42):
+    """Project high-dimensional inputs to a deterministic compact space."""
+    x = np.asarray(x, dtype=np.float32)
+    if x.ndim != 2 or len(x) == 0:
+        return x
+    d = x.shape[1]
+    if d <= int(n_components):
+        return x
+    rng = np.random.RandomState(random_seed)
+    projection = rng.normal(
+        0.0, 1.0, size=(d, int(n_components))
+    ).astype(np.float32)
+    projection /= np.sqrt(float(n_components))
+    return x @ projection
+
+
+def _make_sample_loader(loader, fraction=0.20, random_seed=42):
+    """Create a deterministic random subset loader containing ``fraction``
+    of the samples from ``loader``.
+
+    Only the subset is retained for temporal data-shift detection. The
+    original training loader is never modified.
+    """
+    if loader is None or not hasattr(loader, "dataset"):
+        return None
+
+    dataset = loader.dataset
+    n = len(dataset)
+    if n == 0:
+        return None
+
+    sample_size = max(1, int(round(float(n) * float(fraction))))
+    sample_size = min(sample_size, n)
+
+    rng = np.random.RandomState(int(random_seed))
+    indices = rng.choice(n, size=sample_size, replace=False).tolist()
+
+    from torch.utils.data import DataLoader, Subset
+
+    subset = Subset(dataset, indices)
+
+    return DataLoader(
+        subset,
+        batch_size=getattr(loader, "batch_size", None) or 1,
+        shuffle=False,
+        num_workers=getattr(loader, "num_workers", 0),
+        collate_fn=getattr(loader, "collate_fn", None),
+        drop_last=False,
+        pin_memory=getattr(loader, "pin_memory", False),
+    )
+
+
+def _performance_from_loader(model, loader, device, dataset_name, n_classes):
+    """Evaluate one model on a loader and return balanced accuracy."""
+    if loader is None or len(loader.dataset) == 0:
+        return 0.0, np.empty(0, dtype=np.int8), np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64)
+
+    key = {
+        "CIFAR10": "img",
+        "MNIST": "image",
+        "EMNIST": "image",
+        "GTSRB": "image",
+        "Gowalla": "sequence",
+        "WISDM-W": "sequence",
+        "ImageNet": "image",
+        "ImageNet10": "image",
+        "wikitext": "sequence",
+        "Foursquare": "sequence",
+    }[dataset_name]
+
+    model.eval()
+    model.to(device)
+    y_true = []
+    y_pred = []
+
+    with torch.no_grad():
+        for batch in loader:
+            x = batch[key].to(device)
+            labels = batch["label"].to(device)
+            outputs = model(x)
+            predictions = torch.argmax(outputs, dim=1)
+            y_true.append(labels.detach().cpu().numpy())
+            y_pred.append(predictions.detach().cpu().numpy())
+
+    y_true = np.concatenate(y_true).astype(np.int64)
+    y_pred = np.concatenate(y_pred).astype(np.int64)
+    score = float(metrics.balanced_accuracy_score(y_true, y_pred))
+    correct = (y_true == y_pred).astype(np.int8)
+    return score, correct, y_true, y_pred
+
+
+def _bootstrap_performance_drop_pvalue(
+        old_true,
+        old_pred,
+        current_true,
+        current_pred,
+        random_seed=42,
+        n_bootstrap=200
+):
+    """Estimate significance of a balanced-accuracy performance drop."""
+    old_true = np.asarray(old_true).reshape(-1)
+    old_pred = np.asarray(old_pred).reshape(-1)
+    current_true = np.asarray(current_true).reshape(-1)
+    current_pred = np.asarray(current_pred).reshape(-1)
+
+    if min(len(old_true), len(current_true)) < 10:
+        return 1.0
+
+    rng = np.random.RandomState(int(random_seed))
+    drops = np.empty(int(n_bootstrap), dtype=np.float64)
+
+    for i in range(int(n_bootstrap)):
+        old_idx = rng.randint(0, len(old_true), size=len(old_true))
+        current_idx = rng.randint(0, len(current_true), size=len(current_true))
+
+        old_score = metrics.balanced_accuracy_score(
+            old_true[old_idx], old_pred[old_idx]
+        )
+        current_score = metrics.balanced_accuracy_score(
+            current_true[current_idx], current_pred[current_idx]
+        )
+        drops[i] = old_score - current_score
+
+    # One-sided bootstrap evidence for a positive degradation.
+    return float(
+        (np.sum(drops <= 0.0) + 1.0) / (len(drops) + 1.0)
+    )
+
+def detect_generic_data_shift(
+        model,
+        old_loader,
+        current_loader,
+        device,
+        dataset_name,
         n_classes,
-        label_offset=0,
-        max_samples_per_class=256,
+        min_performance_drop=0.20,
+        alpha=0.05,
+        n_bootstrap=200,
         random_seed=42
 ):
     """
-    Extract a bounded and deterministic random sample of training
-    examples for each class.
+    Detect generic data shift from relative model-performance degradation.
 
-    The concept-drift detector compares:
+    The same combined model is evaluated on a sample of the previous
+    training window and a sample of the current training window.
 
-        P(X | Y)
+    A generic shift is reported only when:
 
-    between two training windows.
+        1. The relative performance reduction is at least
+           ``min_performance_drop``; and
 
-    Important:
-    - Only local training data is used.
-    - No validation/test data is accessed.
-    - Samples are selected independently within each class.
-    - Random selection avoids artifacts caused by the ordering of
-      examples inside the DataLoader.
-    - label_offset is kept for backward compatibility with experiments
-      that explicitly transform labels.
-    """
+        2. The performance degradation is statistically significant
+           according to the bootstrap p-value.
 
-    try:
-        class_features = {
-            c: []
-            for c in range(n_classes)
-        }
+    The relative performance reduction is defined as:
 
-        for batch in loader:
+        relative_drop =
+            max(old_score - current_score, 0) / old_score
 
-            if not isinstance(batch, dict):
-                raise ValueError(
-                    f"Unexpected batch type: {type(batch)}"
-                )
-
-            if key not in batch:
-                raise KeyError(
-                    f"Input key '{key}' not found in batch. "
-                    f"Available keys: {list(batch.keys())}"
-                )
-
-            if "label" not in batch:
-                raise KeyError(
-                    "Key 'label' not found in batch."
-                )
-
-            x = batch[key]
-            y = batch["label"]
-
-            if not isinstance(x, torch.Tensor):
-                x = torch.as_tensor(x)
-
-            if not isinstance(y, torch.Tensor):
-                y = torch.as_tensor(y)
-
-            x = (
-                x.detach()
-                .cpu()
-                .numpy()
-            )
-
-            y = (
-                y.detach()
-                .cpu()
-                .numpy()
-            )
-
-            # Flatten each sample independently.
-            x = x.reshape(
-                x.shape[0],
-                -1
-            ).astype(
-                np.float32,
-                copy=False
-            )
-
-            y = y.astype(
-                np.int64,
-                copy=False
-            )
-
-            # Keep compatibility with the existing
-            # concept-drift simulation.
-            if label_offset != 0:
-                y = (
-                    y + int(label_offset)
-                ) % int(n_classes)
-
-            for class_id in range(n_classes):
-
-                indices = np.where(
-                    y == class_id
-                )[0]
-
-                if len(indices) == 0:
-                    continue
-
-                current_count = sum(
-                    len(part)
-                    for part in class_features[class_id]
-                )
-
-                remaining = (
-                    max_samples_per_class
-                    - current_count
-                )
-
-                if remaining <= 0:
-                    continue
-
-                # Deterministic random sampling inside each batch.
-                rng = np.random.RandomState(
-                    random_seed
-                    + 1009 * class_id
-                )
-
-                if len(indices) > remaining:
-                    indices = rng.choice(
-                        indices,
-                        size=remaining,
-                        replace=False
-                    )
-
-                class_features[class_id].append(
-                    x[indices]
-                )
-
-            # Stop when all classes have enough samples.
-            if all(
-                    sum(
-                        len(part)
-                        for part in class_features[c]
-                    )
-                    >= max_samples_per_class
-                    for c in range(n_classes)
-            ):
-                break
-
-        # ------------------------------------------------------------
-        # Concatenate samples for each class.
-        # ------------------------------------------------------------
-
-        for class_id in range(n_classes):
-
-            if len(
-                    class_features[class_id]
-            ) == 0:
-
-                class_features[class_id] = np.empty(
-                    (0, 0),
-                    dtype=np.float32
-                )
-
-                continue
-
-            class_features[class_id] = np.concatenate(
-                class_features[class_id],
-                axis=0
-            )
-
-            # Final deterministic cap.
-            if (
-                    len(class_features[class_id])
-                    > max_samples_per_class
-            ):
-
-                rng = np.random.RandomState(
-                    random_seed
-                    + 1009 * class_id
-                    + 7919
-                )
-
-                indices = rng.choice(
-                    len(class_features[class_id]),
-                    size=max_samples_per_class,
-                    replace=False
-                )
-
-                class_features[class_id] = (
-                    class_features[class_id][indices]
-                )
-
-        return class_features
-
-    except Exception as e:
-
-        print(
-            "_extract_class_conditional_features error"
-        )
-
-        print(
-            "Error on line {} {} {}".format(
-                sys.exc_info()[-1].tb_lineno,
-                type(e).__name__,
-                e
-            )
-        )
-
-        raise
-
-def detect_concept_drift(
-        loader_a,
-        loader_b,
-        n_classes,
-        key="image",
-        label_offset_a=0,
-        label_offset_b=0,
-        max_samples_per_class=512,
-        n_projections=16,
-        min_samples_per_class=20,
-        random_seed=42,
-        projection_alpha=0.05,
-        min_significant_projections=1
-):
-    """
-    Detect Concept Drift by measuring changes in P(Y | X).
-
-    The current concept-drift simulator preserves P(Y) but changes
-    P(X | Y) by reassigning the input X of one class to another
-    class while keeping the target label unchanged.
+    Therefore, ``min_performance_drop=0.20`` means that the current
+    balanced accuracy must be at least 20% lower than the previous
+    balanced accuracy.
 
     Example:
 
-        BEFORE:
-            X_a -> Y=0
-            X_b -> Y=1
+        old_score = 0.90
+        current_score = 0.72
 
-        AFTER:
-            X_b -> Y=0
-            X_a -> Y=1
+        absolute_drop = 0.18
+        relative_drop = 0.18 / 0.90 = 0.20
 
-    Therefore, the most direct observable consequence is:
+    In this case, the practical degradation threshold is satisfied.
 
-        P(Y | X)_old != P(Y | X)_new
-
-    For the simulated drift, the exact sample identity is preserved.
-    Consequently, the detector first searches for the same X in both
-    windows and checks whether its associated label changed.
-
-    A statistical P(X | Y) detector is retained as a fallback for
-    situations where exact sample matching is insufficient.
-
-    Returns
-    -------
-    float
-        Concept-drift score in [0, 1].
+    The bootstrap is used only to determine whether the observed
+    performance degradation is statistically significant. It does
+    not determine the magnitude of the practical degradation.
     """
 
     try:
+        # ------------------------------------------------------------
+        # Evaluate the same combined model on the previous window
+        # and on the current window.
+        # ------------------------------------------------------------
+        old_score, _, old_true, old_pred = _performance_from_loader(
+            model,
+            old_loader,
+            device,
+            dataset_name,
+            n_classes
+        )
 
-        # ============================================================
-        # Helper: create an exact signature for one sample
-        # ============================================================
-
-        def sample_signature(x):
-
-            if not isinstance(
-                    x,
-                    torch.Tensor
-            ):
-                x = torch.as_tensor(x)
-
-            x = (
-                x.detach()
-                .cpu()
-                .contiguous()
+        current_score, _, current_true, current_pred = (
+            _performance_from_loader(
+                model,
+                current_loader,
+                device,
+                dataset_name,
+                n_classes
             )
+        )
 
+        # ------------------------------------------------------------
+        # Insufficient data for a reliable comparison.
+        # ------------------------------------------------------------
+        if len(old_true) < 10 or len(current_true) < 10:
             return (
-                str(
-                    x.dtype
-                ).encode("utf-8")
-                + b"|"
-                + str(
-                    tuple(
-                        x.shape
-                    )
-                ).encode("utf-8")
-                + b"|"
-                + x.numpy().tobytes()
-            )
-
-        # ============================================================
-        # Helper: extract X -> labels
-        # ============================================================
-
-        def extract_sample_labels(
-                loader,
-                label_offset
-        ):
-
-            sample_labels = {}
-
-            if loader is None:
-                return sample_labels
-
-            for batch in loader:
-
-                if not isinstance(
-                        batch,
-                        dict
-                ):
-                    continue
-
-                if (
-                        key not in batch
-                        or "label" not in batch
-                ):
-                    continue
-
-                x = batch[key]
-                y = batch["label"]
-
-                if not isinstance(
-                        x,
-                        torch.Tensor
-                ):
-                    x = torch.as_tensor(x)
-
-                if not isinstance(
-                        y,
-                        torch.Tensor
-                ):
-                    y = torch.as_tensor(y)
-
-                x = (
-                    x.detach()
-                    .cpu()
-                )
-
-                y = (
-                    y.detach()
-                    .cpu()
-                    .numpy()
-                    .astype(
-                        np.int64
-                    )
-                )
-
-                # ----------------------------------------------------
-                # Keep compatibility with the original implementation.
-                # ----------------------------------------------------
-
-                if label_offset != 0:
-
-                    y = (
-                        y
-                        + int(label_offset)
-                    ) % int(
-                        n_classes
-                    )
-
-                for i in range(
-                        x.shape[0]
-                ):
-
-                    signature = (
-                        sample_signature(
-                            x[i]
-                        )
-                    )
-
-                    label = int(
-                        y[i]
-                    )
-
-                    if signature not in sample_labels:
-
-                        sample_labels[
-                            signature
-                        ] = set()
-
-                    sample_labels[
-                        signature
-                    ].add(
-                        label
-                    )
-
-            return sample_labels
-
-        # ============================================================
-        # EXACT SAMPLE-REASSIGNMENT DETECTION
-        # ============================================================
-
-        labels_a = extract_sample_labels(
-            loader_a,
-            label_offset_a
-        )
-
-        labels_b = extract_sample_labels(
-            loader_b,
-            label_offset_b
-        )
-
-        # ------------------------------------------------------------
-        # Samples that occur in both windows.
-        # ------------------------------------------------------------
-
-        common_samples = (
-            set(
-                labels_a.keys()
-            )
-            & set(
-                labels_b.keys()
-            )
-        )
-
-        matched = 0
-        reassigned = 0
-
-        for signature in common_samples:
-
-            old_labels = labels_a[
-                signature
-            ]
-
-            new_labels = labels_b[
-                signature
-            ]
-
-            # --------------------------------------------------------
-            # Normally each X has one label. Sets are used because
-            # duplicated samples can exist in real datasets.
-            #
-            # A reassignment is considered definite only when there
-            # is no label overlap between the two windows.
-            # --------------------------------------------------------
-
-            if (
-                    len(
-                        old_labels
-                    ) == 0
-                    or len(
-                        new_labels
-                    ) == 0
-            ):
-                continue
-
-            matched += 1
-
-            if old_labels.isdisjoint(
-                    new_labels
-            ):
-                reassigned += 1
-
-        # ============================================================
-        # DIRECT CD SCORE
-        # ============================================================
-
-        if matched > 0:
-
-            reassignment_score = (
-                reassigned
-                / float(
-                    matched
-                )
-            )
-
-            reassignment_score = float(
-                np.clip(
-                    reassignment_score,
-                    0.0,
-                    1.0
-                )
-            )
-
-        else:
-
-            reassignment_score = 0.0
-
-        print(
-            f"[CD REASSIGNMENT] "
-            f"matched={matched} "
-            f"reassigned={reassigned} "
-            f"score={reassignment_score:.6f}"
-        )
-
-        # ============================================================
-        # WHY WE DO NOT STOP HERE
-        #
-        # If the loaders do not expose the exact same samples
-        # (e.g., future experiments with transformed X), exact
-        # matching can be insufficient.
-        #
-        # Therefore retain the original statistical detector.
-        # ============================================================
-
-        statistical_score = 0.0
-
-        # ------------------------------------------------------------
-        # Use the statistical detector only when exact matching
-        # provides insufficient evidence.
-        # ------------------------------------------------------------
-
-        if (
-                matched
-                < min_samples_per_class
-        ):
-
-            class_features_a = (
-                _extract_class_conditional_features(
-                    loader=loader_a,
-                    key=key,
-                    n_classes=n_classes,
-                    label_offset=label_offset_a,
-                    max_samples_per_class=max_samples_per_class,
-                    random_seed=random_seed
-                )
-            )
-
-            class_features_b = (
-                _extract_class_conditional_features(
-                    loader=loader_b,
-                    key=key,
-                    n_classes=n_classes,
-                    label_offset=label_offset_b,
-                    max_samples_per_class=max_samples_per_class,
-                    random_seed=random_seed + 7919
-                )
-            )
-
-            class_scores = []
-            class_weights = []
-
-            for class_id in range(
-                    n_classes
-            ):
-
-                xa = class_features_a[
-                    class_id
-                ]
-
-                xb = class_features_b[
-                    class_id
-                ]
-
-                if (
-                        xa.ndim != 2
-                        or xb.ndim != 2
-                        or len(xa)
-                        < min_samples_per_class
-                        or len(xb)
-                        < min_samples_per_class
-                ):
-                    continue
-
-                if (
-                        xa.shape[1]
-                        != xb.shape[1]
-                ):
-                    continue
-
-                feature_dim = (
-                    xa.shape[1]
-                )
-
-                if feature_dim <= 0:
-                    continue
-
-                rng = np.random.RandomState(
-                    random_seed
-                    + 1009
-                    * class_id
-                )
-
-                projections = (
-                    rng.normal(
-                        0.0,
-                        1.0,
-                        size=(
-                            n_projections,
-                            feature_dim
-                        )
-                    )
-                    .astype(
-                        np.float32
-                    )
-                )
-
-                norms = np.linalg.norm(
-                    projections,
-                    axis=1,
-                    keepdims=True
-                )
-
-                projections = (
-                    projections
-                    / np.maximum(
-                        norms,
-                        1e-12
-                    )
-                )
-
-                projected_a = (
-                    np.matmul(
-                        xa,
-                        projections.T
-                    )
-                )
-
-                projected_b = (
-                    np.matmul(
-                        xb,
-                        projections.T
-                    )
-                )
-
-                ks_statistics = []
-                p_values = []
-
-                for projection_id in range(
-                        n_projections
-                ):
-
-                    values_a = (
-                        projected_a[
-                            :,
-                            projection_id
-                        ]
-                    )
-
-                    values_b = (
-                        projected_b[
-                            :,
-                            projection_id
-                        ]
-                    )
-
-                    combined = np.concatenate(
-                        [
-                            values_a,
-                            values_b
-                        ]
-                    )
-
-                    scale = np.std(
-                        combined
-                    )
-
-                    if (
-                            not np.isfinite(
-                                scale
-                            )
-                            or scale < 1e-12
-                    ):
-                        scale = 1.0
-
-                    values_a = (
-                        values_a
-                        / scale
-                    )
-
-                    values_b = (
-                        values_b
-                        / scale
-                    )
-
-                    statistic, p_value = (
-                        ks_2samp(
-                            values_a,
-                            values_b,
-                            alternative="two-sided",
-                            mode="auto"
-                        )
-                    )
-
-                    if (
-                            not np.isfinite(
-                                statistic
-                            )
-                            or not np.isfinite(
-                                p_value
-                            )
-                    ):
-                        continue
-
-                    ks_statistics.append(
-                        float(
-                            np.clip(
-                                statistic,
-                                0.0,
-                                1.0
-                            )
-                        )
-                    )
-
-                    p_values.append(
-                        float(
-                            np.clip(
-                                p_value,
-                                0.0,
-                                1.0
-                            )
-                        )
-                    )
-
-                if len(
-                        ks_statistics
-                ) == 0:
-                    continue
-
-                ks_statistics = np.asarray(
-                    ks_statistics,
-                    dtype=float
-                )
-
-                p_values = np.asarray(
-                    p_values,
-                    dtype=float
-                )
-
-                significant = (
-                    p_values
-                    < projection_alpha
-                )
-
-                n_significant = int(
-                    np.sum(
-                        significant
-                    )
-                )
-
-                significance_fraction = (
-                    n_significant
-                    / float(
-                        len(
-                            p_values
-                        )
-                    )
-                )
-
-                mean_ks = float(
-                    np.mean(
-                        ks_statistics
-                    )
-                )
-
-                median_ks = float(
-                    np.median(
-                        ks_statistics
-                    )
-                )
-
-                max_ks = float(
-                    np.max(
-                        ks_statistics
-                    )
-                )
-
-                top_k = max(
-                    1,
-                    int(
-                        np.ceil(
-                            0.25
-                            * len(
-                                ks_statistics
-                            )
-                        )
-                    )
-                )
-
-                strongest_ks = float(
-                    np.mean(
-                        np.sort(
-                            ks_statistics
-                        )[-top_k:]
-                    )
-                )
-
-                class_score = (
-                    0.25 * mean_ks
-                    + 0.25 * median_ks
-                    + 0.20 * max_ks
-                    + 0.30 * strongest_ks
-                )
-
-                class_score = (
-                    0.80
-                    * class_score
-                    + 0.20
-                    * significance_fraction
-                )
-
-                class_scores.append(
-                    float(
-                        np.clip(
-                            class_score,
-                            0.0,
-                            1.0
-                        )
-                    )
-                )
-
-                class_weights.append(
-                    float(
-                        min(
-                            len(xa),
-                            len(xb)
-                        )
-                    )
-                )
-
-            if len(
-                    class_scores
-            ) > 0:
-
-                class_scores = np.asarray(
-                    class_scores,
-                    dtype=float
-                )
-
-                class_weights = np.asarray(
-                    class_weights,
-                    dtype=float
-                )
-
-                weight_sum = np.sum(
-                    class_weights
-                )
-
-                if weight_sum > 0:
-
-                    weighted_mean = (
-                        np.sum(
-                            class_scores
-                            * class_weights
-                        )
-                        / weight_sum
-                    )
-
-                else:
-
-                    weighted_mean = np.mean(
-                        class_scores
-                    )
-
-                maximum = np.max(
-                    class_scores
-                )
-
-                statistical_score = (
-                    0.60 * maximum
-                    + 0.40 * weighted_mean
-                )
-
-                statistical_score = float(
-                    np.clip(
-                        statistical_score,
-                        0.0,
-                        1.0
-                    )
-                )
-
-        # ============================================================
-        # FINAL SCORE
-        # ============================================================
-        #
-        # For the current simulator, exact reassignment is the
-        # strongest evidence.
-        #
-        # If enough exact matches exist, use that signal directly.
-        #
-        # Otherwise use the statistical detector.
-        # ============================================================
-
-        if matched >= min_samples_per_class:
-
-            cd_score = reassignment_score
-
-        else:
-
-            cd_score = max(
-                reassignment_score,
-                statistical_score
-            )
-
-        cd_score = float(
-            np.clip(
-                cd_score,
                 0.0,
-                1.0
+                1.0,
+                old_score,
+                current_score
             )
+
+        # ------------------------------------------------------------
+        # Absolute performance degradation.
+        #
+        # This is retained for diagnostics and interpretation, but
+        # it is NOT the threshold used to determine the shift.
+        # ------------------------------------------------------------
+        absolute_drop = float(
+            max(old_score - current_score, 0.0)
         )
 
-        print(
-            f"[CD SCORE] "
-            f"reassignment={reassignment_score:.6f} "
-            f"statistical={statistical_score:.6f} "
-            f"matched={matched} "
-            f"reassigned={reassigned} "
-            f"CD={cd_score:.6f}"
+        # ------------------------------------------------------------
+        # Relative performance degradation.
+        #
+        # Example:
+        #
+        # old_score = 0.80
+        # current_score = 0.64
+        #
+        # relative_drop = (0.80 - 0.64) / 0.80
+        #                = 0.20
+        #
+        # Therefore, this represents a 20% reduction.
+        # ------------------------------------------------------------
+        if old_score > 1e-12:
+            relative_drop = float(
+                absolute_drop / old_score
+            )
+        else:
+            relative_drop = 0.0
+
+        # Numerical safety.
+        relative_drop = float(
+            np.clip(relative_drop, 0.0, 1.0)
         )
 
-        return cd_score
+        # ------------------------------------------------------------
+        # Bootstrap statistical significance test.
+        #
+        # The bootstrap estimates whether the observed degradation
+        # can reasonably be explained by sampling variability.
+        #
+        # IMPORTANT:
+        # The bootstrap p-value is independent of the practical
+        # relative-drop threshold above.
+        # ------------------------------------------------------------
+        p_value = _bootstrap_performance_drop_pvalue(
+            old_true,
+            old_pred,
+            current_true,
+            current_pred,
+            random_seed=random_seed,
+            n_bootstrap=n_bootstrap
+        )
+
+        # ------------------------------------------------------------
+        # Generic data shift is detected only when BOTH conditions
+        # are satisfied:
+        #
+        #   1. Relative degradation >= threshold
+        #   2. Bootstrap p-value < alpha
+        #
+        # Thus, with min_performance_drop=0.20:
+        #
+        #       current_score <= 0.80 * old_score
+        #
+        # AND:
+        #
+        #       p_value < 0.05
+        # ------------------------------------------------------------
+        detected = (
+            relative_drop >= float(min_performance_drop)
+            and p_value < float(alpha)
+        )
+
+        # ------------------------------------------------------------
+        # Return the RELATIVE degradation as the GDS score.
+        #
+        # Previously this returned the absolute difference
+        # old_score - current_score. Now it returns:
+        #
+        #       (old_score - current_score) / old_score
+        #
+        # whenever the shift is detected.
+        # ------------------------------------------------------------
+        return (
+            relative_drop if detected else 0.0,
+            p_value,
+            old_score,
+            current_score
+        )
 
     except Exception as e:
-
-        print(
-            "detect_concept_drift error"
-        )
-
+        print("detect_generic_data_shift error")
         print(
             "Error on line {} {} {}".format(
                 sys.exc_info()[-1].tb_lineno,
@@ -1027,7 +586,13 @@ def detect_concept_drift(
             )
         )
 
-        return 0.0
+        return (
+            0.0,
+            1.0,
+            0.0,
+            0.0
+        )
+
 
 
 class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
@@ -1069,6 +634,8 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
 
             self.combined_model = [None] * self.ME
 
+            self.train_test_fraction  = 0.5
+
             self.train_losses = {
                 me: [] for me in range(self.ME)
             }
@@ -1095,41 +662,19 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             }
 
             # ============================================================
-            # NEW:
-            # Independent reference used exclusively by the Concept
-            # Drift detector.
-            #
-            # IMPORTANT:
-            # recent_trainloader is intentionally NOT modified here.
-            # Its current behavior remains unchanged.
+            # Generic data-shift state
             # ============================================================
+            # Only a 20% sample of the previous training window is retained
+            # for performance-based shift detection.  The full training
+            # loader is never copied.
+            self.data_shift_reference_trainloader = [None] * self.ME
+            self.data_shift_reference_window = [0] * self.ME
+            self.data_shift_reference_label_distribution = [None] * self.ME
 
-            self.cd_reference_trainloader = [
-                                                None
-                                            ] * self.ME
-
-            self.cd_reference_window = [
-                                           0
-                                       ] * self.ME
-
-            self.cd_score = [
-                                0.0
-                            ] * self.ME
-
-            # ------------------------------------------------------------
-            # Initialize the CD reference using the initial local
-            # training data.
-            #
-            # This is a separate copy from recent_trainloader.
-            # ------------------------------------------------------------
-
-            for me in range(self.ME):
-                if self.trainloader[me] is not None:
-                    self.cd_reference_trainloader[me] = (
-                        copy.deepcopy(
-                            self.trainloader[me]
-                        )
-                    )
+            self.gds_score = [0.0] * self.ME
+            self.gds_pvalue = [1.0] * self.ME
+            self.gds_old_performance = [0.0] * self.ME
+            self.gds_current_performance = [0.0] * self.ME
 
         except Exception as e:
             print("__init__ error")
@@ -1147,290 +692,173 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             t,
             global_model
     ):
-        """Train the model with data of this client."""
-
+        """Train the model after the performance-based shift check."""
         try:
+            g = torch.Generator()
+            g.manual_seed(t + self.fold_id)
+            random.seed(t + self.fold_id)
+            np.random.seed(t + self.fold_id)
+            torch.manual_seed(t + self.fold_id)
 
+            # ------------------------------------------------------------
+            # Keep the original MultiFedAvg ordering: load the global
+            # model, then update the local training window.
+            # ------------------------------------------------------------
+            set_weights(self.model[me], global_model)
 
+            if t > 1:
+                self.update_local_train_data(t, me)
 
-            # ============================================================
-            # Previous local label distribution
-            # ============================================================
+            current_loader = self.trainloader[me]
 
-            p_old = copy.deepcopy(
-                self.p_ME[me]
-            )
+            # ------------------------------------------------------------
+            # GENERIC DATA SHIFT -- BEFORE LOCAL TRAINING
+            # ------------------------------------------------------------
+            gds = 0.0
+            gds_pvalue = 1.0
+            old_performance = 0.0
+            current_performance = 0.0
 
-            # ============================================================
-            # Previous CD reference
-            #
-            # This reference is independent from recent_trainloader.
-            # ============================================================
-
-            cd_reference_loader = (
-                self.cd_reference_trainloader[me]
-            )
-
-            # ============================================================
-            # Train using the parent implementation
-            # ============================================================
-
-            parameters, size, metrics = (
-                super().fit(
-                    me,
-                    t,
-                    global_model
-                )
-            )
-
-            self.train_losses[me].append(
-                metrics["train_loss"]
-            )
-
-            self.train_accuracies[me].append(
-                metrics["train_accuracy"]
-            )
-
-            # ============================================================
-            # Current local label distribution
-            # ============================================================
-
-            p_current = copy.deepcopy(
-                self.p_ME[me]
-            )
-
-            # ============================================================
-            # Existing similarity metric
-            #
-            # Kept for backward compatibility.
-            # It is NOT used for LS/CD detection.
-            # ============================================================
-
-            similarity = min(
-                cosine_similarity(
-                    p_current,
-                    p_old
-                ),
-                1.0
-            )
-
-            if 1 - similarity < 0:
-                print(
-                    f"similaridade is "
-                    f"{similarity} "
-                    f"rodada {t}"
-                )
-
-            # ============================================================
-            # LABEL SHIFT
-            #
-            # LS is the Total Variation Distance between the current
-            # and previous local label distributions.
-            # ============================================================
-
-            p_current = np.asarray(
-                p_current,
-                dtype=float
-            ).flatten()
-
-            p_old = np.asarray(
-                p_old,
-                dtype=float
-            ).flatten()
+            previous_loader = self.data_shift_reference_trainloader[me]
+            combined_model = self.combined_model[me]
 
             if (
-                    p_current.shape
-                    != p_old.shape
+                    t > 15
+                    and previous_loader is not None
+                    and current_loader is not None
+                    and combined_model is not None
             ):
-                raise ValueError(
-                    "Label distribution shapes differ: "
-                    f"{p_current.shape} vs "
-                    f"{p_old.shape}"
+                # Test only 20% of the current training data. The previous
+                # 20% was already sampled and stored at the last evaluate().
+                current_eval_loader = _make_sample_loader(
+                    current_loader,
+                    fraction=self.train_test_fraction,
+                    random_seed=(42 + self.client_id + 1000 * me + t)
                 )
 
-            ls = (
-                    0.5
-                    * np.sum(
-                np.abs(
-                    p_current
-                    - p_old
-                )
-            )
-            )
-
-            ls = float(
-                np.clip(
-                    ls,
-                    0.0,
-                    1.0
-                )
-            )
-
-            # ============================================================
-            # CONCEPT DRIFT
-            #
-            # CD is based exclusively on P(X | Y).
-            #
-            # The detector does NOT use:
-            #   - experiment_id
-            #   - ground truth
-            #   - label-shift configuration
-            #   - PS
-            #   - similarity
-            #
-            # Therefore a pure change in Dirichlet alpha should not
-            # generate CD as long as P(X | Y) remains unchanged.
-            # ============================================================
-
-            cd = 0.0
-
-            if (
-                    cd_reference_loader is not None
-                    and self.trainloader[me] is not None
-                    and t > 1
-            ):
-                input_key = (
-                    self.dataset_input_map[
-                        self.args.dataset[me]
-                    ]
-                )
-
-                cd = detect_concept_drift(
-                    loader_a=cd_reference_loader,
-                    loader_b=self.trainloader[me],
-                    n_classes=self.n_classes[me],
-                    key=input_key,
-                    max_samples_per_class=512,
-                    n_projections=16,
-                    min_samples_per_class=20,
-                    random_seed=(
-                            42
-                            + self.client_id
-                            + 1000 * me
-                    ),
-                    projection_alpha=0.05,
-                    min_significant_projections=1
-                )
-
-                cd = float(
-                    np.clip(
-                        cd,
-                        0.0,
-                        1.0
+                gds, gds_pvalue, old_performance, current_performance = (
+                    detect_generic_data_shift(
+                        model=combined_model,
+                        old_loader=previous_loader,
+                        current_loader=current_eval_loader,
+                        device=self.device,
+                        dataset_name=self.args.dataset[me],
+                        n_classes=self.n_classes[me],
+                        min_performance_drop=0.20,
+                        alpha=0.05,
+                        n_bootstrap=200,
+                        random_seed=(42 + self.client_id + 1000 * me + t)
                     )
                 )
 
-                self.cd_score[me] = cd
+                gds = float(np.clip(gds, 0.0, 1.0))
+                gds_pvalue = float(np.clip(gds_pvalue, 0.0, 1.0))
+                old_performance = float(np.clip(old_performance, 0.0, 1.0))
+                current_performance = float(np.clip(current_performance, 0.0, 1.0))
 
-            # ============================================================
-            # PS
-            #
-            # Kept only for backward compatibility with MultiFedPredict.
-            # It is NOT used for data-shift classification.
-            # ============================================================
+            self.gds_score[me] = gds
+            self.gds_pvalue[me] = gds_pvalue
+            self.gds_old_performance[me] = old_performance
+            self.gds_current_performance[me] = current_performance
 
-            ps = (
-                    1.0
-                    - similarity
-            )
-
-            # ============================================================
-            # Only scalar metrics leave the client
-            # ============================================================
-
-            metrics["non_iid"] = {
-
-                "fc": self.fc_ME[me],
-
-                "il": self.il_ME[me],
-
-                "similarity": similarity,
-
-                "ps": ps,
-
-                "ls": ls,
-
-                "cd": cd
-            }
-
-            # ============================================================
-            # Update CD reference AFTER detection
-            #
-            # This is important:
-            #
-            # round t compares:
-            #
-            #   reference from t-1
-            #       VS
-            #   current data from t
-            #
-            # Only AFTER that comparison do we make the current window
-            # the reference for the next round.
-            # ============================================================
-
-            self.cd_reference_trainloader[me] = (
-                copy.deepcopy(
-                    self.trainloader[me]
+            # ------------------------------------------------------------
+            # Existing local label-shift signal.
+            # A compact class distribution is stored at evaluate(), so the
+            # full previous training dataset is not required here.
+            # ------------------------------------------------------------
+            if (
+                    t > 1
+                    and self.data_shift_reference_label_distribution[me] is not None
+                    and current_loader is not None
+            ):
+                p_old_window = self.data_shift_reference_label_distribution[me]
+                p_current_window = label_distribution_from_loader(
+                    current_loader, self.n_classes[me]
                 )
+                ls = float(np.clip(
+                    0.5 * np.sum(np.abs(p_current_window - p_old_window)),
+                    0.0, 1.0
+                ))
+            else:
+                ls = 0.0
+
+            # ------------------------------------------------------------
+            # Existing PS/similarity behavior is preserved.
+            # ------------------------------------------------------------
+            p_old = np.asarray(copy.deepcopy(self.p_ME[me]), dtype=float).flatten()
+            p_current = np.asarray(copy.deepcopy(self.p_ME[me]), dtype=float).flatten()
+            similarity = min(cosine_similarity(p_current, p_old), 1.0)
+            ps = 1.0 - similarity
+
+            data_shift_score = float(np.clip(max(ls, gds), 0.0, 1.0))
+
+            # ------------------------------------------------------------
+            # NOW start the original local-training flow.
+            # ------------------------------------------------------------
+            self.lt[me] = t
+            self.optimizer[me] = self._get_optimizer(
+                dataset_name=self.args.dataset[me],
+                me=me
             )
 
-            self.cd_reference_window[me] = (
+            print(
+                f"[TRAIN DEBUG] client={self.client_id} model={me} "
+                f"dataset={self.args.dataset[me]} n_classes={self.n_classes[me]}"
+            )
+
+            results = train(
+                self.model[me],
+                self.trainloader[me],
+                self.valloader[me],
+                self.optimizer[me],
+                self.local_epochs,
+                self.lr,
+                self.device,
+                self.client_id,
+                t,
+                self.args.dataset[me],
+                self.n_classes[me],
                 self.concept_drift_window_train[me]
             )
 
-            if t in [
-                20,
-                30,
-                40,
-                50,
-                60,
-                70,
-                80,
-                90
-            ]:
-                print(
-                    f"cliente #{self.client_id} "
-                    f"rodada {t} "
-                    f"modelo {me} "
-                    f"accuracies "
-                    f"{self.train_accuracies[me]} "
-                    f"LS={ls:.6f} "
-                    f"CD={cd:.6f}"
-                )
+            results["me"] = me
+            results["client_id"] = self.client_id
+            results["Model size"] = self.models_size[me]
+            results["alpha"] = self.alpha_train[me]
+            self.loss_ME[me] = results["train_loss"]
+
+            self.train_losses[me].append(results["train_loss"])
+            self.train_accuracies[me].append(results["train_accuracy"])
+
+            metrics = results
+            metrics["non_iid"] = {
+                "fc": self.fc_ME[me],
+                "il": self.il_ME[me],
+                "similarity": similarity,
+                "ps": ps,
+                "ls": ls,
+                "gds": gds,
+                "gds_pvalue": gds_pvalue,
+                "gds_old_performance": old_performance,
+                "gds_current_performance": current_performance,
+                "data_shift_score": data_shift_score
+            }
 
             print(
-                f"[CLIENT CD] "
-                f"round={t} "
-                f"client={self.client_id} "
-                f"model={me} "
-                f"CD={cd:.6f} "
-                f"max_samples_per_class=256 "
-                f"n_projections=8 "
-                f"min_samples_per_class=20 "
-                f"alpha=0.01 "
-                f"min_significant_projections=2"
+                f"[CLIENT GDS] round={t} client={self.client_id} model={me} "
+                f"old_bal_acc={old_performance:.6f} "
+                f"current_bal_acc={current_performance:.6f} "
+                f"drop={gds:.6f} p={gds_pvalue:.6g} "
+                f"sample_fraction=0.20"
             )
 
-            return (
-                parameters,
-                size,
-                metrics
-            )
+            return get_weights(self.model[me]), len(self.trainloader[me].dataset), metrics
 
         except Exception as e:
-
-            print(
-                "fit error"
-            )
-
-            print(
-                "Error on line {} {} {}".format(
-                    sys.exc_info()[-1].tb_lineno,
-                    type(e).__name__,
-                    e
-                )
-            )
-
+            print("fit error")
+            print("Error on line {} {} {}".format(
+                sys.exc_info()[-1].tb_lineno, type(e).__name__, e
+            ))
             return None
 
     def evaluate(
@@ -1493,9 +921,9 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 )
             )
 
-            cd = float(
+            gds = float(
                 metrics.get(
-                    "cd",
+                    "gds",
                     0.0
                 )
             )
@@ -1508,11 +936,23 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 )
             )
 
-            # This is now the detector decision produced by the server.
-            data_shift_type = (
+            # General detector state produced by the server.
+            # No shift type is inferred or required by the client.
+            data_shift_detected = bool(
                 metrics.get(
-                    "data_shift_type",
-                    "NO_SHIFT"
+                    "data_shift",
+                    False
+                )
+            )
+
+            # Generic-data-shift p-value is produced during fit() and may be
+            # useful for diagnostics only.  It MUST be read from the
+            # server metrics here; evaluate() has no local gds_pvalue
+            # variable.  This fixes the previous NameError.
+            gds_pvalue = float(
+                metrics.get(
+                    "gds_pvalue",
+                    1.0
                 )
             )
 
@@ -1544,12 +984,12 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             # They are used only for local adaptation state.
             # ---------------------------------------------------------
             tau_ls = 0.10
-            tau_cd = 0.15
 
-            shift_detected = (
-                    ls >= tau_ls
-                    or cd >= tau_cd
-            )
+            # Do not independently create a new shift event in
+            # evaluate().  Event detection is performed once by the
+            # server from aggregated client evidence.  Here we only keep
+            # the local data_shift_round for FedPredict compatibility.
+            shift_detected = data_shift_detected
 
             # ---------------------------------------------------------
             # Data-shift round is triggered by either detector.
@@ -1617,7 +1057,9 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                             tau_dh[me]
                     },
                     data_shift_type=(
-                        data_shift_type
+                        "DATA_SHIFT"
+                        if data_shift_detected
+                        else "NO_SHIFT"
                     ),
                     device=self.device,
                     global_model_original_shape=(
@@ -1639,17 +1081,40 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 f"il={il} "
                 f"dh={data_heterogeneity_degree} "
                 f"ls={ls} "
-                f"cd={cd} "
+                f"gds={gds} "
                 f"ps={ps} "
                 f"nt={nt} "
-                f"type={data_shift_type}"
+                f"data_shift={'DATA_SHIFT' if data_shift_detected else 'NO_SHIFT'}"
             )
+
+            # =========================================================
+            # Save the exact combined model used by this evaluate().
+            # The next fit() uses this model to test the previous and
+            # current training windows before local training starts.
+            # =========================================================
+            self.combined_model[me] = copy.deepcopy(combined_model).cpu()
+
+            # Keep only 20% of the training dataset for the next generic
+            # performance-based data-shift test.  The full previous
+            # training dataset is never retained.
+            if self.trainloader[me] is not None:
+                self.data_shift_reference_trainloader[me] = _make_sample_loader(
+                    self.trainloader[me],
+                    fraction=self.train_test_fraction,
+                    random_seed=(42 + self.client_id + 1000 * me + t)
+                )
+                self.data_shift_reference_window[me] = int(t)
+                self.data_shift_reference_label_distribution[me] = (
+                    label_distribution_from_loader(
+                        self.trainloader[me], self.n_classes[me]
+                    )
+                )
 
             # =========================================================
             # IMPORTANT:
             #
             # This is evaluation only.
-            # No LS/CD is calculated from this loader.
+            # No LS/CD is calculated from this validation loader.
             # =========================================================
             loss, test_metrics = test(
                 combined_model,

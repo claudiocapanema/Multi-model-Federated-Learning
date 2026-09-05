@@ -130,8 +130,12 @@ if __name__ == "__main__":
     # experiment_id = "label_shift#3"
     # experiment_id = "label_shift#3_gradual"
     # experiment_id = "label_shift#1_sudden"
-    experiment_id = "label_shift#0.1-1.0_sudden"
-    experiment_id = "label_shift#0.1-10.0_sudden"
+    # experiment_id = "label_shift#0.1-1.0_sudden"
+    # experiment_id = "label_shift#0.1-10.0_sudden"
+    # experiment_id = "label_shift#1.0-10.0_sudden"
+    # experiment_id = "label_shift#1.0-0.1_sudden"
+    experiment_id = "label_shift#10.0-0.1_sudden"
+    # experiment_id = "label_shift#10.0-1.0_sudden"
     # experiment_id = "label_shift#1_recurrent"
     # experiment_id = "label_shift#2_sudden"
     # experiment_id = "label_shift#2_recurrent"
@@ -157,9 +161,9 @@ if __name__ == "__main__":
     # total_clients = 60
     # total_clients = 100
     # alphas = [10.0, 10.0]
-    alphas = [0.1, 0.1, 0.1]
+    # alphas = [0.1, 0.1, 0.1]
     # alphas = [1.0, 1.0, 1.0]
-    # alphas = [10.0, 10.0, 10.0]
+    alphas = [10.0, 10.0, 10.0]
 
     # alphas = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
 

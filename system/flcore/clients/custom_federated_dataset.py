@@ -17,13 +17,16 @@
 
 from typing import Any, Optional, Union
 
+import random
+
 import datasets
 from datasets import Dataset, DatasetDict
+from PIL import Image
 from flwr_datasets.common import EventType, event
 from flwr_datasets.partitioner import Partitioner
 from flwr_datasets.preprocessor import Preprocessor
 from flwr_datasets.utils import (
-    _check_if_dataset_tested,
+    # _check_if_dataset_tested,
     _instantiate_merger_if_needed,
     _instantiate_partitioners,
 )
@@ -112,17 +115,24 @@ class CustomFederatedDataset:
         self,
         *,
         dataset: str,
-        path: str,
+        path: Optional[str] = None,
         subset: Optional[str] = None,
+        dataset_name: Optional[str] = None,
         preprocessor: Optional[Union[Preprocessor, dict[str, tuple[str, ...]]]] = None,
         partitioners: dict[str, Union[Partitioner, int]],
         shuffle: bool = True,
         seed: Optional[int] = 42,
+        duplication_factors: Optional[dict[str, int]] = None,
+        duplication_client_threshold: int = 100,
+        augmentation_datasets: Optional[dict[str, bool]] = None,
+        rotation_degrees: float = 10.0,
+        translation_pixels: int = 2,
         **load_dataset_kwargs: Any,
     ) -> None:
-        _check_if_dataset_tested(dataset)
-        self._dataset_name: str = dataset
-        self._dataset_path: str = path
+        # _check_if_dataset_tested(dataset)
+        self._dataset_id: str = dataset
+        self._dataset_name: str = dataset_name or dataset
+        self._dataset_path: Optional[str] = path
         self._subset: Optional[str] = subset
         self._preprocessor: Optional[Preprocessor] = _instantiate_merger_if_needed(
             preprocessor
@@ -133,6 +143,15 @@ class CustomFederatedDataset:
         self._check_partitioners_correctness()
         self._shuffle = shuffle
         self._seed = seed
+        self._duplication_factors = duplication_factors or {}
+        self._duplication_client_threshold = duplication_client_threshold
+        self._augmentation_datasets = (
+            {"CIFAR10": True, "MNIST": True, "GTSRB": True, "ImageNet10": True, "F-MNIST": True}
+            if augmentation_datasets is None
+            else augmentation_datasets
+        )
+        self._rotation_degrees = float(rotation_degrees)
+        self._translation_pixels = int(translation_pixels)
         #  _dataset is prepared lazily on the first call to `load_partition`
         #  or `load_split`. See _prepare_datasets for more details
         self._dataset: Optional[DatasetDict] = None
@@ -313,9 +332,19 @@ class CustomFederatedDataset:
         Therefore, for such edge cases (for which we have split) the split should
         happen before the resplitting.
         """
-        self._dataset = datasets.load_from_disk(
-            dataset_path=self._dataset_path
-        )
+        # Load either from a local Arrow dataset directory or directly from the
+        # Hugging Face dataset identifier. The latter is useful when ``path`` is
+        # not supplied by the caller.
+        if self._dataset_path is not None:
+            self._dataset = datasets.load_from_disk(
+                dataset_path=self._dataset_path
+            )
+        else:
+            self._dataset = datasets.load_dataset(
+                self._dataset_id,
+                **self._load_dataset_kwargs,
+            )
+
         if not isinstance(self._dataset, datasets.DatasetDict):
             raise ValueError(
                 "Probably one of the specified parameter in `load_dataset_kwargs` "
@@ -323,6 +352,60 @@ class CustomFederatedDataset:
                 "Make sure to use parameter such that the return type is DatasetDict. "
                 f"The return type is currently: {type(self._dataset)}."
             )
+
+        # Expand only the TRAIN split, and only when both conditions hold:
+        #   1) the dataset name is configured for duplication; and
+        #   2) the number of federated clients is greater than the threshold.
+        # This happens before shuffling and before assigning the dataset to the
+        # partitioner, so the partitioner sees the expanded dataset.
+        num_partitions = max(
+            (partitioner.num_partitions for partitioner in self._partitioners.values()),
+            default=0,
+        )
+        dataset_key = self._dataset_name.strip().upper()
+        duplication_factor = self._duplication_factors.get(dataset_key, 1)
+
+        if (
+            "train" in self._dataset
+            and duplication_factor > 1
+            and num_partitions >= self._duplication_client_threshold
+        ):
+            original_train = self._dataset["train"]
+            original_train_size = len(original_train)
+            train_copies = [original_train]
+
+            use_augmentation = self._augmentation_datasets.get(dataset_key, False)
+
+            if use_augmentation:
+                # Keep the first copy unchanged. The additional copies are
+                # independently augmented versions of the original samples.
+                for copy_id in range(1, duplication_factor):
+                    augmented_train = self._augment_train_split(
+                        original_train,
+                        seed=(
+                            None
+                            if self._seed is None
+                            else self._seed + copy_id
+                        ),
+                    )
+                    train_copies.append(augmented_train)
+            else:
+                # Fallback for configured datasets without augmentation.
+                train_copies.extend(
+                    [original_train] * (duplication_factor - 1)
+                )
+
+            self._dataset["train"] = datasets.concatenate_datasets(train_copies)
+
+            print(
+                f"Expanded dataset {self._dataset_name}: train size "
+                f"{original_train_size} -> {len(self._dataset['train'])} "
+                f"({duplication_factor}x) for {num_partitions} clients; "
+                f"augmentation={use_augmentation}, "
+                f"rotation=+/-{self._rotation_degrees}deg, "
+                f"translation=+/-{self._translation_pixels}px."
+            )
+
         if self._shuffle:
             # Note it shuffles all the splits. The self._dataset is DatasetDict
             # so e.g. {"train": train_data, "test": test_data}. All splits get shuffled.
@@ -332,6 +415,81 @@ class CustomFederatedDataset:
         available_splits = list(self._dataset.keys())
         self._event["load_split"] = {split: False for split in available_splits}
         self._dataset_prepared = True
+
+    def _augment_train_split(
+        self,
+        train_dataset: Dataset,
+        seed: Optional[int],
+    ) -> Dataset:
+        """Create a mildly augmented copy of an image training split.
+
+        The original split is not modified. Each sample receives a small
+        random rotation and a small random horizontal/vertical translation.
+        Labels and all non-image columns are preserved unchanged.
+        """
+        image_column = self._find_image_column(train_dataset)
+        base_seed = 0 if seed is None else int(seed)
+
+        def augment_example(example: dict[str, Any], idx: int) -> dict[str, Any]:
+            image = example[image_column]
+
+            if not isinstance(image, Image.Image):
+                image = Image.fromarray(image)
+
+            rng = random.Random(base_seed + idx)
+
+            angle = rng.uniform(
+                -self._rotation_degrees,
+                self._rotation_degrees,
+            )
+            tx = rng.randint(
+                -self._translation_pixels,
+                self._translation_pixels,
+            )
+            ty = rng.randint(
+                -self._translation_pixels,
+                self._translation_pixels,
+            )
+
+            augmented = image.rotate(
+                angle,
+                resample=Image.Resampling.BILINEAR,
+                fillcolor=0,
+            )
+
+            # Apply a small translation after rotation.
+            augmented = augmented.transform(
+                augmented.size,
+                Image.Transform.AFFINE,
+                (1, 0, -tx, 0, 1, -ty),
+                resample=Image.Resampling.BILINEAR,
+                fillcolor=0,
+            )
+
+            example[image_column] = augmented
+            return example
+
+        return train_dataset.map(
+            augment_example,
+            with_indices=True,
+            desc=f"Mild augmentation: {self._dataset_name} train",
+        )
+
+    @staticmethod
+    def _find_image_column(dataset: Dataset) -> str:
+        """Find the image column without assuming a dataset-specific name."""
+        for column_name, feature in dataset.features.items():
+            if isinstance(feature, datasets.Image):
+                return column_name
+
+        for column_name in ("image", "img", "pixel_values"):
+            if column_name in dataset.column_names:
+                return column_name
+
+        raise ValueError(
+            "Could not identify an image column in dataset. "
+            f"Available columns: {dataset.column_names}"
+        )
 
     def _check_if_no_split_keyword_possible(self) -> None:
         if len(self._partitioners) != 1:

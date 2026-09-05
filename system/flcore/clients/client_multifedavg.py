@@ -82,6 +82,8 @@ class MultiFedAvgClient:
             self.lr = self.args.learning_rate
             self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
             self.lt = [-1] * self.ME
+            self.partition_seed_train = [1] * self.ME
+            self.partition_seed_test = [1] * self.ME
             print("ler model size")
             self.models_size = self._get_models_size()
             self.n_classes = [
@@ -132,7 +134,52 @@ class MultiFedAvgClient:
     def label_shift_config(self, ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds):
         try:
             if len(experiment_id) > 0:
-                if experiment_id == "label_shift#0.1-1.0_sudden":
+                # ---------------------------------------------------------
+                # Seed-based label shift experiments.
+                #
+                # These configurations deliberately keep alpha unchanged.
+                # The label distribution changes because the Dirichlet
+                # partition is regenerated with a different integer seed.
+                # The experiment suffixes 0.1, 1.0 and 10.0 identify the
+                # configured partition seeds 1, 10 and 100, respectively.
+                # ---------------------------------------------------------
+                if experiment_id == "label_shift#0.1_sudden":
+                    ME_concept_drift_rounds = [[int(n_rounds * 0.3)],
+                                               [int(n_rounds * 0.5)],
+                                               [int(n_rounds * 0.7)]]
+                    partition_seeds = [[2], [2], [2]]
+                    type_ = "label_shift"
+                    config = {me: {
+                        "data_shift_rounds": ME_concept_drift_rounds[me],
+                        "new_alphas": [float(alphas[me])],
+                        "partition_seeds": partition_seeds[me],
+                        "type": type_
+                    } for me in range(ME)}
+                elif experiment_id == "label_shift#1.0_sudden":
+                    ME_concept_drift_rounds = [[int(n_rounds * 0.3)],
+                                               [int(n_rounds * 0.5)],
+                                               [int(n_rounds * 0.7)]]
+                    partition_seeds = [[10], [10], [10]]
+                    type_ = "label_shift"
+                    config = {me: {
+                        "data_shift_rounds": ME_concept_drift_rounds[me],
+                        "new_alphas": [float(alphas[me])],
+                        "partition_seeds": partition_seeds[me],
+                        "type": type_
+                    } for me in range(ME)}
+                elif experiment_id == "label_shift#10.0_sudden":
+                    ME_concept_drift_rounds = [[int(n_rounds * 0.3)],
+                                               [int(n_rounds * 0.5)],
+                                               [int(n_rounds * 0.7)]]
+                    partition_seeds = [[100], [100], [100]]
+                    type_ = "label_shift"
+                    config = {me: {
+                        "data_shift_rounds": ME_concept_drift_rounds[me],
+                        "new_alphas": [float(alphas[me])],
+                        "partition_seeds": partition_seeds[me],
+                        "type": type_
+                    } for me in range(ME)}
+                elif experiment_id == "label_shift#0.1-1.0_sudden":
                     assert all(i == 0.1 for i in self.alpha_train)
                     ME_concept_drift_rounds = [[int(n_rounds * 0.3)],
                                                [int(n_rounds * 0.5)],
@@ -1246,6 +1293,7 @@ class MultiFedAvgClient:
                     num_partitions=self.args.total_clients + 1,
                     batch_size=self.batch_size[me],
                     fold_id=self.fold_id,
+                    partition_seed=self.partition_seed_train[me],
                 )
 
                 # Keep the original, unshifted training dataset.
@@ -1271,6 +1319,7 @@ class MultiFedAvgClient:
 
                 (
                     alpha_me,
+                    partition_seed,
                     concept_drift_window,
                     data_shift_flag
                 ) = self._data_shift_flag(
@@ -1304,11 +1353,9 @@ class MultiFedAvgClient:
                 ):
 
                     if (
-                            self.alpha_train[me]
-                            != self.alpha_test[me]
-                            and
-                            self.alpha_test[me]
-                            == alpha_me
+                            self.alpha_train[me] != self.alpha_test[me]
+                            and self.alpha_test[me] == alpha_me
+                            and self.partition_seed_train[me] == partition_seed
                     ):
 
                         self.alpha_train[me] = (
@@ -1333,6 +1380,9 @@ class MultiFedAvgClient:
                             alpha_me
                         )
 
+                        self.partition_seed_train[me] = int(partition_seed)
+                        self.partition_seed_test[me] = int(partition_seed)
+
                         (
                             self.trainloader[me],
                             self.valloader[me]
@@ -1344,6 +1394,7 @@ class MultiFedAvgClient:
                             num_partitions=self.args.total_clients + 1,
                             batch_size=self.batch_size[me],
                             fold_id=self.fold_id,
+                            partition_seed=self.partition_seed_train[me] if t == 1 else partition_seed,
                         )
 
                         self.recent_trainloader[me] = (
@@ -1413,6 +1464,7 @@ class MultiFedAvgClient:
                             num_partitions=self.args.total_clients + 1,
                             batch_size=self.batch_size[me],
                             fold_id=self.fold_id,
+                            partition_seed=self.partition_seed_train[me] if t == 1 else partition_seed,
                         )
 
                         print(
@@ -1442,6 +1494,7 @@ class MultiFedAvgClient:
                             num_partitions=self.args.total_clients + 1,
                             batch_size=self.batch_size[me],
                             fold_id=self.fold_id,
+                            partition_seed=self.partition_seed_train[me] if t == 1 else partition_seed,
                         )
                         self.trainloader[me] = (
                             self._apply_concept_drift_to_loader(
@@ -1495,6 +1548,7 @@ class MultiFedAvgClient:
 
             (
                 alpha_me,
+                partition_seed,
                 concept_drift_window,
                 data_shift_flag
             ) = self._data_shift_flag(
@@ -1511,7 +1565,7 @@ class MultiFedAvgClient:
                     data_shift_flag
                     and self.data_shift_config[me]["type"]
                     == "label_shift"
-                    and self.alpha_test[me] != alpha_me
+                    and (self.alpha_test[me] != alpha_me or self.partition_seed_test[me] != partition_seed)
             ):
                 print(
                     f"[LABEL SHIFT - TEST] "
@@ -1526,6 +1580,7 @@ class MultiFedAvgClient:
                 self.alpha_test[me] = (
                     alpha_me
                 )
+                self.partition_seed_test[me] = int(partition_seed)
 
                 (
                     self.recent_trainloader[me],
@@ -1538,6 +1593,7 @@ class MultiFedAvgClient:
                     num_partitions=self.args.total_clients + 1,
                     batch_size=self.batch_size[me],
                     fold_id=self.fold_id,
+                    partition_seed=partition_seed,
                 )
 
                 return (
@@ -1609,6 +1665,7 @@ class MultiFedAvgClient:
                     num_partitions=self.args.total_clients + 1,
                     batch_size=self.batch_size[me],
                     fold_id=self.fold_id,
+                    partition_seed=partition_seed,
                 )
 
                 # -----------------------------------------------------
@@ -1679,6 +1736,39 @@ class MultiFedAvgClient:
                 self.fc_ME,
                 self.il_ME
             )
+
+    def _get_current_partition_seed(self, server_round, me, train=True):
+        """Return the Dirichlet partition seed active at ``server_round``.
+
+        For the seed-based label-shift experiments, alpha is kept fixed and
+        only the partition seed changes.  Other shift configurations retain
+        the original seed (1).
+        """
+        try:
+            default_seed = 1
+
+            if self.data_shift_config == {}:
+                return default_seed, False
+
+            config = self.data_shift_config[me]
+            seeds = config.get("partition_seeds")
+            shift_rounds = config.get("data_shift_rounds", [])
+
+            if not seeds:
+                return default_seed, False
+
+            current_seed = default_seed
+            for i, start_round in enumerate(shift_rounds):
+                if server_round >= start_round:
+                    current_seed = int(seeds[i])
+
+            reference_seed = getattr(self, "partition_seed_train", [default_seed] * self.ME)[me] if train else getattr(self, "partition_seed_test", [default_seed] * self.ME)[me]
+            return current_seed, current_seed != reference_seed
+
+        except Exception as e:
+            print(f"_get_current_partition_seed error {self.data_shift_config}")
+            print("Error on line {} {} {}".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+            return 1, False
 
     def _get_current_alpha(self, server_round, me, train):
         """
@@ -1769,8 +1859,9 @@ class MultiFedAvgClient:
 
         try:
             alpha, label_shift_flag = self._get_current_alpha(server_round, me, train)
+            partition_seed, seed_shift_flag = self._get_current_partition_seed(server_round, me, train)
             concept_drift_window, concept_drift_flag = self._check_concept_drift(server_round, me, train)
-            return alpha, concept_drift_window, True in [label_shift_flag, concept_drift_flag]
+            return alpha, partition_seed, concept_drift_window, True in [label_shift_flag, seed_shift_flag, concept_drift_flag]
 
         except Exception as e:
             print(f"_data_shift_flag error {self.data_shift_config}")
@@ -2089,7 +2180,6 @@ class MultiFedAvgClient:
                     e
                 )
             )
-
 
 
 
