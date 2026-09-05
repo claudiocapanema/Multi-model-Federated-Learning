@@ -36,8 +36,8 @@ def read_data(
     experiment_id : str, optional
         Identificador do experimento.
 
-    alpha_value : float, optional
-        Valor de alpha utilizado no experimento.
+    alpha_value : float or tuple/list, optional
+        Configuração de alpha utilizada no experimento.
 
     Returns
     -------
@@ -65,15 +65,16 @@ def read_data(
                     continue
 
                 df = pd.read_csv(path)
+
                 print(df)
 
                 if df.empty:
                     print(f"\nArquivo vazio: {path}")
                     continue
 
-                # --------------------------------------------------
-                # Identificação da solução
-                # --------------------------------------------------
+                # ==================================================
+                # IDENTIFICAÇÃO DA SOLUÇÃO
+                # ==================================================
 
                 df["Detector"] = solution
 
@@ -82,43 +83,74 @@ def read_data(
                     solution
                 )
 
-                # --------------------------------------------------
-                # Metadados do experimento
-                # --------------------------------------------------
+                # ==================================================
+                # METADADOS DO EXPERIMENTO
+                # ==================================================
 
                 if experiment_id is not None:
+
                     df["Experiment ID"] = experiment_id
 
                 if alpha_value is not None:
 
-                    if isinstance(alpha_value, (tuple, list)):
+                    if isinstance(
+                        alpha_value,
+                        (tuple, list)
+                    ):
 
-                        # Label Shift: alpha_before -> alpha_after
-                        df["Alpha Before"] = alpha_value[0]
-                        df["Alpha After"] = alpha_value[1]
+                        # Label Shift:
+                        # alpha_before -> alpha_after
+
+                        df["Alpha Before"] = (
+                            alpha_value[0]
+                        )
+
+                        df["Alpha After"] = (
+                            alpha_value[1]
+                        )
 
                     else:
 
                         # Concept Drift
+
                         df["Alpha"] = alpha_value
 
-                # --------------------------------------------------
-                # Tipos numéricos
-                # --------------------------------------------------
+                # ==================================================
+                # TIPOS NUMÉRICOS
+                # ==================================================
 
                 numeric_columns = [
+
                     "Fold ID",
+
                     "Round",
+
                     "Model",
+
                     "Precision",
+
                     "Recall",
+
                     "F1",
+
                     "Detection Delay",
+
                     "False Alarms",
+
                     "First Detection Round",
+
+                    # IMPORTANTE:
+                    # Detection Round é um evento temporal
+                    # utilizado na avaliação.
+
+                    "Detection Round",
+
                     "Shift Round",
+
                     "Alpha",
+
                     "Alpha Before",
+
                     "Alpha After"
                 ]
 
@@ -131,9 +163,9 @@ def read_data(
                             errors="coerce"
                         )
 
-                # --------------------------------------------------
-                # Tipos categóricos
-                # --------------------------------------------------
+                # ==================================================
+                # TIPOS CATEGÓRICOS
+                # ==================================================
 
                 if "Shift Configuration" in df.columns:
 
@@ -156,9 +188,9 @@ def read_data(
                         .astype(str)
                     )
 
-                # --------------------------------------------------
-                # Adicionar ao DataFrame global
-                # --------------------------------------------------
+                # ==================================================
+                # ADICIONAR AO DATAFRAME GLOBAL
+                # ==================================================
 
                 if df_concat is None:
 
@@ -167,7 +199,10 @@ def read_data(
                 else:
 
                     df_concat = pd.concat(
-                        [df_concat, df],
+                        [
+                            df_concat,
+                            df
+                        ],
                         ignore_index=True
                     )
 
@@ -179,7 +214,9 @@ def read_data(
 
     if df_concat is None:
 
-        print("\nNenhum arquivo foi carregado.")
+        print(
+            "\nNenhum arquivo foi carregado."
+        )
 
         return pd.DataFrame()
 
@@ -254,422 +291,1186 @@ def format_shift_configuration(shift_type, experiment_id):
 
 def select_final_detection_results(df):
     """
-    Select only the final round of each experimental unit.
+    Prepara os resultados temporais para avaliação de detecção
+    de shift.
 
-    Experimental unit:
-        Detector × Dataset × Fold ID × Model
-        × Shift Type × Shift Configuration
+    IMPORTANTE
+    ----------
+    Este método NÃO seleciona somente a última rodada.
+
+    Ele agrega os eventos temporais de cada unidade experimental:
+
+        Detector
+        Dataset
+        Fold ID
+        Model
+        Shift Type
+        Shift Configuration
+
+    A avaliação depende de:
+
+        - Shift Round
+        - First Detection Round
+        - Detection Round
+
+    Valores especiais
+    -----------------
+    First Detection Round = -1
+
+        significa que o detector NÃO detectou o shift.
+
+        Portanto, -1 é convertido para NaN e NÃO é tratado
+        como uma rodada de detecção.
+
+    Returns
+    -------
+    pd.DataFrame
+        Uma linha por unidade experimental.
     """
 
     required_columns = [
+
         "Detector",
+
         "Dataset",
+
         "Fold ID",
+
         "Round",
+
         "Model",
+
         "Shift Type",
+
         "Shift Configuration",
+
+        "Shift Round",
+
+        "First Detection Round"
     ]
 
     missing = [
-        col for col in required_columns
+
+        col
+        for col in required_columns
         if col not in df.columns
     ]
 
     if missing:
+
         raise ValueError(
-            "Missing required columns: "
+            "Missing required columns for temporal detection "
+            "evaluation: "
             + ", ".join(missing)
         )
 
     if df.empty:
+
         return df.copy()
 
     df_work = df.copy()
 
-    # ------------------------------------------------------------
-    # Normalize Round
-    # ------------------------------------------------------------
+    # ============================================================
+    # NORMALIZE NUMERIC COLUMNS
+    # ============================================================
 
-    df_work["Round"] = pd.to_numeric(
-        df_work["Round"],
-        errors="coerce"
-    )
+    numeric_columns = [
 
-    df_work = df_work[
-        df_work["Round"].notna()
-    ].copy()
+        "Fold ID",
 
-    # ------------------------------------------------------------
-    # Normalize identifiers
-    # ------------------------------------------------------------
+        "Round",
+
+        "Model",
+
+        "Shift Round",
+
+        "First Detection Round"
+    ]
+
+    if "Detection Round" in df_work.columns:
+
+        numeric_columns.append(
+            "Detection Round"
+        )
+
+    for column in numeric_columns:
+
+        df_work[column] = pd.to_numeric(
+            df_work[column],
+            errors="coerce"
+        )
+
+    # ============================================================
+    # NORMALIZE IDENTIFIERS
+    # ============================================================
 
     for column in [
+
         "Detector",
+
         "Dataset",
+
         "Shift Type",
-        "Shift Configuration",
+
+        "Shift Configuration"
     ]:
+
         df_work[column] = (
             df_work[column]
             .astype(str)
             .str.strip()
         )
 
-    df_work["Fold ID"] = pd.to_numeric(
-        df_work["Fold ID"],
-        errors="coerce"
-    )
-
-    df_work["Model"] = pd.to_numeric(
-        df_work["Model"],
-        errors="coerce"
-    )
-
-    # ------------------------------------------------------------
-    # Experimental unit
-    # ------------------------------------------------------------
+    # ============================================================
+    # EXPERIMENTAL UNIT
+    # ============================================================
 
     group_columns = [
+
         "Detector",
+
         "Dataset",
+
         "Fold ID",
+
         "Model",
+
         "Shift Type",
-        "Shift Configuration",
+
+        "Shift Configuration"
     ]
 
-    # ------------------------------------------------------------
-    # Find maximum round for each experimental unit
-    # ------------------------------------------------------------
+    rows = []
 
-    max_round = (
-        df_work
-        .groupby(
-            group_columns,
-            dropna=False
-        )["Round"]
-        .transform("max")
+    for group_key, group in df_work.groupby(
+        group_columns,
+        dropna=False
+    ):
+
+        group = group.sort_values(
+            "Round"
+        ).copy()
+
+        # ========================================================
+        # GROUND-TRUTH SHIFT ROUND
+        # ========================================================
+
+        shift_rounds = (
+            pd.to_numeric(
+                group["Shift Round"],
+                errors="coerce"
+            )
+            .dropna()
+            .unique()
+        )
+
+        if len(shift_rounds) == 0:
+
+            shift_round = np.nan
+
+        else:
+
+            shift_round = float(
+                shift_rounds[0]
+            )
+
+        # ========================================================
+        # FIRST DETECTION ROUND
+        # ========================================================
+
+        first_detection_values = (
+            pd.to_numeric(
+                group["First Detection Round"],
+                errors="coerce"
+            )
+            .dropna()
+        )
+
+        # --------------------------------------------------------
+        # -1 significa "não detectado".
+        #
+        # Portanto, NÃO pode ser considerado uma detecção.
+        # --------------------------------------------------------
+
+        first_detection_values = (
+            first_detection_values[
+                first_detection_values >= 0
+            ]
+        )
+
+        if len(first_detection_values) == 0:
+
+            first_detection_round = np.nan
+
+        else:
+
+            first_detection_round = float(
+                first_detection_values.min()
+            )
+
+        # ========================================================
+        # DETECTION ROUND
+        # ========================================================
+
+        detection_rounds = []
+
+        if "Detection Round" in group.columns:
+
+            values = (
+                pd.to_numeric(
+                    group["Detection Round"],
+                    errors="coerce"
+                )
+                .dropna()
+                .tolist()
+            )
+
+            # ----------------------------------------------------
+            # Também descartar valores negativos.
+            #
+            # Se Detection Round utilizar -1 para indicar
+            # ausência de detecção, ele não deve ser tratado
+            # como alarme.
+            # ----------------------------------------------------
+
+            values = [
+                float(x)
+                for x in values
+                if float(x) >= 0
+            ]
+
+            detection_rounds.extend(
+                values
+            )
+
+        # ========================================================
+        # FIRST DETECTION ROUND
+        # ========================================================
+
+        # First Detection Round é uma informação de detecção.
+        #
+        # Só adicionamos se for realmente uma detecção válida.
+
+        if not pd.isna(
+            first_detection_round
+        ):
+
+            detection_rounds.append(
+                first_detection_round
+            )
+
+        # ========================================================
+        # REMOVE INVALID / DUPLICATE ROUNDS
+        # ========================================================
+
+        detection_rounds = sorted(
+            set(
+                float(x)
+                for x in detection_rounds
+                if not pd.isna(x)
+                and float(x) >= 0
+            )
+        )
+
+        # ========================================================
+        # LAST EVALUATED ROUND
+        # ========================================================
+
+        evaluated_rounds = (
+            pd.to_numeric(
+                group["Round"],
+                errors="coerce"
+            )
+            .dropna()
+        )
+
+        if len(evaluated_rounds) > 0:
+
+            last_round = float(
+                evaluated_rounds.max()
+            )
+
+        else:
+
+            last_round = np.nan
+
+        # ========================================================
+        # CREATE RESULT
+        # ========================================================
+
+        row = dict(
+            zip(
+                group_columns,
+                group_key
+            )
+        )
+
+        row["Shift Round"] = (
+            shift_round
+        )
+
+        row["First Detection Round"] = (
+            first_detection_round
+        )
+
+        row["Detection Rounds"] = (
+            detection_rounds
+        )
+
+        row["Last Round"] = (
+            last_round
+        )
+
+        rows.append(row)
+
+    result = pd.DataFrame(
+        rows
     )
 
-    # ------------------------------------------------------------
-    # Keep only final round
-    # ------------------------------------------------------------
+    return result
 
-    df_final = df_work[
-        df_work["Round"] == max_round
-    ].copy()
+def _get_valid_detection_rounds(
+    row,
+    max_detection_delay=None
+):
+    """
+    Retorna os alarmes considerados válidos para o shift.
 
-    # ------------------------------------------------------------
-    # Safety check
-    # ------------------------------------------------------------
+    Parameters
+    ----------
+    row : pd.Series
+        Unidade experimental.
 
-    duplicated_units = (
-        df_final
-        .duplicated(
-            subset=group_columns,
-            keep=False
+    max_detection_delay : int or None
+        Janela máxima aceitável de detecção após o shift.
+
+        None:
+            qualquer detecção após o shift e antes do fim
+            da avaliação é considerada válida.
+
+    Returns
+    -------
+    list
+        Rodadas de detecção válidas.
+    """
+
+    shift_round = row["Shift Round"]
+
+    if pd.isna(shift_round):
+        return []
+
+    detection_rounds = row.get(
+        "Detection Rounds",
+        []
+    )
+
+    if not isinstance(
+        detection_rounds,
+        (list, tuple)
+    ):
+        return []
+
+    valid = []
+
+    for detection_round in detection_rounds:
+
+        if pd.isna(detection_round):
+            continue
+
+        detection_round = float(
+            detection_round
+        )
+
+        # Detection before the actual shift
+        # is a false alarm.
+        if detection_round < shift_round:
+            continue
+
+        # Optional maximum detection window.
+        if max_detection_delay is not None:
+
+            if (
+                detection_round
+                > shift_round
+                + max_detection_delay
+            ):
+                continue
+
+        valid.append(detection_round)
+
+    return sorted(set(valid))
+
+
+def calculate_detection_rate(
+    df,
+    max_detection_delay=None
+):
+    """
+    Detection Rate (DR).
+
+    DR = N_detected_shifts / N_actual_shifts
+
+    A shift é considerado detectado se existir pelo menos
+    uma detecção válida após o Shift Round.
+
+    Higher is better.
+    """
+
+    if df.empty:
+        return np.nan
+
+    detected = 0
+    total = 0
+
+    for _, row in df.iterrows():
+
+        shift_round = row["Shift Round"]
+
+        if pd.isna(shift_round):
+            continue
+
+        total += 1
+
+        valid_detections = (
+            _get_valid_detection_rounds(
+                row,
+                max_detection_delay
+            )
+        )
+
+        if len(valid_detections) > 0:
+            detected += 1
+
+    if total == 0:
+        return np.nan
+
+    return detected / total
+
+
+def calculate_missed_detection_rate(
+    df,
+    max_detection_delay=None
+):
+    """
+    Missed Detection Rate (MDR).
+
+    MDR = N_missed / N_actual_shifts
+
+    Lower is better.
+    """
+
+    detection_rate = calculate_detection_rate(
+        df,
+        max_detection_delay
+    )
+
+    if pd.isna(detection_rate):
+        return np.nan
+
+    return 1.0 - detection_rate
+
+
+def calculate_average_detection_delay(
+    df,
+    max_detection_delay=None
+):
+    """
+    Average Detection Delay (ADD / MTD).
+
+    Para cada shift detectado:
+
+        delay =
+            First Valid Detection Round
+            - Shift Round
+
+    Shifts não detectados não participam do cálculo.
+
+    Lower is better.
+    """
+
+    if df.empty:
+        return np.nan
+
+    delays = []
+
+    for _, row in df.iterrows():
+
+        shift_round = row["Shift Round"]
+
+        if pd.isna(shift_round):
+            continue
+
+        valid_detections = (
+            _get_valid_detection_rounds(
+                row,
+                max_detection_delay
+            )
+        )
+
+        if not valid_detections:
+            continue
+
+        first_detection = valid_detections[0]
+
+        delay = (
+            first_detection
+            - float(shift_round)
+        )
+
+        if delay >= 0:
+            delays.append(delay)
+
+    if not delays:
+        return np.nan
+
+    return float(
+        np.mean(delays)
+    )
+
+
+def calculate_episode_f1(
+    df,
+    max_detection_delay=None
+):
+    """
+    Episode-level F1.
+
+    Cada shift ground-truth pode produzir no máximo
+    um verdadeiro positivo.
+
+    Isso evita contar várias detecções do mesmo shift
+    como múltiplos TP.
+
+    TP = shift com pelo menos uma detecção válida
+    FN = shift sem detecção válida
+    FP = alarmes que ocorreram fora das janelas dos shifts
+
+    Higher is better.
+    """
+
+    if df.empty:
+        return np.nan
+
+    tp = 0
+    fn = 0
+    fp = 0
+
+    for _, row in df.iterrows():
+
+        shift_round = row["Shift Round"]
+
+        if pd.isna(shift_round):
+            continue
+
+        detection_rounds = row.get(
+            "Detection Rounds",
+            []
+        )
+
+        if not isinstance(
+            detection_rounds,
+            (list, tuple)
+        ):
+            detection_rounds = []
+
+        detection_rounds = sorted(
+            set(
+                float(x)
+                for x in detection_rounds
+                if not pd.isna(x)
+            )
+        )
+
+        valid_detections = (
+            _get_valid_detection_rounds(
+                row,
+                max_detection_delay
+            )
+        )
+
+        # --------------------------------------------------------
+        # TP / FN
+        # --------------------------------------------------------
+
+        if valid_detections:
+            tp += 1
+        else:
+            fn += 1
+
+        # --------------------------------------------------------
+        # False alarms
+        # --------------------------------------------------------
+
+        valid_set = set(
+            valid_detections
+        )
+
+        for detection_round in detection_rounds:
+
+            if detection_round < shift_round:
+                fp += 1
+                continue
+
+            if (
+                max_detection_delay is not None
+                and detection_round
+                > shift_round
+                + max_detection_delay
+            ):
+                fp += 1
+                continue
+
+            # A detection inside the valid episode
+            # is not counted as FP.
+            if detection_round in valid_set:
+                continue
+
+    precision_denominator = (
+        tp + fp
+    )
+
+    recall_denominator = (
+        tp + fn
+    )
+
+    if precision_denominator == 0:
+        precision = 0.0
+    else:
+        precision = (
+            tp
+            / precision_denominator
+        )
+
+    if recall_denominator == 0:
+        recall = 0.0
+    else:
+        recall = (
+            tp
+            / recall_denominator
+        )
+
+    if (
+        precision + recall
+    ) == 0:
+        return 0.0
+
+    return (
+        2.0
+        * precision
+        * recall
+        / (
+            precision
+            + recall
         )
     )
 
-    if duplicated_units.any():
 
-        print(
-            "\nWARNING: multiple rows remain "
-            "for some experimental units."
+def calculate_alarm_rate(df):
+    """
+    Alarm Rate.
+
+    Número total de alarmes dividido pelo número
+    total de rodadas avaliadas.
+
+    AR = N_alarms / N_evaluated_rounds
+
+    Lower is better.
+
+    Essa métrica mede a tendência do detector de gerar
+    alarmes excessivos.
+    """
+
+    if df.empty:
+        return np.nan
+
+    total_alarms = 0
+    total_rounds = 0
+
+    for _, row in df.iterrows():
+
+        detection_rounds = row.get(
+            "Detection Rounds",
+            []
         )
 
-        print(
-            df_final.loc[
-                duplicated_units,
-                group_columns + ["Round"]
-            ].sort_values(
-                group_columns
-            ).to_string(index=False)
+        if isinstance(
+            detection_rounds,
+            (list, tuple)
+        ):
+            total_alarms += len(
+                set(detection_rounds)
+            )
+
+        last_round = row.get(
+            "Last Round",
+            np.nan
         )
 
-    df_final.reset_index(
-        drop=True,
-        inplace=True
+        if not pd.isna(last_round):
+            total_rounds += int(
+                last_round
+            )
+
+    if total_rounds <= 0:
+        return np.nan
+
+    return (
+        total_alarms
+        / total_rounds
     )
 
-    # ------------------------------------------------------------
-    # Debug
-    # ------------------------------------------------------------
 
-    print("\n" + "=" * 90)
-    print("FINAL EXPERIMENTAL UNITS")
-    print("=" * 90)
+def calculate_detection_metric_values(
+    df,
+    metric,
+    max_detection_delay=None
+):
+    """
+    Retorna uma observação da métrica por unidade experimental.
 
-    print(
-        df_final[
-            group_columns + ["Round"]
-        ].to_string(index=False)
+    Cada linha de `df` representa uma unidade experimental.
+
+    As métricas são calculadas a partir dos eventos temporais:
+
+        - Shift Round
+        - Detection Rounds
+
+    Métricas:
+
+        Detection Rate
+        Missed Detection Rate
+        Average Detection Delay
+        Episode F1
+        Alarm Rate
+    """
+
+    if df is None or df.empty:
+        return pd.Series(dtype=float)
+
+    values = []
+
+    for _, row in df.iterrows():
+
+        shift_round = row.get(
+            "Shift Round",
+            np.nan
+        )
+
+        if pd.isna(shift_round):
+            continue
+
+        shift_round = float(
+            shift_round
+        )
+
+        # ============================================================
+        # DETECTION ROUNDS
+        # ============================================================
+
+        detection_rounds = row.get(
+            "Detection Rounds",
+            []
+        )
+
+        if not isinstance(
+            detection_rounds,
+            (list, tuple, np.ndarray)
+        ):
+            detection_rounds = []
+
+        normalized_detection_rounds = []
+
+        for detection_round in detection_rounds:
+
+            try:
+                detection_round = float(
+                    detection_round
+                )
+            except (
+                ValueError,
+                TypeError
+            ):
+                continue
+
+            # -1 e outros valores negativos significam
+            # ausência de detecção.
+            if detection_round < 0:
+                continue
+
+            normalized_detection_rounds.append(
+                detection_round
+            )
+
+        detection_rounds = sorted(
+            set(normalized_detection_rounds)
+        )
+
+        # ============================================================
+        # VALID DETECTIONS
+        # ============================================================
+
+        valid_detections = (
+            _get_valid_detection_rounds(
+                row,
+                max_detection_delay=(
+                    max_detection_delay
+                )
+            )
+        )
+
+        # ============================================================
+        # DETECTION RATE
+        # ============================================================
+
+        if metric == "Detection Rate":
+
+            values.append(
+                1.0
+                if valid_detections
+                else 0.0
+            )
+
+        # ============================================================
+        # MISSED DETECTION RATE
+        # ============================================================
+
+        elif metric == "Missed Detection Rate":
+
+            values.append(
+                0.0
+                if valid_detections
+                else 1.0
+            )
+
+        # ============================================================
+        # AVERAGE DETECTION DELAY
+        # ============================================================
+
+        elif metric == "Average Detection Delay":
+
+            # Shifts não detectados não entram no ADD.
+            if not valid_detections:
+                continue
+
+            first_detection = float(
+                valid_detections[0]
+            )
+
+            delay = (
+                first_detection
+                - shift_round
+            )
+
+            if delay >= 0:
+                values.append(
+                    delay
+                )
+
+        # ============================================================
+        # EPISODE F1
+        # ============================================================
+
+        elif metric == "Episode F1":
+
+            # --------------------------------------------------------
+            # Um shift representa um único episódio.
+            # --------------------------------------------------------
+
+            tp = (
+                1
+                if valid_detections
+                else 0
+            )
+
+            fn = (
+                0
+                if valid_detections
+                else 1
+            )
+
+            # --------------------------------------------------------
+            # False alarms
+            #
+            # Alarmes antes do shift ou fora da janela máxima
+            # são considerados FP.
+            # --------------------------------------------------------
+
+            fp = 0
+
+            valid_set = set(
+                valid_detections
+            )
+
+            for detection_round in detection_rounds:
+
+                # ----------------------------------------------------
+                # Alarme antes do shift
+                # ----------------------------------------------------
+
+                if detection_round < shift_round:
+                    fp += 1
+                    continue
+
+                # ----------------------------------------------------
+                # Alarme depois da janela válida
+                # ----------------------------------------------------
+
+                if (
+                    max_detection_delay is not None
+                    and detection_round
+                    > (
+                        shift_round
+                        + max_detection_delay
+                    )
+                ):
+                    fp += 1
+                    continue
+
+                # ----------------------------------------------------
+                # Detecção válida.
+                # ----------------------------------------------------
+
+                if detection_round in valid_set:
+                    continue
+
+            # --------------------------------------------------------
+            # Episode F1
+            # --------------------------------------------------------
+
+            precision_denominator = (
+                tp + fp
+            )
+
+            recall_denominator = (
+                tp + fn
+            )
+
+            if precision_denominator == 0:
+                precision = 0.0
+            else:
+                precision = (
+                    tp
+                    / precision_denominator
+                )
+
+            if recall_denominator == 0:
+                recall = 0.0
+            else:
+                recall = (
+                    tp
+                    / recall_denominator
+                )
+
+            if (
+                precision + recall
+            ) == 0:
+
+                f1 = 0.0
+
+            else:
+
+                f1 = (
+                    2.0
+                    * precision
+                    * recall
+                    / (
+                        precision
+                        + recall
+                    )
+                )
+
+            values.append(
+                f1
+            )
+
+        # ============================================================
+        # ALARM RATE
+        # ============================================================
+
+        elif metric == "Alarm Rate":
+
+            last_round = row.get(
+                "Last Round",
+                np.nan
+            )
+
+            if pd.isna(last_round):
+                continue
+
+            last_round = float(
+                last_round
+            )
+
+            if last_round <= 0:
+                continue
+
+            # Cada Detection Round único corresponde a um alarme.
+            number_of_alarms = len(
+                detection_rounds
+            )
+
+            alarm_rate = (
+                number_of_alarms
+                / last_round
+            )
+
+            values.append(
+                alarm_rate
+            )
+
+        else:
+
+            raise ValueError(
+                f"Unsupported detection metric: "
+                f"'{metric}'"
+            )
+
+    return pd.Series(
+        values,
+        dtype=float
     )
 
-    print("\nRows per detector:")
-    print(
-        df_final["Detector"]
-        .value_counts()
-        .sort_index()
-        .to_string()
-    )
-
-    print("=" * 90)
-
-    return df_final
-
-def mean_ci(values, ci=0.95, bounded=False):
+def mean_ci(
+    values,
+    ci=0.95,
+    bounded=False
+):
     """
     Calcula a média e a margem do intervalo de confiança.
 
     Parameters
     ----------
     values : array-like
-        Valores numéricos da métrica.
+        Valores individuais da métrica.
 
     ci : float
         Nível de confiança.
 
     bounded : bool
-        Se True, limita o intervalo ao domínio [0, 1].
-        Usado para Precision, Recall e F1.
+        Se True, limita os limites do IC ao intervalo [0, 1].
 
     Returns
     -------
-    mean, margin
+    mean : float
+        Média.
 
-    Notes
-    -----
-    Esta função é estatística e não contém regras específicas
-    de nenhuma métrica.
+    margin : float
+        Margem do intervalo de confiança.
 
-    Em particular, valores -1 não são removidos aqui.
-    O tratamento de valores especiais deve ser feito antes
-    da chamada desta função, de acordo com a semântica da métrica.
+    A tabela apresenta:
+
+        mean ± margin
     """
+
+    # ============================================================
+    # CONVERTER PARA SERIES
+    # ============================================================
+
+    values = pd.Series(
+        values,
+        dtype="float64"
+    )
+
+    # ============================================================
+    # REMOVER VALORES INVÁLIDOS
+    # ============================================================
 
     values = pd.to_numeric(
         values,
         errors="coerce"
-    ).dropna().to_numpy(dtype=float)
+    ).dropna()
+
+    values = values.to_numpy(
+        dtype=float
+    )
+
+    # ============================================================
+    # SEM DADOS
+    # ============================================================
 
     if len(values) == 0:
         return np.nan, np.nan
 
-    mean = np.mean(values)
+    # ============================================================
+    # MÉDIA
+    # ============================================================
 
-    # Apenas uma observação
+    mean = np.mean(
+        values
+    )
+
+    # ============================================================
+    # UMA OBSERVAÇÃO
+    # ============================================================
+
     if len(values) == 1:
-        return round(mean, 2), 0.00
 
-    # Todos os valores são iguais
-    if np.allclose(values, values[0]):
-        return round(mean, 2), 0.00
+        return (
+            round(mean, 2),
+            0.00
+        )
 
-    # Erro padrão da média
-    sem = st.sem(values)
+    # ============================================================
+    # TODOS OS VALORES IGUAIS
+    # ============================================================
 
-    # Intervalo de confiança baseado na distribuição t
-    interval = st.t.interval(
+    if np.allclose(
+        values,
+        values[0]
+    ):
+
+        return (
+            round(mean, 2),
+            0.00
+        )
+
+    # ============================================================
+    # STANDARD ERROR
+    # ============================================================
+
+    sem = st.sem(
+        values
+    )
+
+    # ============================================================
+    # CONFIDENCE INTERVAL
+    # ============================================================
+
+    lower, upper = st.t.interval(
         confidence=ci,
         df=len(values) - 1,
         loc=mean,
         scale=sem
     )
 
-    lower, upper = interval
+    # ============================================================
+    # BOUND [0, 1]
+    # ============================================================
 
-    # Métricas limitadas a [0, 1]
     if bounded:
-        lower = max(0.0, lower)
-        upper = min(1.0, upper)
 
-    # A tabela utiliza:
-    #
-    #     mean ± margin
-    #
-    # Portanto, usamos a maior distância entre a média
-    # e os limites do intervalo.
+        lower = max(
+            0.0,
+            lower
+        )
+
+        upper = min(
+            1.0,
+            upper
+        )
+
+    # ============================================================
+    # IC REPRESENTADO COMO MARGEM
+    # ============================================================
+
     margin = max(
         mean - lower,
         upper - mean
     )
 
-    return round(mean, 2), round(margin, 2)
-
-def prepare_detection_metric_values(
-    df,
-    metric
-):
-    """
-    Prepara os valores de uma métrica de detecção para
-    agregação estatística.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Resultados finais dos experimentos.
-
-    metric : str
-        Nome da métrica.
-
-    Returns
-    -------
-    pd.Series
-        Valores válidos para a métrica.
-
-    Notes
-    -----
-    Detection Delay:
-        -1 significa que o shift não foi detectado.
-        Esses valores NÃO participam do cálculo do delay.
-
-    Undetected Shift Rate:
-        Não retorna valores diretamente. Essa métrica deve
-        ser calculada pela função calculate_undetected_shift_rate().
-    """
-
-    values = pd.to_numeric(
-        df[metric],
-        errors="coerce"
-    )
-
-    if metric == "Detection Delay":
-        values = values[
-            values >= 0
-        ]
-
-    return values.dropna()
-
-def calculate_undetected_shift_rate(df):
-    """
-    Calcula a taxa de shifts não detectados.
-
-    Definition
-    ----------
-        Undetected Shift Rate =
-            N_undetected / N_shifts
-
-    No CSV:
-        Detection Delay >= 0 -> shift detectado
-        Detection Delay == -1 -> shift não detectado
-
-    Returns
-    -------
-    float
-        Valor entre 0 e 1.
-
-    Notes
-    -----
-    Cada linha de df representa uma unidade experimental:
-
-        Detector × Dataset × Fold × Model × Shift Configuration
-
-    Portanto, cada linha corresponde a um shift ground-truth
-    que deve ser classificado como detectado ou não detectado.
-    """
-
-    if df.empty:
-        return np.nan
-
-    delays = pd.to_numeric(
-        df["Detection Delay"],
-        errors="coerce"
-    ).dropna()
-
-    if len(delays) == 0:
-        return np.nan
-
-    undetected = np.sum(
-        delays < 0
-    )
-
-    total = len(delays)
-
-    return float(
-        undetected / total
-    )
-
-def calculate_detection_metric(
-    df,
-    metric,
-    ci=0.95
-):
-    """
-    Calcula média e intervalo de confiança para uma métrica
-    de detecção.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Resultados finais dos experimentos.
-
-    metric : str
-        Métrica a ser calculada.
-
-    ci : float
-        Nível de confiança.
-
-    Returns
-    -------
-    mean, margin
-
-    Notes
-    -----
-    Detection Delay:
-        calculado somente sobre shifts detectados.
-
-    Undetected Shift Rate:
-        calculado sobre todos os shifts.
-
-    Precision, Recall e F1:
-        calculados sobre todos os experimentos.
-
-    False Alarms:
-        calculado sobre todos os experimentos.
-    """
-
-    if df.empty:
-        return np.nan, np.nan
-
-    if metric == "Undetected Shift Rate":
-
-        rate = calculate_undetected_shift_rate(df)
-
-        if pd.isna(rate):
-            return np.nan, np.nan
-
-        return round(rate, 2), 0.00
-
-    if metric == "Detection Delay":
-
-        values = prepare_detection_metric_values(
-            df,
-            metric
-        )
-
-    else:
-
-        if metric not in df.columns:
-            return np.nan, np.nan
-
-        values = pd.to_numeric(
-            df[metric],
-            errors="coerce"
-        ).dropna()
-
-    bounded = metric in [
-        "Precision",
-        "Recall",
-        "F1",
-        "Undetected Shift Rate"
-    ]
-
-    return mean_ci(
-        values,
-        ci=ci,
-        bounded=bounded
+    return (
+        round(mean, 2),
+        round(margin, 2)
     )
 
 def table_detection_quality(
@@ -677,254 +1478,255 @@ def table_detection_quality(
     write_path,
     solutions_order,
     metrics=None,
-    ci=0.95
+    ci=0.95,
+    max_detection_delay=None
 ):
     """
-    Gera tabelas quantitativas de qualidade da detecção.
+    Gera uma única tabela com o desempenho dos detectores.
 
-    Métricas:
+    Estrutura:
 
-        Precision
-        Recall
-        F1
-        Detection Delay
-        Undetected Shift Rate
-        False Alarms
+        Data shift type | Solution | Detection Rate |
+        Episode F1 | Average Detection Delay |
+        Missed Detection Rate | Alarm Rate
 
-    Detection Delay:
-        calculado somente sobre shifts detectados.
+    Para cada tipo de shift:
 
-    Undetected Shift Rate:
-        proporção de shifts ground-truth que não foram
-        detectados.
+        Concept drift
+            Solution 1
+            Solution 2
+            Solution 3
+            Solution 4
 
-    A unidade experimental é:
+        Label shift
+            Solution 1
+            Solution 2
+            Solution 3
+            Solution 4
 
-        Detector × Dataset × Fold × Model × Shift Configuration
+    O tipo de shift é apresentado uma única vez utilizando
+    LaTeX \\multirow.
 
-    O CSV contém várias rodadas, mas somente a última rodada
-    de cada experimento é utilizada na tabela.
+    Cada métrica é apresentada como:
+
+        mean ± 95% CI
+
+    O IC é calculado sobre as unidades experimentais.
     """
 
     if metrics is None:
+
         metrics = [
-            "Precision",
-            "Recall",
-            "F1",
-            "Detection Delay",
-            "Undetected Shift Rate",
-            "False Alarms"
+            "Detection Rate",
+            "Episode F1",
+            "Average Detection Delay",
+            "Missed Detection Rate",
+            "Alarm Rate",
         ]
 
-    Path(write_path).mkdir(
+    # ============================================================
+    # CREATE OUTPUT DIRECTORY
+    # ============================================================
+
+    Path(
+        write_path
+    ).mkdir(
         parents=True,
         exist_ok=True
     )
 
-    # ------------------------------------------------------------
-    # 1. Selecionar somente o resultado final de cada experimento
-    # ------------------------------------------------------------
+    # ============================================================
+    # PREPARE TEMPORAL DATA
+    # ============================================================
 
-    df_final = select_final_detection_results(
+    df_eval = select_final_detection_results(
         df
     )
 
-    print("\n" + "=" * 100)
-    print("DEBUG - AFTER select_final_detection_results()")
-    print("=" * 100)
+    if df_eval.empty:
 
-    print("df_all rows:  ", len(df_all))
-    print("df_final rows:", len(df_final))
-
-    print("\nRows by detector:")
-    print(
-        df_final["Detector"]
-        .value_counts()
-        .sort_index()
-    )
-
-    print("\nRows by detector and shift type:")
-    print(
-        df_final
-        .groupby(["Detector", "Shift Type"])
-        .size()
-        .to_string()
-    )
-
-    print("\nRows by detector / dataset / model / shift:")
-    print(
-        df_final
-        .groupby(
-            [
-                "Detector",
-                "Dataset",
-                "Model",
-                "Shift Type",
-                "Shift Configuration"
-            ]
-        )
-        .size()
-        .to_string()
-    )
-
-    print("\nSelected rounds:")
-    print(
-        df_final[
-            [
-                "Detector",
-                "Dataset",
-                "Model",
-                "Shift Type",
-                "Shift Configuration",
-                "Round"
-            ]
-        ]
-        .sort_values(
-            [
-                "Detector",
-                "Shift Type",
-                "Dataset",
-                "Model"
-            ]
-        )
-        .to_string(index=False)
-    )
-
-    print("=" * 100)
-
-    print("\nResultados finais selecionados:")
-
-    print(
-        df_final[
-            [
-                "Detector",
-                "Dataset",
-                "Fold ID",
-                "Model",
-                "Shift Type",
-                "Shift Configuration",
-                "Round"
-            ]
-        ].to_string(index=False)
-    )
-
-    # ------------------------------------------------------------
-    # 2. Tipos de shift
-    # ------------------------------------------------------------
-
-    # ------------------------------------------------------------
-    # Padronizar nomes dos tipos de shift para a tabela
-    # ------------------------------------------------------------
-    if "Shift Type" in df_final.columns:
-        df_final["Shift Type"] = (
-            df_final["Shift Type"]
-            .apply(normalize_shift_type_for_table)
+        print(
+            "\nWARNING: no temporal detection "
+            "records available."
         )
 
-    shift_types = sorted(
-        df_final["Shift Type"]
+        return df_eval
+
+    # ============================================================
+    # NORMALIZE SHIFT TYPE
+    # ============================================================
+
+    df_eval["Shift Type"] = (
+        df_eval["Shift Type"]
+        .apply(format_shift_type)
+    )
+
+    # ============================================================
+    # VALID SHIFT TYPES
+    # ============================================================
+
+    valid_shift_types = [
+        "Concept drift",
+        "Label shift",
+    ]
+
+    df_eval = df_eval[
+        df_eval["Shift Type"].isin(
+            valid_shift_types
+        )
+    ].copy()
+
+    if df_eval.empty:
+
+        print(
+            "\nWARNING: no valid shift types."
+        )
+
+        return df_eval
+
+    # ============================================================
+    # SOLUTION ORDER
+    # ============================================================
+
+    available_solutions = (
+        df_eval["Detector"]
         .dropna()
         .unique()
+        .tolist()
     )
-
-    # ------------------------------------------------------------
-    # 3. Soluções existentes na ordem solicitada
-    # ------------------------------------------------------------
 
     solutions = [
         solution
         for solution in solutions_order
-        if solution in df_final["Detector"].unique()
+        if solution in available_solutions
     ]
 
-    # ------------------------------------------------------------
-    # 4. Gerar uma tabela para cada tipo de shift e métrica
-    # ------------------------------------------------------------
+    # ============================================================
+    # METRIC DISPLAY NAMES
+    # ============================================================
 
-    for shift_type in shift_types:
+    metric_names = {
+        "Detection Rate":
+            "Detection Rate",
 
-        df_shift = df_final[
-            df_final["Shift Type"] == shift_type
+        "Episode F1":
+            "Episode F1",
+
+        "Average Detection Delay":
+            "Average Detection Delay",
+
+        "Missed Detection Rate":
+            "Missed Detection Rate",
+
+        "Alarm Rate":
+            "Alarm Rate",
+    }
+
+    # ============================================================
+    # METRIC DIRECTION
+    # ============================================================
+
+    higher_is_better = {
+        "Detection Rate",
+        "Episode F1",
+    }
+
+    # ============================================================
+    # STORE RAW RESULTS
+    # ============================================================
+
+    results = {}
+
+    for shift_type in valid_shift_types:
+
+        results[shift_type] = {}
+
+        df_shift = df_eval[
+            df_eval["Shift Type"]
+            == shift_type
         ].copy()
 
         if df_shift.empty:
             continue
 
-        for metric in metrics:
+        for solution in solutions:
 
-            if (
-                metric != "Undetected Shift Rate"
-                and metric not in df_shift.columns
-            ):
-                print(
-                    f"\nMétrica ausente: {metric}"
-                )
+            df_solution = df_shift[
+                df_shift["Detector"]
+                == solution
+            ].copy()
+
+            if df_solution.empty:
                 continue
 
-            # ====================================================
-            # 5. Calcular média e IC
-            # ====================================================
+            results[
+                shift_type
+            ][solution] = {}
 
-            rows_raw = {}
+            for metric in metrics:
 
-            for solution in solutions:
-
-                filtered_solution = df_shift[
-                    df_shift["Detector"] == solution
-                ]
-
-                if filtered_solution.empty:
-                    continue
-
-                mean, ci_margin = calculate_detection_metric(
-                    filtered_solution,
-                    metric,
-                    ci=ci
+                mean_value, ci_value = (
+                    calculate_detection_metric(
+                        df_solution,
+                        metric,
+                        ci=ci,
+                        max_detection_delay=(
+                            max_detection_delay
+                        )
+                    )
                 )
 
-                rows_raw[solution] = {
-                    "mean": mean,
-                    "ci": ci_margin
+                results[
+                    shift_type
+                ][solution][metric] = {
+                    "mean": mean_value,
+                    "ci": ci_value,
                 }
 
-            # ====================================================
-            # 6. Determinar direção da métrica
-            # ====================================================
+    # ============================================================
+    # DETERMINE BEST RESULTS
+    # ============================================================
 
-            higher_is_better = metric in [
-                "Precision",
-                "Recall",
-                "F1"
-            ]
+    best_results = {}
 
-            # Detection Delay,
-            # Undetected Shift Rate e
-            # False Alarms:
-            #
-            # menor é melhor.
+    for shift_type in valid_shift_types:
+
+        best_results[
+            shift_type
+        ] = {}
+
+        if shift_type not in results:
+            continue
+
+        for metric in metrics:
 
             valid_solutions = [
                 solution
                 for solution in solutions
-                if solution in rows_raw
+                if solution in results[
+                    shift_type
+                ]
+                and metric in results[
+                    shift_type
+                ][solution]
                 and not pd.isna(
-                    rows_raw[solution]["mean"]
+                    results[
+                        shift_type
+                    ][solution][metric]["mean"]
                 )
             ]
 
             if not valid_solutions:
                 continue
 
-            # ====================================================
-            # 7. Identificar melhor resultado
-            # ====================================================
-
-            if higher_is_better:
+            if metric in higher_is_better:
 
                 best_solution = max(
                     valid_solutions,
                     key=lambda solution:
-                        rows_raw[solution]["mean"]
+                        results[
+                            shift_type
+                        ][solution][metric]["mean"]
                 )
 
             else:
@@ -932,167 +1734,219 @@ def table_detection_quality(
                 best_solution = min(
                     valid_solutions,
                     key=lambda solution:
-                        rows_raw[solution]["mean"]
+                        results[
+                            shift_type
+                        ][solution][metric]["mean"]
                 )
 
-            best_mean = rows_raw[
-                best_solution
-            ]["mean"]
-
-            best_ci = rows_raw[
-                best_solution
-            ]["ci"]
-
-            best_lower = best_mean - best_ci
-            best_upper = best_mean + best_ci
-
-            # ====================================================
-            # 8. Verificar sobreposição dos ICs
-            # ====================================================
-
-            for solution in valid_solutions:
-
-                mean_val = rows_raw[
-                    solution
-                ]["mean"]
-
-                ci_val = rows_raw[
-                    solution
-                ]["ci"]
-
-                for solution in valid_solutions:
-                    mean_val = rows_raw[
-                        solution
-                    ]["mean"]
-
-                    rows_raw[
-                        solution
-                    ]["bold"] = (
-                            best_lower
-                            <= mean_val
-                            <= best_upper
-                    )
-
-            # ====================================================
-            # 9. Construir DataFrame da tabela
-            # ====================================================
-
-            rows_final = []
-
-            for solution in solutions:
-
-                if solution not in rows_raw:
-                    continue
-
-                mean_val = rows_raw[
-                    solution
-                ]["mean"]
-
-                ci_val = rows_raw[
-                    solution
-                ]["ci"]
-
-                if pd.isna(mean_val):
-                    continue
-
-                bold = rows_raw[
-                    solution
-                ].get(
-                    "bold",
-                    False
-                )
-
-                safe_solution = (
-                    solution.replace(
-                        "_",
-                        r"\_"
-                    )
-                )
-
-                value_str = (
-                    f"{mean_val:.2f}"
-                    f"$\\pm$"
-                    f"{ci_val:.2f}"
-                )
-
-                if bold:
-                    value_str = (
-                        f"\\textbf{{{value_str}}}"
-                    )
-
-                rows_final.append(
-                    {
-                        "Detector": safe_solution,
-                        metric: value_str
-                    }
-                )
-
-            if not rows_final:
-                continue
-
-            df_table = pd.DataFrame(
-                rows_final
-            )
-
-            df_table.set_index(
-                "Detector",
-                inplace=True
-            )
-
-            # ====================================================
-            # 10. LaTeX
-            # ====================================================
-
-            latex = df_table.to_latex(
-                escape=False,
-                column_format="lc",
-                index_names=False
-            )
-
-            shift_label = (
+            best_results[
                 shift_type
-                .replace("_", " ")
-                .title()
+            ][metric] = best_solution
+
+    # ============================================================
+    # FORMAT RESULT
+    # ============================================================
+
+    def format_metric_value(
+        shift_type,
+        solution,
+        metric
+    ):
+
+        if (
+            shift_type not in results
+            or solution not in results[
+                shift_type
+            ]
+            or metric not in results[
+                shift_type
+            ][solution]
+        ):
+
+            return "--"
+
+        mean_value = results[
+            shift_type
+        ][solution][metric]["mean"]
+
+        ci_value = results[
+            shift_type
+        ][solution][metric]["ci"]
+
+        if pd.isna(mean_value):
+            return "--"
+
+        if pd.isna(ci_value):
+
+            text = (
+                f"{mean_value:.2f}"
             )
 
-            metric_label = metric
-            latex_complete = f"""
-\\begin{{table}}[t]
-\\centering
-\\caption{{Detection quality for {shift_label} -- {metric_label}.}}
-\\label{{tab:detection_{shift_type.lower().replace(" ", "_")}_{metric.lower().replace(" ", "_")}}}
-\\resizebox{{\\columnwidth}}{{!}}{{%
-{latex}
-}}
-\\end{{table}}
-""".replace(" "
-            "Concept ", " Concept drift ").replace(" Label ", " Label shift ")
+        else:
 
-            # ====================================================
-            # 11. Salvar
-            # ====================================================
-
-            filename = (
-                f"{write_path}/"
-                f"latex_table_detection_"
-                f"{shift_type.lower()}_"
-                f"{metric.lower().replace(' ', '_')}.tex"
+            text = (
+                f"{mean_value:.2f}"
+                f" $\\pm$ "
+                f"{ci_value:.2f}"
             )
 
-            with open(
-                filename,
-                "w",
-                encoding="utf-8"
-            ) as f:
+        # ========================================================
+        # BOLD BEST
+        # ========================================================
 
-                f.write(
-                    latex_complete
+        best_solution = (
+            best_results
+            .get(shift_type, {})
+            .get(metric)
+        )
+
+        if (
+            best_solution is not None
+            and solution == best_solution
+        ):
+
+            text = (
+                "\\textbf{"
+                + text
+                + "}"
+            )
+
+        return text
+
+    # ============================================================
+    # BUILD TABLE ROWS
+    # ============================================================
+
+    table_rows = []
+
+    for shift_type in valid_shift_types:
+
+        if shift_type not in results:
+            continue
+
+        # --------------------------------------------------------
+        # Somente as soluções que realmente possuem resultados.
+        # --------------------------------------------------------
+
+        shift_solutions = [
+            solution
+            for solution in solutions
+            if solution in results[
+                shift_type
+            ]
+        ]
+
+        if not shift_solutions:
+            continue
+
+        number_of_rows = len(
+            shift_solutions
+        )
+
+        for index, solution in enumerate(
+            shift_solutions
+        ):
+
+            # ----------------------------------------------------
+            # multirow somente na primeira linha do grupo.
+            # ----------------------------------------------------
+
+            if index == 0:
+
+                shift_label = (
+                    "\\multirow{"
+                    f"{number_of_rows}"
+                    "}{*}{"
+                    f"{shift_type}"
+                    "}"
                 )
 
-            print(
-                f"\nTabela salva:"
-                f"\n{filename}"
+            else:
+
+                shift_label = ""
+
+            row = {
+                "Data shift type":
+                    shift_label,
+
+                "Solution":
+                    solution,
+            }
+
+            for metric in metrics:
+
+                row[
+                    metric_names.get(
+                        metric,
+                        metric
+                    )
+                ] = format_metric_value(
+                    shift_type,
+                    solution,
+                    metric
+                )
+
+            table_rows.append(
+                row
             )
+
+    # ============================================================
+    # CREATE DATAFRAME
+    # ============================================================
+
+    columns = [
+        "Data shift type",
+        "Solution",
+    ] + [
+        metric_names.get(
+            metric,
+            metric
+        )
+        for metric in metrics
+    ]
+
+    df_table = pd.DataFrame(
+        table_rows,
+        columns=columns
+    )
+
+    # ============================================================
+    # OUTPUT
+    # ============================================================
+
+    filename = os.path.join(
+        write_path,
+        "detection_quality_summary.tex"
+    )
+
+    # ============================================================
+    # LATEX
+    # ============================================================
+
+    generate_latex_table(
+        df_table=df_table,
+        filename=filename,
+        caption=(
+            "Data-shift detection performance "
+            "with 95\\% confidence intervals."
+        ),
+        label=(
+            "tab:detection_quality"
+        ),
+        column_format=(
+            "llccccc"
+        ),
+    )
+
+    print(
+        "\nGenerated unified detection-quality table:"
+    )
+
+    print(
+        filename
+    )
+
+    return df_eval
 
 def normalize_configuration_for_table(configuration):
     if pd.isna(configuration):
@@ -1336,14 +2190,18 @@ def generate_latex_table(
     column_format,
 ):
     """
-    Generate the final LaTeX table.
+    Gera uma tabela LaTeX.
 
-    The dataframe already contains the desired LaTeX markup,
-    including \\textbf{...}. Therefore escape=False is mandatory.
+    O dataframe pode conter comandos LaTeX como:
+
+        \\textbf{...}
+        \\multirow{...}{*}{...}
+
+    Portanto, escape=False é obrigatório.
     """
 
     latex = df_table.to_latex(
-        index=False,                 # REMOVE 0, 1, 2, ...
+        index=False,
         escape=False,
         caption=caption,
         label=label,
@@ -1351,7 +2209,7 @@ def generate_latex_table(
     )
 
     # ============================================================
-    # RESTORE / PRESERVE EXISTING LATEX REPLACEMENTS
+    # PRESERVE EXISTING MODEL REPLACEMENTS
     # ============================================================
 
     latex = (
@@ -1385,7 +2243,7 @@ def generate_latex_table(
             "Concept drift"
         )
         .replace(
-            "Concept",
+            "CONCEPT",
             "Concept drift"
         )
         .replace(
@@ -1397,7 +2255,7 @@ def generate_latex_table(
             "Label shift"
         )
         .replace(
-            "Label",
+            "LABEL",
             "Label shift"
         )
     )
@@ -1421,18 +2279,61 @@ def generate_latex_table(
     )
 
     # ============================================================
+    # ADD REQUIRED MULTIROW PACKAGE
+    # ============================================================
+
+    # Como a tabela usa \\multirow, o documento principal
+    # precisa carregar o pacote multirow.
+    #
+    # Não inserimos \\usepackage diretamente na tabela porque
+    # isso não pertence ao ambiente table.
+    #
+    # Adicionamos apenas um comentário informativo caso o
+    # pacote ainda não esteja sendo carregado.
+
+    latex = (
+        "% Requires: \\usepackage{multirow}\n"
+        + latex
+    )
+
+    # ============================================================
     # WRITE FILE
     # ============================================================
 
     with open(
         filename,
         "w",
-        encoding="utf-8",
+        encoding="utf-8"
     ) as f:
 
         f.write(
             latex
         )
+
+def calculate_detection_metric(
+    df,
+    metric,
+    ci=0.95,
+    max_detection_delay=None
+):
+    values = calculate_detection_metric_values(
+        df,
+        metric,
+        max_detection_delay=max_detection_delay
+    )
+
+    bounded = metric in {
+        "Detection Rate",
+        "Episode F1",
+        "Missed Detection Rate",
+        "Alarm Rate",
+    }
+
+    return mean_ci(
+        values,
+        ci=ci,
+        bounded=bounded
+    )
 
 def table_detection_quality_by_shift_type(
     df_final,
@@ -1441,109 +2342,89 @@ def table_detection_quality_by_shift_type(
     metrics,
     higher_is_better_metrics,
     ci=0.95,
+    max_detection_delay=None,
 ):
     """
-    Generate the overall detection-quality table aggregated by shift type.
+    Gera a tabela geral de desempenho dos detectores
+    por tipo de shift.
 
-    Aggregation:
+    A avaliação utiliza os eventos temporais de detecção.
+
+    Aggregation
+    -----------
         Shift Type × Detector
 
-    For each:
-        Shift Type × Metric
+    Metrics
+    -------
+        Detection Rate
+        Episode F1
+        Average Detection Delay
+        Missed Detection Rate
+        Alarm Rate
 
-    the best mean is identified according to the metric direction.
+    Higher is better
+    -----------------
+        Detection Rate
+        Episode F1
 
-    Higher is better:
-        Precision
-        Recall
-        F1
-
-    Lower is better:
-        Detection Delay
-        Undetected Shift Rate
-        False Alarms
-
-    Bold criterion
-    --------------
-    A method is bold when its MEAN lies inside the confidence
-    interval of the BEST MEAN.
-
-    IMPORTANT
-    ---------
-    The confidence interval of the competing method is NOT used.
-
-    Example:
-
-        Best = 0.50 ± 0.06
-        Best interval = [0.44, 0.56]
-
-        0.50 -> bold
-        0.48 -> bold
-        0.30 -> normal
+    Lower is better
+    ----------------
+        Average Detection Delay
+        Missed Detection Rate
+        Alarm Rate
     """
-
-    # ============================================================
-    # 1. COPY DATAFRAME
-    # ============================================================
-
-    df_final = df_final.copy()
 
     if df_final.empty:
         print(
-            "\nWARNING: "
-            "table_detection_quality_by_shift_type received "
-            "an empty dataframe."
+            "\nWARNING: empty dataframe passed "
+            "to table_detection_quality_by_shift_type."
         )
         return
 
+    df_eval = df_final.copy()
+
     # ============================================================
-    # 2. NORMALIZE SHIFT TYPE
+    # NORMALIZE SHIFT TYPE
     # ============================================================
 
-    df_final["Shift Type"] = (
-        df_final["Shift Type"]
+    df_eval["Shift Type"] = (
+        df_eval["Shift Type"]
         .apply(format_shift_type)
     )
-
-    # ============================================================
-    # 3. KEEP ONLY VALID SHIFT TYPES
-    # ============================================================
 
     valid_shift_types = [
         "Concept drift",
         "Label shift",
     ]
 
-    df_final = df_final[
-        df_final["Shift Type"].isin(valid_shift_types)
+    df_eval = df_eval[
+        df_eval["Shift Type"].isin(
+            valid_shift_types
+        )
     ].copy()
 
-    if df_final.empty:
-        raise RuntimeError(
-            "No valid Concept drift or Label shift records "
-            "remain after normalization."
-        )
+    if df_eval.empty:
+        return
 
     # ============================================================
-    # 4. FIXED SHIFT TYPE ORDER
+    # METRIC DIRECTION
     # ============================================================
 
-    shift_types = [
-        shift_type
-        for shift_type in valid_shift_types
-        if shift_type in df_final["Shift Type"].unique()
-    ]
+    higher_is_better = {
+        "Detection Rate",
+        "Episode F1",
+    }
 
     # ============================================================
-    # 5. CALCULATE AGGREGATED METRICS
+    # BUILD AGGREGATED RESULTS
     # ============================================================
 
     rows_raw = {}
 
-    for shift_type in shift_types:
+    for shift_type in valid_shift_types:
 
-        df_shift = df_final[
-            df_final["Shift Type"] == shift_type
+        df_shift = df_eval[
+            df_eval["Shift Type"] == shift_type
         ].copy()
 
         if df_shift.empty:
@@ -1560,95 +2441,62 @@ def table_detection_quality_by_shift_type(
             if df_solution.empty:
                 continue
 
-            rows_raw[shift_type][solution] = {}
+            rows_raw[
+                shift_type
+            ][solution] = {}
 
             for metric in metrics:
-
-                # ------------------------------------------------
-                # Metric existence
-                # ------------------------------------------------
-
-                if (
-                    metric != "Undetected Shift Rate"
-                    and metric not in df_solution.columns
-                ):
-                    rows_raw[shift_type][solution][metric] = {
-                        "mean": np.nan,
-                        "ci": np.nan,
-                        "bold": False,
-                    }
-                    continue
-
-                # ------------------------------------------------
-                # Calculate metric
-                # ------------------------------------------------
 
                 mean_value, ci_value = (
                     calculate_detection_metric(
                         df_solution,
                         metric,
                         ci=ci,
+                        max_detection_delay=(
+                            max_detection_delay
+                        ),
                     )
                 )
 
-                rows_raw[shift_type][solution][metric] = {
+                rows_raw[
+                    shift_type
+                ][solution][metric] = {
                     "mean": mean_value,
                     "ci": ci_value,
-                    "bold": False,
                 }
 
     # ============================================================
-    # 6. DETERMINE BOLD VALUES
+    # BUILD TABLE
     # ============================================================
 
-    for shift_type in shift_types:
+    for shift_type in valid_shift_types:
 
         if shift_type not in rows_raw:
             continue
 
         for metric in metrics:
 
-            valid_solutions = []
-
-            # ----------------------------------------------------
-            # Collect valid methods
-            # ----------------------------------------------------
-
-            for solution in solutions:
-
-                if solution not in rows_raw[shift_type]:
-                    continue
-
-                if metric not in rows_raw[
+            valid_solutions = [
+                solution
+                for solution in solutions
+                if solution in rows_raw[
                     shift_type
-                ][solution]:
-                    continue
-
-                mean_value = rows_raw[
-                    shift_type
-                ][solution][metric]["mean"]
-
-                if pd.isna(mean_value):
-                    continue
-
-                valid_solutions.append(solution)
+                ]
+                and not pd.isna(
+                    rows_raw[
+                        shift_type
+                    ][solution][metric]["mean"]
+                )
+            ]
 
             if not valid_solutions:
                 continue
 
-            # ----------------------------------------------------
-            # Determine metric direction
-            # ----------------------------------------------------
-
-            higher_is_better = (
-                metric in higher_is_better_metrics
+            metric_is_higher_better = (
+                metric in higher_is_better
             )
 
-            # ----------------------------------------------------
-            # Find BEST MEAN
-            # ----------------------------------------------------
-
-            if higher_is_better:
+            if metric_is_higher_better:
 
                 best_solution = max(
                     valid_solutions,
@@ -1677,108 +2525,14 @@ def table_detection_quality_by_shift_type(
             ][best_solution][metric]["ci"]
 
             # ----------------------------------------------------
-            # Safety
+            # BUILD ROWS
             # ----------------------------------------------------
 
-            if pd.isna(best_mean):
-                continue
+            table_rows = []
 
-            # ----------------------------------------------------
-            # If CI unavailable:
-            # only exact best mean is bold.
-            # ----------------------------------------------------
+            for solution in solutions:
 
-            if pd.isna(best_ci):
-
-                for solution in valid_solutions:
-
-                    mean_value = rows_raw[
-                        shift_type
-                    ][solution][metric]["mean"]
-
-                    rows_raw[
-                        shift_type
-                    ][solution][metric]["bold"] = (
-                        np.isclose(
-                            mean_value,
-                            best_mean,
-                            rtol=1e-12,
-                            atol=1e-12,
-                        )
-                    )
-
-                continue
-
-            # ----------------------------------------------------
-            # BEST METHOD CI
-            # ----------------------------------------------------
-
-            best_lower = (
-                best_mean - best_ci
-            )
-
-            best_upper = (
-                best_mean + best_ci
-            )
-
-            # ----------------------------------------------------
-            # FINAL BOLD RULE
-            #
-            # Compare ONLY the competing MEAN against
-            # the BEST METHOD'S confidence interval.
-            # ----------------------------------------------------
-
-            for solution in valid_solutions:
-
-                mean_value = rows_raw[
-                    shift_type
-                ][solution][metric]["mean"]
-
-                is_bold = (
-                    best_lower
-                    <= mean_value
-                    <= best_upper
-                )
-
-                rows_raw[
-                    shift_type
-                ][solution][metric]["bold"] = bool(
-                    is_bold
-                )
-
-    # ============================================================
-    # 7. BUILD FINAL TABLE
-    # ============================================================
-
-    table_rows = []
-
-    for shift_type in shift_types:
-
-        if shift_type not in rows_raw:
-            continue
-
-        for solution in solutions:
-
-            if solution not in rows_raw[shift_type]:
-                continue
-
-            safe_solution = solution.replace(
-                "_",
-                r"\_"
-            )
-
-            row = {
-                "Shift Type": shift_type,
-                "Detector": safe_solution,
-            }
-
-            for metric in metrics:
-
-                if metric not in rows_raw[
-                    shift_type
-                ][solution]:
-
-                    row[metric] = "--"
+                if solution not in valid_solutions:
                     continue
 
                 mean_value = rows_raw[
@@ -1789,129 +2543,103 @@ def table_detection_quality_by_shift_type(
                     shift_type
                 ][solution][metric]["ci"]
 
-                is_bold = rows_raw[
-                    shift_type
-                ][solution][metric].get(
-                    "bold",
-                    False,
-                )
-
-                # ------------------------------------------------
-                # N/A
-                # ------------------------------------------------
-
                 if pd.isna(mean_value):
+                    continue
 
-                    if metric == "Detection Delay":
-                        value_str = "N/A"
-                    else:
-                        value_str = "--"
+                # ------------------------------------------------
+                # Formatting
+                # ------------------------------------------------
+
+                if pd.isna(ci_value):
+
+                    text = (
+                        f"{mean_value:.2f}"
+                    )
 
                 else:
 
-                    # ------------------------------------------------
-                    # Mean ± CI
-                    # ------------------------------------------------
+                    text = (
+                        f"{mean_value:.2f}"
+                        f" $\\pm$ "
+                        f"{ci_value:.2f}"
+                    )
 
-                    if pd.isna(ci_value):
+                # ------------------------------------------------
+                # BOLD
+                # ------------------------------------------------
 
-                        value_str = (
-                            f"{mean_value:.2f}"
-                        )
+                if not pd.isna(best_ci):
 
-                    else:
+                    best_lower = (
+                        best_mean
+                        - best_ci
+                    )
 
-                        value_str = (
-                            f"{mean_value:.2f}"
-                            f"$\\pm$"
-                            f"{ci_value:.2f}"
-                        )
+                    best_upper = (
+                        best_mean
+                        + best_ci
+                    )
 
-                    # ------------------------------------------------
-                    # Bold
-                    # ------------------------------------------------
+                    is_bold = (
+                        best_lower
+                        <= mean_value
+                        <= best_upper
+                    )
 
-                    if is_bold:
+                else:
 
-                        value_str = (
-                            "\\textbf{"
-                            + value_str
-                            + "}"
-                        )
+                    is_bold = np.isclose(
+                        mean_value,
+                        best_mean,
+                        rtol=1e-12,
+                        atol=1e-12,
+                    )
 
-                row[metric] = value_str
+                if is_bold:
 
-            table_rows.append(row)
+                    text = (
+                        "\\textbf{"
+                        + text
+                        + "}"
+                    )
 
-    # ============================================================
-    # 8. SAFETY CHECK
-    # ============================================================
+                table_rows.append(
+                    {
+                        "Detector": solution,
+                        metric: text,
+                    }
+                )
 
-    if not table_rows:
-        raise RuntimeError(
-            "No rows were generated for the "
-            "detection-quality-by-shift-type table."
-        )
+            if not table_rows:
+                continue
 
-    # ============================================================
-    # 9. CREATE DATAFRAME
-    # ============================================================
+            df_table = pd.DataFrame(
+                table_rows
+            )
 
-    df_table = pd.DataFrame(
-        table_rows
-    )
+            filename = os.path.join(
+                write_path,
+                (
+                    "overall_detection_"
+                    f"{metric.lower().replace(' ', '_')}_"
+                    f"{shift_type.lower().replace(' ', '_')}.tex"
+                )
+            )
 
-    latex_columns = [
-        "Shift Type",
-        "Detector",
-        "Precision",
-        "Recall",
-        "F1",
-        "Detection Delay",
-        "Undetected Shift Rate",
-        "False Alarms",
-    ]
-
-    df_table = df_table[
-        latex_columns
-    ]
-
-    # ============================================================
-    # 10. GENERATE LATEX
-    # ============================================================
-
-    filename = (
-        f"{write_path}"
-        "latex_table_detection_quality_"
-        "by_shift_type.tex"
-    )
-
-    generate_latex_table(
-        df_table=df_table,
-        filename=filename,
-        caption=(
-            "Overall comparison of data-shift "
-            "detection quality by shift type. "
-            "Values are reported as mean "
-            "$\\pm$ 95\\% confidence interval "
-            "across datasets, models, folds, "
-            "and shift configurations."
-        ),
-        label=(
-            "tab:detection_quality_"
-            "by_shift_type"
-        ),
-        column_format=(
-            "ll"
-            + "c" * len(metrics)
-        ),
-    )
-
-    print(
-        "\nTabela by shift type salva em:"
-    )
-
-    print(filename)
+            generate_latex_table(
+                df_table=df_table,
+                filename=filename,
+                caption=(
+                    f"{metric} for "
+                    f"{shift_type} detection."
+                ),
+                label=(
+                    "tab:overall_detection_"
+                    f"{metric.lower().replace(' ', '_')}_"
+                    f"{shift_type.lower().replace(' ', '_')}"
+                ),
+                column_format="lr",
+            )
 
 def table_per_dataset(df, write_path, metric, solutions_order, ci=0.95):
 
@@ -2530,18 +3258,16 @@ if __name__ == "__main__":
     # ============================================================
 
     metrics = [
-        "Precision",
-        "Recall",
-        "F1",
-        "Detection Delay",
-        "Undetected Shift Rate",
-        "False Alarms",
+        "Detection Rate",
+        "Episode F1",
+        "Average Detection Delay",
+        "Missed Detection Rate",
+        "Alarm Rate",
     ]
 
     higher_is_better_metrics = {
-        "Precision",
-        "Recall",
-        "F1",
+        "Detection Rate",
+        "Episode F1",
     }
 
     print("\n" + "=" * 100)
@@ -2600,7 +3326,7 @@ if __name__ == "__main__":
         .to_string()
     )
 
-    print("\nRodadas selecionadas:")
+    print("\nDados temporais selecionados para detecção:")
     print(
         df_final[
             [
@@ -2610,12 +3336,10 @@ if __name__ == "__main__":
                 "Model",
                 "Shift Type",
                 "Shift Configuration",
-                "Round",
-                "Precision",
-                "Recall",
-                "F1",
-                "Detection Delay",
-                "False Alarms",
+                "Shift Round",
+                "First Detection Round",
+                "Detection Rounds",
+                "Last Round",
             ]
         ]
         .sort_values(
@@ -2635,11 +3359,11 @@ if __name__ == "__main__":
     # GERAR TABELA COM OS DADOS FINAIS
     # ============================================================
 
-    table_detection_quality_by_shift_type(
-        df_final=df_final,
+    table_detection_quality(
+        df=df_all,
         write_path=write_path,
-        solutions=solutions,
+        solutions_order=solutions,
         metrics=metrics,
-        higher_is_better_metrics=higher_is_better_metrics,
-        ci=0.95
+        ci=0.95,
+        max_detection_delay=None,
     )
