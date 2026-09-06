@@ -49,9 +49,13 @@ class CDAFedAvg(MultiFedAvg):
 
         # Shift type
         self.shift_type = (
-            "Label"
-            if "label_shift" in self.args.experiment_id
-            else "Concept"
+            "Combined"
+            if "combined_shift" in self.args.experiment_id
+            else (
+                "Label"
+                if "label_shift" in self.args.experiment_id
+                else "Concept"
+            )
         )
 
         # Shift configuration
@@ -59,6 +63,7 @@ class CDAFedAvg(MultiFedAvg):
             self.args.experiment_id
             .replace("label_shift#", "")
             .replace("concept_drift#", "")
+            .replace("combined_shift#", "")
             .replace("_sudden", "")
         )
 
