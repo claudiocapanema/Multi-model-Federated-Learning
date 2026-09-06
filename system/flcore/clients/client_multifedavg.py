@@ -315,6 +315,85 @@ class MultiFedAvgClient:
                     type_ = "label_shift"
                     config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                    "type": type_} for me in range(ME)}
+                elif experiment_id.startswith("combined_shift#") and experiment_id.endswith("_sudden"):
+                    # ---------------------------------------------------------
+                    # Combined shift:
+                    #   - alpha changes from the value encoded before "_"
+                    #     to the value encoded after "_";
+                    #   - concept drift is activated at the SAME round;
+                    #   - both changes affect the data used by this model.
+                    #
+                    # Example:
+                    #   combined_shift#0.1_1.0_sudden
+                    # means alpha: 0.1 -> 1.0, with concept drift enabled
+                    # simultaneously at the shift round.
+                    # ---------------------------------------------------------
+                    combined_transitions = {
+                        "0.1_1.0": (0.1, 1.0),
+                        "0.1-1.0": (0.1, 1.0),
+                        "0.1_10.0": (0.1, 10.0),
+                        "0.1-10.0": (0.1, 10.0),
+                        "1.0_0.1": (1.0, 0.1),
+                        "1.0-0.1": (1.0, 0.1),
+                        "1.0_10.0": (1.0, 10.0),
+                        "1.0-10.0": (1.0, 10.0),
+                        "10.0_0.1": (10.0, 0.1),
+                        "10.0-0.1": (10.0, 0.1),
+                        "10.0_1.0": (10.0, 1.0),
+                        "10.0-1.0": (10.0, 1.0),
+                    }
+
+                    transition_key = experiment_id.replace(
+                        "combined_shift#", ""
+                    ).replace("_sudden", "")
+
+                    if transition_key not in combined_transitions:
+                        config = {}
+                    else:
+                        initial_alpha, target_alpha = combined_transitions[
+                            transition_key
+                        ]
+
+                        if not all(
+                            abs(float(alpha) - initial_alpha) <= 1e-8
+                            for alpha in self.alpha_train
+                        ):
+                            raise ValueError(
+                                f"{experiment_id} requires initial alpha="
+                                f"{initial_alpha}, but received "
+                                f"{self.alpha_train}"
+                            )
+
+                        ME_concept_drift_rounds = [
+                            [int(n_rounds * 0.3)],
+                            [int(n_rounds * 0.5)],
+                            [int(n_rounds * 0.7)]
+                        ]
+
+                        new_alphas = [
+                            [target_alpha]
+                            for _ in range(ME)
+                        ]
+
+                        new_concept_drift_window = [
+                            [1]
+                            for _ in range(ME)
+                        ]
+
+                        type_ = "combined_shift"
+
+                        config = {
+                            me: {
+                                "data_shift_rounds": ME_concept_drift_rounds[me],
+                                "new_alphas": new_alphas[me],
+                                "new_concept_drift_window": (
+                                    new_concept_drift_window[me]
+                                ),
+                                "type": type_
+                            }
+                            for me in range(ME)
+                        }
+
                 else:
                     config = {}
 
@@ -432,17 +511,48 @@ class MultiFedAvgClient:
     def get_data_shift_config(self, ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds, seed):
 
         try:
-
-            if "label_shift" in experiment_id:
-                return self.label_shift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds)
+            # IMPORTANT: combined_shift must be checked before label_shift
+            # and concept_drift.  Its implementation is handled by
+            # label_shift_config(), but it has its own type and must not be
+            # routed to the label-only/concept-only configurations.
+            if "combined_shift" in experiment_id:
+                return self.label_shift_config(
+                    ME,
+                    n_rounds,
+                    alphas,
+                    experiment_id,
+                    client_id,
+                    gradual_rounds
+                )
+            elif "label_shift" in experiment_id:
+                return self.label_shift_config(
+                    ME,
+                    n_rounds,
+                    alphas,
+                    experiment_id,
+                    client_id,
+                    gradual_rounds
+                )
             elif "concept_drift" in experiment_id:
-                return self.global_concept_drift_config(ME, n_rounds, alphas, experiment_id, client_id, gradual_rounds)
+                return self.global_concept_drift_config(
+                    ME,
+                    n_rounds,
+                    alphas,
+                    experiment_id,
+                    client_id,
+                    gradual_rounds
+                )
             else:
                 return {}
 
         except Exception as e:
             print("get_data_shift_config error")
-            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+            print("""Error on line {} {} {}""".format(
+                sys.exc_info()[-1].tb_lineno,
+                type(e).__name__,
+                e
+            ))
+            return {}
 
     def set_parameters(self, m, model):
         for new_param, old_param in zip(model.parameters(), self.model[m].parameters()):
@@ -534,7 +644,8 @@ class MultiFedAvgClient:
             loader,
             me,
             concept_drift_window,
-            shuffle=False
+            shuffle=False,
+            shift_context="concept_drift"
     ):
         """
         Apply concept drift by changing P(X|Y) while preserving P(Y).
@@ -1230,6 +1341,22 @@ class MultiFedAvgClient:
 
             # ================================================================
             # FINAL DIAGNOSTICS
+            #
+            # These diagnostics are intentionally based on the ACTUAL
+            # samples before and after the transformation.  They therefore
+            # provide evidence that concept drift really occurred, instead
+            # of only confirming that concept_drift_window was enabled.
+            #
+            # A genuine concept drift here must satisfy:
+            #
+            #   1) Y is unchanged -> P(Y) is preserved;
+            #   2) X changes for a non-zero fraction of samples;
+            #   3) changed X comes from another original class;
+            #   4) P(X|Y) changes.
+            #
+            # For (4), we compare the mean input representation for each
+            # class before and after the reassignment.  This is a diagnostic
+            # only; it does not affect training.
             # ================================================================
 
             changed_fraction = (
@@ -1238,6 +1365,188 @@ class MultiFedAvgClient:
                 len(samples),
                 1
             )
+            )
+
+            # ---------------------------------------------------------------
+            # Empirical X-change verification
+            # ---------------------------------------------------------------
+            changed_x = 0
+            total_x = len(samples)
+            total_abs_change = 0.0
+            total_elements = 0
+
+            try:
+                for original_sample, shifted_sample in zip(
+                        samples,
+                        shifted_samples
+                ):
+                    original_x = original_sample[input_key]
+                    shifted_x = shifted_sample[input_key]
+
+                    if (
+                            isinstance(original_x, torch.Tensor)
+                            and isinstance(shifted_x, torch.Tensor)
+                    ):
+                        if not torch.equal(
+                                original_x,
+                                shifted_x
+                        ):
+                            changed_x += 1
+
+                        original_float = (
+                            original_x.detach()
+                            .cpu()
+                            .float()
+                        )
+                        shifted_float = (
+                            shifted_x.detach()
+                            .cpu()
+                            .float()
+                        )
+
+                        if original_float.shape == shifted_float.shape:
+                            diff = torch.abs(
+                                original_float - shifted_float
+                            )
+                            total_abs_change += float(
+                                diff.sum().item()
+                            )
+                            total_elements += int(
+                                diff.numel()
+                            )
+
+            except Exception as diagnostic_error:
+                print(
+                    f"[CONCEPT DRIFT VERIFY] "
+                    f"client={self.client_id} "
+                    f"model={me} "
+                    f"X_comparison_error="
+                    f"{type(diagnostic_error).__name__}: "
+                    f"{diagnostic_error}"
+                )
+
+            empirical_x_changed_fraction = (
+                changed_x / max(total_x, 1)
+            )
+
+            mean_abs_x_change = (
+                total_abs_change / max(total_elements, 1)
+            )
+
+            # ---------------------------------------------------------------
+            # Empirical P(X|Y) verification
+            #
+            # For each class Y=c, compare the average input representation
+            # before and after the shift.  A positive difference means the
+            # conditional input distribution associated with that label
+            # changed.
+            # ---------------------------------------------------------------
+            conditional_mean_changes = []
+            classes_with_conditional_change = 0
+
+            try:
+                for class_id in present_classes:
+
+                    class_samples = [
+                        i for i, label in enumerate(labels)
+                        if int(label) == int(class_id)
+                    ]
+
+                    if len(class_samples) == 0:
+                        continue
+
+                    original_tensors = [
+                        samples[i][input_key]
+                        for i in class_samples
+                        if isinstance(
+                            samples[i][input_key],
+                            torch.Tensor
+                        )
+                    ]
+
+                    shifted_tensors = [
+                        shifted_samples[i][input_key]
+                        for i in class_samples
+                        if isinstance(
+                            shifted_samples[i][input_key],
+                            torch.Tensor
+                        )
+                    ]
+
+                    if (
+                            len(original_tensors) == len(class_samples)
+                            and len(shifted_tensors) == len(class_samples)
+                    ):
+                        original_stack = torch.stack(
+                            [
+                                x.detach().cpu().float()
+                                for x in original_tensors
+                            ],
+                            dim=0
+                        )
+
+                        shifted_stack = torch.stack(
+                            [
+                                x.detach().cpu().float()
+                                for x in shifted_tensors
+                            ],
+                            dim=0
+                        )
+
+                        original_mean = (
+                            original_stack.mean(dim=0)
+                        )
+                        shifted_mean = (
+                            shifted_stack.mean(dim=0)
+                        )
+
+                        conditional_mean_change = float(
+                            torch.abs(
+                                original_mean - shifted_mean
+                            ).mean().item()
+                        )
+
+                        conditional_mean_changes.append(
+                            conditional_mean_change
+                        )
+
+                        if conditional_mean_change > 1e-12:
+                            classes_with_conditional_change += 1
+
+            except Exception as diagnostic_error:
+                print(
+                    f"[CONCEPT DRIFT VERIFY] "
+                    f"client={self.client_id} "
+                    f"model={me} "
+                    f"P(X|Y)_comparison_error="
+                    f"{type(diagnostic_error).__name__}: "
+                    f"{diagnostic_error}"
+                )
+
+            mean_conditional_change = (
+                float(np.mean(conditional_mean_changes))
+                if conditional_mean_changes
+                else 0.0
+            )
+
+            conditional_change_fraction = (
+                classes_with_conditional_change
+                / max(len(present_classes), 1)
+            )
+
+            # ---------------------------------------------------------------
+            # Final logical verdict.
+            #
+            # We require all observable properties of the implemented
+            # concept-drift mechanism to hold.  The P(X|Y) diagnostic is
+            # based on the empirical class-conditional input means.
+            # ---------------------------------------------------------------
+            concept_drift_confirmed = bool(
+                valid_cross_class_assignments > 0
+                and changed_x > 0
+                and np.array_equal(labels, shifted_labels)
+                and np.array_equal(original_counts, shifted_counts)
+                and mean_conditional_change > 1e-12
             )
 
             print(
@@ -1253,6 +1562,26 @@ class MultiFedAvgClient:
                 f"P(Y)_preserved=True "
                 f"labels_unchanged=True "
                 f"cross_class_reassignment=True"
+            )
+
+            print(
+                f"[CONCEPT DRIFT VERIFY] "
+                f"shift_type={shift_context} "
+                f"client={self.client_id} "
+                f"model={me} "
+                f"dataset={dataset_name} "
+                f"window={concept_drift_window} "
+                f"X_changed={changed_x}/{total_x} "
+                f"X_changed_fraction={empirical_x_changed_fraction:.3f} "
+                f"mean_abs_X_change={mean_abs_x_change:.8f} "
+                f"P(X|Y)_mean_change={mean_conditional_change:.8f} "
+                f"classes_with_P(X|Y)_change="
+                f"{classes_with_conditional_change}/"
+                f"{len(present_classes)} "
+                f"P(X|Y)_change_fraction="
+                f"{conditional_change_fraction:.3f} "
+                f"concept_drift_confirmed="
+                f"{concept_drift_confirmed}"
             )
 
             return shifted_loader
@@ -1404,6 +1733,75 @@ class MultiFedAvgClient:
                         )
 
                         (self.p_ME[me], self.fc_ME[me], self.il_ME[me]) = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id, self.n_classes, me=me)
+
+                # =====================================================
+                # COMBINED SHIFT
+                # =====================================================
+
+                elif (
+                        data_shift_flag
+                        and self.data_shift_config[me]["type"]
+                        == "combined_shift"
+                        and t - self.lt[me] > 0
+                ):
+
+                    print(
+                        f"[COMBINED SHIFT - TRAIN] "
+                        f"client={self.client_id} "
+                        f"model={me} "
+                        f"round={t}: "
+                        f"alpha {self.alpha_train[me]} -> {alpha_me}; "
+                        f"concept drift window "
+                        f"{self.concept_drift_window_train[me]} -> "
+                        f"{concept_drift_window}"
+                    )
+
+                    # Combined shift changes P(Y) through the new
+                    # Dirichlet alpha and P(X|Y) through concept drift.
+                    self.alpha_train[me] = alpha_me
+                    self.alpha_test[me] = alpha_me
+                    self.partition_seed_train[me] = int(partition_seed)
+                    self.partition_seed_test[me] = int(partition_seed)
+                    self.concept_drift_window_train[me] = (
+                        concept_drift_window
+                    )
+
+                    (
+                        self.trainloader[me],
+                        self.valloader[me]
+                    ) = load_data(
+                        dataset_name=self.args.dataset[me],
+                        alpha=self.alpha_train[me],
+                        data_sampling_percentage=self.args.data_percentage,
+                        partition_id=self.client_id,
+                        num_partitions=self.args.total_clients + 1,
+                        batch_size=self.batch_size[me],
+                        fold_id=self.fold_id,
+                        partition_seed=partition_seed,
+                    )
+
+                    if concept_drift_window > 0:
+                        self.trainloader[me] = (
+                            self._apply_concept_drift_to_loader(
+                                self.trainloader[me],
+                                me,
+                                concept_drift_window,
+                                shuffle=True,
+                                shift_context="combined_shift"
+                            )
+                        )
+
+                    (
+                        self.p_ME[me],
+                        self.fc_ME[me],
+                        self.il_ME[me]
+                    ) = self._get_datasets_metrics(
+                        self.trainloader,
+                        self.ME,
+                        self.client_id,
+                        self.n_classes,
+                        me=me
+                    )
 
                 # =====================================================
                 # CONCEPT DRIFT
@@ -1595,6 +1993,68 @@ class MultiFedAvgClient:
                     fold_id=self.fold_id,
                     partition_seed=partition_seed,
                 )
+
+                return (
+                    self.p_ME,
+                    self.fc_ME,
+                    self.il_ME
+                )
+
+            # =========================================================
+            # COMBINED SHIFT
+            # =========================================================
+
+            if (
+                    self.data_shift_config[me]["type"]
+                    == "combined_shift"
+                    and data_shift_flag
+                    and (
+                        self.alpha_test[me] != alpha_me
+                        or self.partition_seed_test[me] != partition_seed
+                        or self.concept_drift_window_test[me]
+                        != concept_drift_window
+                    )
+            ):
+                print(
+                    f"[COMBINED SHIFT - TEST] "
+                    f"client={self.client_id} "
+                    f"model={me} "
+                    f"round={t}: "
+                    f"alpha {self.alpha_test[me]} -> {alpha_me}; "
+                    f"concept drift window "
+                    f"{self.concept_drift_window_test[me]} -> "
+                    f"{concept_drift_window}"
+                )
+
+                self.alpha_test[me] = alpha_me
+                self.partition_seed_test[me] = int(partition_seed)
+                self.concept_drift_window_test[me] = (
+                    concept_drift_window
+                )
+
+                _, original_valloader = load_data(
+                    dataset_name=self.args.dataset[me],
+                    alpha=self.alpha_test[me],
+                    data_sampling_percentage=self.args.data_percentage,
+                    partition_id=self.client_id,
+                    num_partitions=self.args.total_clients + 1,
+                    batch_size=self.batch_size[me],
+                    fold_id=self.fold_id,
+                    partition_seed=partition_seed,
+                )
+
+                if concept_drift_window <= 0:
+                    self.valloader[me] = original_valloader
+                else:
+                    self.valloader[me] = (
+                        self._apply_concept_drift_to_loader(
+                            original_valloader,
+                            me,
+                            concept_drift_window,
+                            shuffle=False,
+                            shift_context="combined_shift"
+                        )
+                    )
 
                 return (
                     self.p_ME,
@@ -1870,7 +2330,7 @@ class MultiFedAvgClient:
     def _check_concept_drift(self, server_round, me, train):
 
         try:
-            if self.data_shift_config == {} or self.data_shift_config[me]["type"] != "concept_drift":
+            if self.data_shift_config == {} or self.data_shift_config[me]["type"] not in ("concept_drift", "combined_shift"):
                 return 0, False
             else:
                 reference_concept_drift_window = self.concept_drift_window_train[me] if train else self.concept_drift_window_test[me]
@@ -2180,9 +2640,6 @@ class MultiFedAvgClient:
                     e
                 )
             )
-
-
-
 
 
 

@@ -723,7 +723,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             combined_model = self.combined_model[me]
 
             if (
-                    t > 15
+                    t > 10
                     and previous_loader is not None
                     and current_loader is not None
                     and combined_model is not None
