@@ -401,6 +401,42 @@ def _bootstrap_performance_drop_pvalue(
         (np.sum(drops <= 0.0) + 1.0) / (len(drops) + 1.0)
     )
 
+# ============================================================
+# Adaptive GDS performance-drop threshold based on CURRENT DH
+# ============================================================
+# Observed DH range in the datasets: 27%--74%.
+# The threshold increases linearly from 20% to 50%.
+GDS_DH_MIN = 0.27
+GDS_DH_MAX = 0.74
+GDS_MIN_PERFORMANCE_DROP_MIN = 0.25
+GDS_MIN_PERFORMANCE_DROP_MAX = 0.40
+
+
+def get_adaptive_min_performance_drop(dh):
+    """Map the current local DH to the GDS relative-drop threshold."""
+    try:
+        dh = float(dh)
+        # Accept either [0, 1] values or percentage values such as 27--74.
+        if dh > 1.0:
+            dh /= 100.0
+
+        dh = float(np.clip(dh, GDS_DH_MIN, GDS_DH_MAX))
+        normalized_dh = (dh - GDS_DH_MIN) / (GDS_DH_MAX - GDS_DH_MIN)
+
+        threshold = (
+            GDS_MIN_PERFORMANCE_DROP_MIN
+            + normalized_dh
+            * (GDS_MIN_PERFORMANCE_DROP_MAX - GDS_MIN_PERFORMANCE_DROP_MIN)
+        )
+        return float(np.clip(
+            threshold,
+            GDS_MIN_PERFORMANCE_DROP_MIN,
+            GDS_MIN_PERFORMANCE_DROP_MAX
+        ))
+    except Exception:
+        return GDS_MIN_PERFORMANCE_DROP_MIN
+
+
 def detect_generic_data_shift(
         model,
         old_loader,
@@ -712,6 +748,23 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             current_loader = self.trainloader[me]
 
             # ------------------------------------------------------------
+            # CURRENT LOCAL DH
+            # ------------------------------------------------------------
+            # update_local_train_data() has already prepared the current
+            # training window, so fc_ME/il_ME represent the CURRENT local
+            # data heterogeneity used for this detection.
+            current_dh = float(
+                np.clip(
+                    ((1.0 - float(self.fc_ME[me])) + float(self.il_ME[me])) / 2.0,
+                    0.0,
+                    1.0
+                )
+            )
+            adaptive_min_performance_drop = get_adaptive_min_performance_drop(
+                current_dh
+            )
+
+            # ------------------------------------------------------------
             # GENERIC DATA SHIFT -- BEFORE LOCAL TRAINING
             # ------------------------------------------------------------
             gds = 0.0
@@ -744,7 +797,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                         device=self.device,
                         dataset_name=self.args.dataset[me],
                         n_classes=self.n_classes[me],
-                        min_performance_drop=0.20,
+                        min_performance_drop=adaptive_min_performance_drop,
                         alpha=0.05,
                         n_bootstrap=200,
                         random_seed=(42 + self.client_id + 1000 * me + t)
@@ -841,6 +894,8 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 "gds_pvalue": gds_pvalue,
                 "gds_old_performance": old_performance,
                 "gds_current_performance": current_performance,
+                "gds_current_dh": current_dh,
+                "gds_min_performance_drop": adaptive_min_performance_drop,
                 "data_shift_score": data_shift_score
             }
 
@@ -849,6 +904,8 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 f"old_bal_acc={old_performance:.6f} "
                 f"current_bal_acc={current_performance:.6f} "
                 f"drop={gds:.6f} p={gds_pvalue:.6g} "
+                f"current_dh={current_dh:.6f} "
+                f"min_performance_drop={adaptive_min_performance_drop:.6f} "
                 f"sample_fraction=0.20"
             )
 
