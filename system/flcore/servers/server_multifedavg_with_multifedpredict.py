@@ -246,9 +246,11 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
             self.dataset = self.args.dataset
 
-            if "label_shift" in self.args.experiment_id:
+            if "combined_shift" in self.args.experiment_id:
+                self.shift_type = "COMBINED_SHIFT"
+            elif "label_shift" in self.args.experiment_id:
                 self.shift_type = "LABEL_SHIFT"
-            elif "concept_drift" in  self.args.experiment_id:
+            elif "concept_drift" in self.args.experiment_id:
                 self.shift_type = "CONCEPT_DRIFT"
             else:
                 self.shift_type = "NO_SHIFT"
@@ -501,8 +503,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
             self.clients_ids_uniform_selection = [
                 client_id
-                for client_id
-                in copy.deepcopy(
+                for client_id in copy.deepcopy(
                     self.clients_ids
                 )
             ]
@@ -523,6 +524,21 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 []
                 for me in range(self.ME)
             ]
+
+            # ============================================================
+            # ADAPTATION STATE
+            #
+            # Persistent set containing all clients that have already
+            # trained during the current adaptation phase.
+            #
+            # This MUST be independent from selected_clients_m because
+            # selected_clients_m is reconstructed every round.
+            # ============================================================
+
+            self.adaptation_trained_clients = {
+                me: set()
+                for me in range(self.ME)
+            }
 
             # ============================================================
             # Ground-truth shift rounds
@@ -1515,22 +1531,22 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             # GENERAL DATA-SHIFT DETECTION
             #
             # The client computes a single scalar data-shift score from
-            # complementary local signals.  The server does not classify
+            # complementary local signals. The server does not classify
             # the shift as LABEL_SHIFT, CONCEPT_DRIFT, or COMBINED_SHIFT.
             #
             # A shift is detected when the aggregated score reaches the
-            # common threshold.  This same decision drives adaptation for
-            # every simulated shift scenario.
+            # common threshold.
             # ============================================================
 
             shift_detected = [
-                False
-            ] * self.ME
+                                 False
+                             ] * self.ME
 
-            data_shift_threshold = float(self.data_shift_threshold)
+            data_shift_threshold = float(
+                self.data_shift_threshold
+            )
 
             for me in range(self.ME):
-
                 current_score = float(
                     np.clip(
                         self.data_shift_score[me],
@@ -1540,7 +1556,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 )
 
                 shift_detected[me] = (
-                    current_score >= data_shift_threshold
+                        current_score
+                        >= data_shift_threshold
                 )
 
                 self.data_shift_detected[me] = (
@@ -1563,12 +1580,14 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             # IMPORTANT:
             #
             # The clients responsible for detecting the shift are the
-            # clients that trained in the previous round. They have
-            # already processed the new data.
+            # clients that trained in the previous round.
             #
-            # Therefore, detection at round t only initializes the
-            # adaptation state. It does NOT cause those same clients to
-            # be selected again.
+            # They have already processed the new data and therefore
+            # MUST NOT be trained again during this adaptation.
+            #
+            # The persistent adaptation_trained_clients set is initialized
+            # with those clients and then accumulates every client trained
+            # during the adaptation phase.
             # ============================================================
 
             newly_detected_model = -1
@@ -1579,13 +1598,17 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     continue
 
                 # --------------------------------------------------------
-                # A persistent significant CD test is not a new event.
-                # A new adaptation is started only on the transition
-                # from NO_SHIFT to a shift state.
+                # A persistent shift is not a new event.
+                #
+                # Adaptation starts only on the transition:
+                #
+                # NO_SHIFT -> DATA_SHIFT
                 # --------------------------------------------------------
+
                 previous_state = bool(
                     self.previous_detector_state.get(
-                        me, False
+                        me,
+                        False
                     )
                 )
 
@@ -1594,18 +1617,22 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 )
 
                 new_shift_event = (
-                    not previous_state
-                    and current_state
+                        not previous_state
+                        and current_state
                 )
 
                 if not new_shift_event:
                     print(
                         f"[SHIFT EVENT IGNORED] "
-                        f"round={t} model={me} "
-                        f"state={'DATA_SHIFT' if current_state else 'NO_SHIFT'} "
-                        f"previous={'DATA_SHIFT' if previous_state else 'NO_SHIFT'} "
+                        f"round={t} "
+                        f"model={me} "
+                        f"state="
+                        f"{'DATA_SHIFT' if current_state else 'NO_SHIFT'} "
+                        f"previous="
+                        f"{'DATA_SHIFT' if previous_state else 'NO_SHIFT'} "
                         f"reason=persistent_shift"
                     )
+
                     continue
 
                 # --------------------------------------------------------
@@ -1621,9 +1648,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
                 # --------------------------------------------------------
                 # Start a NEW adaptation phase.
-                #
-                # The actual adaptation selection below excludes the
-                # clients that generated the current shift evidence.
                 # --------------------------------------------------------
 
                 self.last_drift_round[me] = t
@@ -1638,12 +1662,36 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
                 newly_detected_model = me
 
+                # --------------------------------------------------------
+                # IMPORTANT:
+                #
+                # The clients selected in the previous round are the
+                # clients whose training produced the evidence of the
+                # shift.
+                #
+                # Therefore, they are considered ALREADY TRAINED for
+                # this adaptation phase.
+                #
+                # This state persists across subsequent rounds.
+                # --------------------------------------------------------
+
+                detected_clients = set(
+                    self.selected_clients_m[me]
+                )
+
+                self.adaptation_trained_clients[me] = (
+                    set(detected_clients)
+                )
+
                 print(
                     f"[ADAPTATION START] "
                     f"round={t} "
                     f"model={me} "
                     f"detected_clients="
-                    f"{self.selected_clients_m[me]}"
+                    f"{sorted(detected_clients)} "
+                    f"already_covered="
+                    f"{len(detected_clients)}/"
+                    f"{len(self.clients_ids)}"
                 )
 
                 break
@@ -1672,15 +1720,20 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             )
 
             # ============================================================
-            # Clients that already participated in the round that
-            # produced the shift detection.
+            # Persistent adaptation coverage
             #
-            # These clients already trained with the new data and must
-            # NOT be selected again for adaptation.
+            # Unlike selected_clients_m, this set survives across rounds.
+            # It contains:
+            #
+            # 1. Clients from the round that produced the shift detection.
+            # 2. Clients already selected during adaptation.
+            #
+            # Thus, a client is never selected twice in the same
+            # adaptation phase.
             # ============================================================
 
             already_adapted_clients = set(
-                self.selected_clients_m[
+                self.adaptation_trained_clients[
                     adaptation_model
                 ]
             )
@@ -1689,18 +1742,29 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 f"[ADAPTATION] "
                 f"round={t} "
                 f"model={adaptation_model} "
-                f"already_adapted="
-                f"{sorted(already_adapted_clients)}"
+                f"already_covered="
+                f"{sorted(already_adapted_clients)} "
+                f"covered="
+                f"{len(already_adapted_clients)}/"
+                f"{len(self.clients_ids)}"
             )
 
             # ============================================================
-            # Build the pool of clients that are still available for
-            # adaptation.
+            # Build the pool of clients that HAVE NOT YET participated
+            # in this adaptation phase.
             #
             # IMPORTANT:
             #
-            # Do not use the complete client set here because that could
-            # select again the clients that detected the shift.
+            # We intentionally DO NOT use
+            # self.clients_ids_uniform_selection here.
+            #
+            # That list belongs to the normal MultiFedPredict selection
+            # mechanism and can already have clients removed from it due
+            # to previous normal rounds.
+            #
+            # Using it during adaptation could prevent some clients from
+            # ever being selected, defeating the guarantee that every
+            # client is trained exactly once after the detected shift.
             # ============================================================
 
             available_clients = [
@@ -1710,58 +1774,50 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             ]
 
             # ============================================================
-            # Also respect the existing uniform-selection pool when
-            # possible.
-            # ============================================================
-
-            uniform_available_clients = [
-                client_id
-                for client_id in self.clients_ids_uniform_selection
-                if client_id not in already_adapted_clients
-            ]
-
-            # ============================================================
-            # Prefer clients still present in the uniform-selection pool.
-            # ============================================================
-
-            if len(uniform_available_clients) > 0:
-
-                candidate_clients = (
-                    uniform_available_clients
-                )
-
-            else:
-
-                candidate_clients = (
-                    available_clients
-                )
-
-            # ============================================================
             # Select clients for the current adaptation round.
+            #
+            # At most num_training_clients are selected.
+            # If fewer clients remain, all remaining clients are selected.
             # ============================================================
 
             selected_clients = []
 
-            if len(candidate_clients) > 0:
-                remaining = min(
+            if len(available_clients) > 0:
+                number_to_select = min(
                     self.num_training_clients,
-                    len(candidate_clients)
+                    len(available_clients)
                 )
 
                 selected_clients = sorted(
                     random.sample(
-                        candidate_clients,
-                        remaining
+                        available_clients,
+                        number_to_select
                     )
                 )
 
             # ============================================================
-            # Remove selected clients from the uniform-selection pool.
+            # Persistently register the clients selected in this adaptation
+            # round.
+            # ============================================================
+
+            self.adaptation_trained_clients[
+                adaptation_model
+            ].update(
+                selected_clients
+            )
+
+            # ============================================================
+            # Remove selected clients from the normal uniform-selection
+            # pool as well.
+            #
+            # This prevents them from being immediately selected again by
+            # the normal mechanism after adaptation finishes.
             # ============================================================
 
             self.clients_ids_uniform_selection = [
                 client_id
-                for client_id in self.clients_ids_uniform_selection
+                for client_id
+                in self.clients_ids_uniform_selection
                 if client_id not in selected_clients
             ]
 
@@ -1784,32 +1840,53 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     sc.append([])
 
             # ============================================================
-            # Diagnostics
+            # Current adaptation coverage
             # ============================================================
+
+            covered_clients = set(
+                self.adaptation_trained_clients[
+                    adaptation_model
+                ]
+            )
+
+            remaining_clients = [
+                client_id
+                for client_id in self.clients_ids
+                if client_id not in covered_clients
+            ]
 
             print(
                 f"[ADAPTATION SELECTION] "
                 f"round={t} "
                 f"model={adaptation_model} "
                 f"selected={selected_clients} "
+                f"covered="
+                f"{len(covered_clients)}/"
+                f"{len(self.clients_ids)} "
                 f"remaining="
-                f"{len(available_clients) - len(selected_clients)}"
+                f"{len(remaining_clients)}"
             )
 
             # ============================================================
             # Adaptation completion
             #
-            # The adaptation phase finishes when there are no more
-            # clients available for adaptation or when the configured
-            # adaptation interval has elapsed.
+            # PRIMARY STOP CONDITION:
+            #
+            # The adaptation ends immediately when EVERY client has been
+            # trained once during the adaptation phase, counting the
+            # clients that trained in the round that produced the shift.
+            #
+            # The interval is NOT used as the normal adaptation duration.
+            #
+            # It remains only as a safeguard against an unexpectedly long
+            # adaptation phase.
             # ============================================================
 
             adaptation_finished = False
 
             if (
-                    t >= self.adaptation_until[
-                adaptation_model
-            ]
+                    len(covered_clients)
+                    >= len(self.clients_ids)
             ):
 
                 adaptation_finished = True
@@ -1818,10 +1895,25 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     f"[ADAPTATION END] "
                     f"round={t} "
                     f"model={adaptation_model} "
-                    f"reason=interval_elapsed"
+                    f"reason=all_clients_covered "
+                    f"covered="
+                    f"{len(covered_clients)}/"
+                    f"{len(self.clients_ids)}"
                 )
 
-            elif len(available_clients) == 0:
+            elif (
+                    t >= self.adaptation_until[
+                adaptation_model
+            ]
+            ):
+
+                # --------------------------------------------------------
+                # Safety timeout.
+                #
+                # This should NOT normally determine the duration.
+                # It exists only to prevent an infinite adaptation in
+                # case something unexpected prevents client coverage.
+                # --------------------------------------------------------
 
                 adaptation_finished = True
 
@@ -1829,7 +1921,12 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     f"[ADAPTATION END] "
                     f"round={t} "
                     f"model={adaptation_model} "
-                    f"reason=no_available_clients"
+                    f"reason=safety_interval_elapsed "
+                    f"covered="
+                    f"{len(covered_clients)}/"
+                    f"{len(self.clients_ids)} "
+                    f"remaining="
+                    f"{len(remaining_clients)}"
                 )
 
             # ============================================================
@@ -1846,6 +1943,20 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 ] = False
 
                 self.data_drift_model = -1
+
+                # --------------------------------------------------------
+                # Clear the persistent adaptation state.
+                #
+                # A future shift event must start a new coverage cycle.
+                # --------------------------------------------------------
+
+                self.adaptation_trained_clients[
+                    adaptation_model
+                ] = set()
+
+                # --------------------------------------------------------
+                # Restore the normal uniform-selection pool.
+                # --------------------------------------------------------
 
                 self.clients_ids_uniform_selection = [
                     client_id
