@@ -409,7 +409,7 @@ def _bootstrap_performance_drop_pvalue(
 GDS_DH_MIN = 0.27
 GDS_DH_MAX = 0.74
 GDS_MIN_PERFORMANCE_DROP_MIN = 0.25
-GDS_MIN_PERFORMANCE_DROP_MAX = 0.40
+GDS_MIN_PERFORMANCE_DROP_MAX = 0.35
 
 
 def get_adaptive_min_performance_drop(dh):
@@ -1035,12 +1035,6 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 0.32,
                 0.39
             ]
-
-            # ---------------------------------------------------------
-            # These thresholds are kept consistent with the server.
-            # They are used only for local adaptation state.
-            # ---------------------------------------------------------
-            tau_ls = 0.10
 
             # Do not independently create a new shift event in
             # evaluate().  Event detection is performed once by the
