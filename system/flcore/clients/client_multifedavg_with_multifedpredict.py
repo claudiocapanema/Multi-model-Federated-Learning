@@ -670,7 +670,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
 
             self.combined_model = [None] * self.ME
 
-            self.train_test_fraction  = 0.5
+            self.train_test_fraction  = 0.4
 
             self.train_losses = {
                 me: [] for me in range(self.ME)
@@ -765,60 +765,18 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             )
 
             # ------------------------------------------------------------
-            # GENERIC DATA SHIFT -- BEFORE LOCAL TRAINING
+            # LABEL-SHIFT EVIDENCE
             # ------------------------------------------------------------
-            gds = 0.0
-            gds_pvalue = 1.0
-            old_performance = 0.0
-            current_performance = 0.0
-
-            previous_loader = self.data_shift_reference_trainloader[me]
-            combined_model = self.combined_model[me]
-
-            if (
-                    t > 10
-                    and previous_loader is not None
-                    and current_loader is not None
-                    and combined_model is not None
-            ):
-                # Test only 20% of the current training data. The previous
-                # 20% was already sampled and stored at the last evaluate().
-                current_eval_loader = _make_sample_loader(
-                    current_loader,
-                    fraction=self.train_test_fraction,
-                    random_seed=(42 + self.client_id + 1000 * me + t)
-                )
-
-                gds, gds_pvalue, old_performance, current_performance = (
-                    detect_generic_data_shift(
-                        model=combined_model,
-                        old_loader=previous_loader,
-                        current_loader=current_eval_loader,
-                        device=self.device,
-                        dataset_name=self.args.dataset[me],
-                        n_classes=self.n_classes[me],
-                        min_performance_drop=adaptive_min_performance_drop,
-                        alpha=0.05,
-                        n_bootstrap=200,
-                        random_seed=(42 + self.client_id + 1000 * me + t)
-                    )
-                )
-
-                gds = float(np.clip(gds, 0.0, 1.0))
-                gds_pvalue = float(np.clip(gds_pvalue, 0.0, 1.0))
-                old_performance = float(np.clip(old_performance, 0.0, 1.0))
-                current_performance = float(np.clip(current_performance, 0.0, 1.0))
-
-            self.gds_score[me] = gds
-            self.gds_pvalue[me] = gds_pvalue
-            self.gds_old_performance[me] = old_performance
-            self.gds_current_performance[me] = current_performance
-
-            # ------------------------------------------------------------
-            # Existing local label-shift signal.
-            # A compact class distribution is stored at evaluate(), so the
-            # full previous training dataset is not required here.
-            # ------------------------------------------------------------
+            # LS is computed locally from the current training window and
+            # the previous training-window class distribution saved during
+            # evaluate().  Only the scalar LS score is returned to the
+            # server; class distributions are never transmitted.
+            #
+            # LS = 0.5 * sum_c |p_current(c) - p_previous(c)|
+            #
+            # The first training window has no previous window, therefore
+            # LS=0.0 for the first round.
+            ls = 0.0
             if (
                     t > 1
                     and self.data_shift_reference_label_distribution[me] is not None
@@ -829,11 +787,31 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                     current_loader, self.n_classes[me]
                 )
                 ls = float(np.clip(
-                    0.5 * np.sum(np.abs(p_current_window - p_old_window)),
-                    0.0, 1.0
+                    0.5 * np.sum(
+                        np.abs(p_current_window - p_old_window)
+                    ),
+                    0.0,
+                    1.0
                 ))
-            else:
-                ls = 0.0
+
+            # ------------------------------------------------------------
+            # Data-shift evidence is evaluated by the SERVER.
+            # The previous local GDS detector is intentionally not used
+            # for the final data-shift decision.
+            # The combined-model accuracy used by the server detector is
+            # computed later in evaluate(), after the combined model has
+            # been obtained and saved there, preserving the original
+            # MultiFedPredict flow.
+            # ------------------------------------------------------------
+            gds = 0.0
+            gds_pvalue = 1.0
+            old_performance = 0.0
+            current_performance = 0.0
+
+            self.gds_score[me] = gds
+            self.gds_pvalue[me] = gds_pvalue
+            self.gds_old_performance[me] = old_performance
+            self.gds_current_performance[me] = current_performance
 
             # ------------------------------------------------------------
             # Existing PS/similarity behavior is preserved.
@@ -843,7 +821,9 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             similarity = min(cosine_similarity(p_current, p_old), 1.0)
             ps = 1.0 - similarity
 
-            data_shift_score = float(np.clip(max(ls, gds), 0.0, 1.0))
+            # Kept only for backward-compatible logging. The server
+            # detector no longer uses this combined score.
+            data_shift_score = float(np.clip(ls, 0.0, 1.0))
 
             # ------------------------------------------------------------
             # NOW start the original local-training flow.
@@ -900,13 +880,8 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             }
 
             print(
-                f"[CLIENT GDS] round={t} client={self.client_id} model={me} "
-                f"old_bal_acc={old_performance:.6f} "
-                f"current_bal_acc={current_performance:.6f} "
-                f"drop={gds:.6f} p={gds_pvalue:.6g} "
-                f"current_dh={current_dh:.6f} "
-                f"min_performance_drop={adaptive_min_performance_drop:.6f} "
-                f"sample_fraction=0.20"
+                f"[CLIENT SHIFT EVIDENCE] round={t} client={self.client_id} model={me} "
+                f"LS={ls:.6f} train_accuracy={results['train_accuracy']:.6f}"
             )
 
             return get_weights(self.model[me]), len(self.trainloader[me].dataset), metrics
@@ -1145,6 +1120,53 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             # =========================================================
             self.combined_model[me] = copy.deepcopy(combined_model).cpu()
 
+            # =========================================================
+            # Combined-model training accuracy
+            # =========================================================
+            # Only clients that actually trained model ``me`` in this
+            # round contribute this value to the server-side history.
+            # The combined model is deliberately obtained exactly as in
+            # the original implementation above and is evaluated here,
+            # inside evaluate().
+            combined_train_accuracy = None
+
+            # The combined-model training test is only needed for
+            # experiments where concept drift / combined shift is
+            # explicitly being simulated.  For all other experiment
+            # types (e.g. label shift or no shift), do not evaluate the
+            # combined model on the local training data.
+            experiment_id = str(
+                getattr(self.args, "experiment_id", "")
+            ).lower()
+
+            combined_model_test_enabled = (
+                "concept_drift" in experiment_id
+                or "combined_shift" in experiment_id
+            )
+
+            if (
+                    combined_model_test_enabled
+                    and self.lt[me] == t
+                    and self.trainloader[me] is not None
+                    and len(self.trainloader[me].dataset) > 0
+            ):
+                _, combined_train_metrics = test(
+                    combined_model,
+                    self.trainloader[me],
+                    self.device,
+                    self.client_id,
+                    t,
+                    self.args.dataset[me],
+                    self.n_classes[me],
+                )
+                combined_train_accuracy = float(
+                    np.clip(
+                        combined_train_metrics["Accuracy"],
+                        0.0,
+                        1.0
+                    )
+                )
+
             # Keep only 20% of the training dataset for the next generic
             # performance-based data-shift test.  The full previous
             # training dataset is never retained.
@@ -1194,6 +1216,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
 
             test_metrics["gw"] = float(gw)
             test_metrics["lw"] = float(lw)
+            test_metrics["combined_train_accuracy"] = combined_train_accuracy
 
             tuple_me = (
                 loss,

@@ -94,6 +94,30 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             self.train_accuracy_list = {
                 me: [] for me in range(self.ME)
             }
+            # Aggregated local-model training accuracy indexed by round.
+            # This is kept separately from train_accuracy_list so that
+            # rounds in which a model was not trained are not populated
+            # with the previous round's value in the CSV.
+            self.train_accuracy_by_round = {
+                me: {} for me in range(self.ME)
+            }
+
+            # Server-side history of the combined model's training accuracy.
+            self.combined_train_accuracy = {me: 0.0 for me in range(self.ME)}
+            self.combined_train_accuracy_history = {me: [] for me in range(self.ME)}
+            self.combined_accuracy_reference = {me: 0.0 for me in range(self.ME)}
+            self.combined_accuracy_drop = {me: 0.0 for me in range(self.ME)}
+            self.combined_accuracy_drop_significant = {me: False for me in range(self.ME)}
+
+            # FedPredict weights returned by client.evaluate().
+            # These must come exclusively from evaluate(), never from fit().
+            self.gw = {me: [] for me in range(self.ME)}
+            self.lw = {me: [] for me in range(self.ME)}
+            self.gw_by_round = {me: {} for me in range(self.ME)}
+            self.lw_by_round = {me: {} for me in range(self.ME)}
+
+            self.combined_accuracy_history_window = 10
+            self.combined_accuracy_drop_threshold = 0.20
 
             self.max_number_of_rounds_data_drift_adaptation = (
                     len(self.clients)
@@ -292,6 +316,17 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 me: []
                 for me in range(self.ME)
             }
+
+            self.combined_train_accuracy = {me: 0.0 for me in range(self.ME)}
+            self.combined_train_accuracy_history = {me: [] for me in range(self.ME)}
+            self.combined_accuracy_reference = {me: 0.0 for me in range(self.ME)}
+            self.combined_accuracy_drop = {me: 0.0 for me in range(self.ME)}
+            self.combined_accuracy_drop_significant = {me: False for me in range(self.ME)}
+
+            self.gw = {me: [] for me in range(self.ME)}
+            self.lw = {me: [] for me in range(self.ME)}
+            self.gw_by_round = {me: {} for me in range(self.ME)}
+            self.lw_by_round = {me: {} for me in range(self.ME)}
 
             # ============================================================
             # Client-level generic-data-shift information
@@ -717,6 +752,20 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                             me
                         ]["Loss"]
                     )
+
+                    aggregated_train_accuracy = metrics_aggregated_mefl[me].get(
+                        "Accuracy"
+                    )
+                    if aggregated_train_accuracy is not None:
+                        aggregated_train_accuracy = float(
+                            np.clip(aggregated_train_accuracy, 0.0, 1.0)
+                        )
+                        self.train_accuracy_list[me].append(
+                            aggregated_train_accuracy
+                        )
+                        self.train_accuracy_by_round[me][server_round] = (
+                            aggregated_train_accuracy
+                        )
 
                     print(
                         f"Teste data shift "
@@ -1528,50 +1577,102 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 )
 
             # ============================================================
-            # GENERAL DATA-SHIFT DETECTION
+            # SERVER-SIDE DATA-SHIFT DETECTION
             #
-            # The client computes a single scalar data-shift score from
-            # complementary local signals. The server does not classify
-            # the shift as LABEL_SHIFT, CONCEPT_DRIFT, or COMBINED_SHIFT.
-            #
-            # A shift is detected when the aggregated score reaches the
-            # common threshold.
+            # DATA_SHIFT = significant aggregated LS OR significant
+            # drop in aggregated combined-model training accuracy.
             # ============================================================
-
-            shift_detected = [
-                                 False
-                             ] * self.ME
-
-            data_shift_threshold = float(
-                self.data_shift_threshold
-            )
+            shift_detected = [False] * self.ME
+            ls_threshold = float(self.data_shift_threshold)
+            acc_drop_threshold = float(self.combined_accuracy_drop_threshold)
+            history_window = int(self.combined_accuracy_history_window)
 
             for me in range(self.ME):
-                current_score = float(
-                    np.clip(
-                        self.data_shift_score[me],
-                        0.0,
-                        1.0
+                current_ls = float(np.clip(self.ls[me], 0.0, 1.0))
+                ls_significant = current_ls >= ls_threshold
+
+                # The LS history is available for every shift type, including
+                # LABEL_SHIFT experiments where the combined-model training
+                # test is intentionally disabled on the client.
+                ls_history = self.ls_list[me]
+                previous_ls_history = ls_history[:-1]
+
+                history = self.combined_train_accuracy_history[me]
+
+                # The most recent history entry is the current round.
+                # The reference must contain only PREVIOUS rounds.
+                previous_history = history[:-1]
+
+                # After a confirmed shift, the accuracy history is reset and
+                # must be warmed up with a complete post-shift window before
+                # the detector is allowed to use accuracy evidence again.
+                # Because the current round is already in `history`, we need
+                # history_window PREVIOUS post-shift observations, i.e.
+                # len(history) >= history_window + 1.
+                accuracy_history_ready = len(previous_history) >= history_window
+
+                if accuracy_history_ready:
+                    reference = float(np.mean(previous_history[-history_window:]))
+                    current_accuracy = float(np.clip(self.combined_train_accuracy[me], 0.0, 1.0))
+                    relative_drop = (
+                        max(0.0, (reference - current_accuracy) / reference)
+                        if reference > 1e-12 else 0.0
                     )
+                    accuracy_drop_significant = relative_drop >= acc_drop_threshold
+                else:
+                    reference = 0.0
+                    relative_drop = 0.0
+                    accuracy_drop_significant = False
+
+                self.combined_accuracy_reference[me] = reference
+                self.combined_accuracy_drop[me] = relative_drop
+                self.combined_accuracy_drop_significant[me] = accuracy_drop_significant
+
+                # LABEL_SHIFT must not depend on combined-model accuracy.
+                # The combined training test is intentionally disabled for
+                # label-shift experiments, so using its history here would
+                # make LS detection impossible.  The LS history itself is
+                # used as the warm-up window after each confirmed shift.
+                label_shift_history_ready = (
+                    len(previous_ls_history) >= history_window
                 )
 
-                shift_detected[me] = (
-                        current_score
-                        >= data_shift_threshold
-                )
-
-                self.data_shift_detected[me] = (
-                    shift_detected[me]
-                )
+                if self.shift_type == "LABEL_SHIFT":
+                    shift_detection_ready = label_shift_history_ready
+                    shift_detected[me] = bool(
+                        shift_detection_ready and ls_significant
+                    )
+                else:
+                    # Concept/combined shift continues to use the combined
+                    # training-accuracy evidence and its post-reset warm-up.
+                    shift_detection_ready = accuracy_history_ready
+                    shift_detected[me] = bool(
+                        shift_detection_ready and
+                        (ls_significant or accuracy_drop_significant)
+                    )
+                self.data_shift_detected[me] = shift_detected[me]
+                self.data_shift_score[me] = max(current_ls, relative_drop)
+                # aggregate_fit() already created the entry for this round;
+                # update it with the accuracy evidence instead of appending
+                # a duplicate round.
+                if self.data_shift_score_list[me]:
+                    self.data_shift_score_list[me][-1] = self.data_shift_score[me]
 
                 print(
-                    f"[DATA SHIFT DETECTOR] "
-                    f"round={t} "
-                    f"model={me} "
-                    f"score={current_score:.6f} "
-                    f"threshold={data_shift_threshold:.6f} "
-                    f"state="
-                    f"{'DATA_SHIFT' if shift_detected[me] else 'NO_SHIFT'}"
+                    f"[DATA SHIFT DETECTOR] round={t} model={me} "
+                    f"shift_type={self.shift_type} "
+                    f"LS={current_ls:.6f} LS_threshold={ls_threshold:.6f} "
+                    f"LS_significant={ls_significant} "
+                    f"combined_train_accuracy={self.combined_train_accuracy[me]:.6f} "
+                    f"accuracy_reference={reference:.6f} "
+                    f"relative_accuracy_drop={relative_drop:.6f} "
+                    f"drop_threshold={acc_drop_threshold:.6f} "
+                    f"accuracy_drop_significant={accuracy_drop_significant} "
+                    f"ls_history_size={len(ls_history)} "
+                    f"label_shift_history_ready={label_shift_history_ready} "
+                    f"accuracy_history_size={len(history)} "
+                    f"accuracy_history_ready={accuracy_history_ready} "
+                    f"state={'DATA_SHIFT' if shift_detected[me] else 'NO_SHIFT'}"
                 )
 
             # ============================================================
@@ -1651,6 +1752,47 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 # --------------------------------------------------------
 
                 self.last_drift_round[me] = t
+
+                # --------------------------------------------------------
+                # RESET THE COMBINED-ACCURACY HISTORY AT THE NEW SHIFT
+                # EVENT.
+                #
+                # The current round must NOT be discarded: its accuracy
+                # is the first observation of the new data regime.
+                # Keeping only the current value also prevents pre-shift
+                # accuracies from contaminating future references.
+                #
+                # The detector has already used the PRE-SHIFT history
+                # above to confirm this shift, so resetting here does not
+                # affect the current detection decision.
+                # --------------------------------------------------------
+                current_accuracy_for_new_regime = float(
+                    np.clip(self.combined_train_accuracy[me], 0.0, 1.0)
+                )
+                self.combined_train_accuracy_history[me] = [
+                    current_accuracy_for_new_regime
+                ]
+
+                # LABEL_SHIFT has its own temporal warm-up because the
+                # combined-model test is disabled for label-shift experiments.
+                # Preserve the current LS observation as the first sample of
+                # the new regime and require a full subsequent LS window
+                # before another detection can be confirmed.
+                current_ls_for_new_regime = float(np.clip(self.ls[me], 0.0, 1.0))
+                self.ls_list[me] = [current_ls_for_new_regime]
+
+                print(
+                    f"[DATA SHIFT ACCURACY HISTORY RESET] "
+                    f"round={t} model={me} "
+                    f"preserved_current_accuracy={current_accuracy_for_new_regime:.6f} "
+                    f"history_size={len(self.combined_train_accuracy_history[me])}"
+                )
+                print(
+                    f"[DATA SHIFT LS HISTORY RESET] "
+                    f"round={t} model={me} "
+                    f"preserved_current_ls={current_ls_for_new_regime:.6f} "
+                    f"history_size={len(self.ls_list[me])}"
+                )
 
                 self.in_adaptation[me] = True
 
@@ -2183,6 +2325,106 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 )
             )
 
+    def aggregate_evaluate(
+            self,
+            server_round,
+            results,
+            failures,
+    ):
+        """Aggregate evaluation metrics and combined-model train accuracy."""
+        try:
+            results_mefl = {me: [] for me in range(self.ME)}
+            for loss, num_examples, result in results:
+                metrics = result[2] if isinstance(result, tuple) and len(result) == 3 else result
+                me = int(metrics["me"])
+                results_mefl[me].append((loss, num_examples, metrics))
+
+            loss_aggregated_mefl = {me: 0.0 for me in range(self.ME)}
+            metrics_aggregated_mefl = {me: {} for me in range(self.ME)}
+
+            for me in range(self.ME):
+                rows = results_mefl[me]
+                if not rows:
+                    continue
+
+                loss_aggregated_mefl[me] = weighted_loss_avg(
+                    [(n, loss) for loss, n, _ in rows]
+                )
+
+                def weighted_metric(name):
+                    values, weights = [], []
+                    for _, n, m in rows:
+                        value = m.get(name)
+                        if value is None:
+                            continue
+                        try:
+                            value = float(value)
+                        except (TypeError, ValueError):
+                            continue
+                        values.append(value)
+                        weights.append(n)
+                    if not values or sum(weights) <= 0:
+                        return None
+                    return float(np.average(values, weights=weights))
+
+                combined_acc = weighted_metric("combined_train_accuracy")
+                train_acc = weighted_metric("train_accuracy")
+
+                # gw/lw are produced by client.evaluate().
+                # Keep them exactly as in the original implementation:
+                # lists containing one value per evaluating client.
+                self.gw[me] = [
+                    metrics.get("gw")
+                    for _, _, metrics in rows
+                    if metrics.get("gw") is not None
+                ]
+                self.lw[me] = [
+                    metrics.get("lw")
+                    for _, _, metrics in rows
+                    if metrics.get("lw") is not None
+                ]
+                self.gw_by_round[me][server_round] = list(self.gw[me])
+                self.lw_by_round[me][server_round] = list(self.lw[me])
+
+                if combined_acc is not None:
+                    self.combined_train_accuracy[me] = float(np.clip(combined_acc, 0.0, 1.0))
+                    self.combined_train_accuracy_history[me].append(self.combined_train_accuracy[me])
+
+                metrics_aggregated_mefl[me] = {
+                    "combined_train_accuracy": self.combined_train_accuracy[me] if combined_acc is not None else None,
+                    "train_accuracy": train_acc,
+                    "Round (t)": server_round,
+                }
+
+                if self.evaluate_metrics_aggregation_fn:
+                    custom = self.evaluate_metrics_aggregation_fn(
+                        [(n, m) for _, n, m in rows]
+                    )
+                    if custom:
+                        metrics_aggregated_mefl[me].update(custom)
+
+                if combined_acc is not None:
+                    metrics_aggregated_mefl[me]["combined_train_accuracy"] = self.combined_train_accuracy[me]
+                if train_acc is not None:
+                    metrics_aggregated_mefl[me]["train_accuracy"] = train_acc
+
+                self.add_metrics(server_round, metrics_aggregated_mefl, me)
+                self._save_results(server_round, me)
+
+                print(
+                    f"[COMBINED TRAIN ACC] round={server_round} model={me} "
+                    f"aggregated={self.combined_train_accuracy[me]:.6f} "
+                    f"history_size={len(self.combined_train_accuracy_history[me])}"
+                )
+
+            return loss_aggregated_mefl, metrics_aggregated_mefl
+        except Exception as e:
+            print("aggregate_evaluate error")
+            print("Error on line {} {} {}".format(
+                sys.exc_info()[-1].tb_lineno, type(e).__name__, e
+            ))
+            return {me: 0.0 for me in range(self.ME)}, {me: {} for me in range(self.ME)}
+
     def add_metrics(
             self,
             server_round,
@@ -2267,6 +2509,23 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             ]["lw"] = (
                 self.lw[me]
             )
+
+            # ============================================================
+            # Combined-model accuracy evidence
+            # ============================================================
+            # Keep ONE canonical combined-train-accuracy field.
+            metrics_aggregated[me]["combined_train_accuracy"] = self.combined_train_accuracy[me]
+            metrics_aggregated[me]["Combined accuracy reference"] = self.combined_accuracy_reference[me]
+            metrics_aggregated[me]["Combined accuracy drop"] = self.combined_accuracy_drop[me]
+            metrics_aggregated[me]["Combined accuracy drop significant"] = self.combined_accuracy_drop_significant[me]
+            metrics_aggregated[me]["Combined accuracy history size"] = len(self.combined_train_accuracy_history[me])
+
+            # train_accuracy comes from aggregate_fit() and is indexed by
+            # round, so skipped-training rounds remain empty.
+            round_train_accuracy = self.train_accuracy_by_round[me].get(
+                server_round
+            )
+            metrics_aggregated[me]["train_accuracy"] = round_train_accuracy
 
             # ============================================================
             # Data-shift information
@@ -2776,38 +3035,4 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
         except Exception as e:
             print("_weighted_average error")
-            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
-
-    def detect_change_ema(self, signal, alpha=0.1, threshold=3.0):
-        try:
-            """
-            Detecta mudanças repentinas usando EMA (Exponential Moving Average).
-
-            Args:
-                signal (list ou np.array): sequência de valores reais.
-                alpha (float): fator de suavização da EMA (0<alpha<=1).
-                threshold (float): múltiplos do desvio padrão do resíduo para detectar mudança.
-
-            Returns:
-                indices (list): pontos onde foram detectadas mudanças.
-                ema (np.array): valores da EMA ao longo do tempo.
-            """
-            signal = np.array(signal)
-            ema = np.zeros_like(signal, dtype=float)
-            ema[0] = signal[0]
-
-            # Calcula EMA
-            for t in range(1, len(signal)):
-                ema[t] = alpha * signal[t] + (1 - alpha) * ema[t - 1]
-
-            # Resíduo
-            residuals = signal - ema
-            std = np.std(residuals)
-
-            # Detecta mudanças quando resíduo "explode"
-            change_points = [i for i, r in enumerate(residuals) if abs(r) > threshold * std]
-
-            return change_points, ema
-        except Exception as e:
-            print("detect_change_ema error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
