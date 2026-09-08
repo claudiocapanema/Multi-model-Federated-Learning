@@ -9,49 +9,39 @@ import copy
 from base_plots import bar_plot, line_plot, ecdf_plot
 import matplotlib.pyplot as plt
 
+# Registro dos arquivos CSV para verificar, ao final da execução,
+# quais não possuem exatamente 5 folds distintos.
+FOLD_VALIDATION = []
+
 def read_data(
     read_solutions,
     solution_names=None,
     experiment_id=None,
-    alpha_value=None
+    alpha_value=None,
+    dataset_shift_rounds=None
 ):
     """
-    Lê os CSVs de shift detection metrics de todas as soluções
-    e concatena os resultados em um único DataFrame.
+    Lê os CSVs específicos de cada dataset e solução.
 
-    Parameters
-    ----------
-    read_solutions : dict
-        Dicionário no formato:
+    Cada CSV deve conter as colunas:
+        Fold ID, Round (t), Data shift
 
-        {
-            "FedConD": [path1, path2, ...],
-            "FedDrift": [path1, path2, ...],
-            ...
-        }
-
-    solution_names : dict, optional
-        Mapeamento entre nome interno e nome apresentado na tabela.
-
-    experiment_id : str, optional
-        Identificador do experimento.
-
-    alpha_value : float or tuple/list, optional
-        Configuração de alpha utilizada no experimento.
-
-    Returns
-    -------
-    pd.DataFrame
-        Dados concatenados de todas as soluções.
+    São adicionadas:
+        Solution
+        Dataset
+        Shift Round
     """
 
-    df_concat = None
+    df_list = []
 
     if solution_names is None:
         solution_names = {
             solution: solution
             for solution in read_solutions.keys()
         }
+
+    if dataset_shift_rounds is None:
+        dataset_shift_rounds = {}
 
     for solution, paths in read_solutions.items():
 
@@ -64,163 +54,112 @@ def read_data(
                     print(f"Arquivo não encontrado: {path}")
                     continue
 
-                df = pd.read_csv(path)
-
-                print(df)
+                df = pd.read_csv(
+                    path,
+                    usecols=["Fold ID", "Round (t)", "Data shift"]
+                )
 
                 if df.empty:
                     print(f"\nArquivo vazio: {path}")
                     continue
 
-                # ==================================================
-                # IDENTIFICAÇÃO DA SOLUÇÃO
-                # ==================================================
+                # Manter somente as três colunas do CSV.
+                df = df[
+                    ["Fold ID", "Round (t)", "Data shift"]
+                ].copy()
 
-                df["Detector"] = solution
+                # ----------------------------------------------------
+                # DATASET
+                # ----------------------------------------------------
+                filename = os.path.basename(path)
 
-                df["Table"] = solution_names.get(
+                dataset_name = None
+
+                # O nome do CSV segue:
+                # {dataset_name}_{solution}.csv
+                for candidate_dataset in dataset_shift_rounds.keys():
+                    if filename.startswith(
+                        f"{candidate_dataset}_"
+                    ):
+                        dataset_name = candidate_dataset
+                        break
+
+                if dataset_name is None:
+                    raise ValueError(
+                        f"Não foi possível identificar o dataset "
+                        f"a partir do arquivo: {filename}"
+                    )
+
+                df["Dataset"] = dataset_name
+
+                # ----------------------------------------------------
+                # SOLUTION
+                # ----------------------------------------------------
+                df["Solution"] = solution_names.get(
                     solution,
                     solution
                 )
 
-                # ==================================================
-                # METADADOS DO EXPERIMENTO
-                # ==================================================
-
-                if experiment_id is not None:
-
-                    df["Experiment ID"] = experiment_id
-
-                if alpha_value is not None:
-
-                    if isinstance(
-                        alpha_value,
-                        (tuple, list)
-                    ):
-
-                        # Label Shift:
-                        # alpha_before -> alpha_after
-
-                        df["Alpha Before"] = (
-                            alpha_value[0]
-                        )
-
-                        df["Alpha After"] = (
-                            alpha_value[1]
-                        )
-
-                    else:
-
-                        # Concept Drift
-
-                        df["Alpha"] = alpha_value
-
-                # ==================================================
-                # TIPOS NUMÉRICOS
-                # ==================================================
-
-                numeric_columns = [
-
-                    "Fold ID",
-
-                    "Round",
-
-                    "Model",
-
-                    "Precision",
-
-                    "Recall",
-
-                    "F1",
-
-                    "Detection Delay",
-
-                    "False Alarms",
-
-                    "First Detection Round",
-
-                    # IMPORTANTE:
-                    # Detection Round é um evento temporal
-                    # utilizado na avaliação.
-
-                    "Detection Round",
-
-                    "Shift Round",
-
-                    "Alpha",
-
-                    "Alpha Before",
-
-                    "Alpha After"
+                # ----------------------------------------------------
+                # SHIFT ROUND
+                # ----------------------------------------------------
+                df["Shift Round"] = dataset_shift_rounds[
+                    dataset_name
                 ]
 
-                for col in numeric_columns:
+                # Verificação por arquivo: um CSV completo deve conter
+                # exatamente 5 folds distintos.
+                fold_ids = pd.to_numeric(
+                    df["Fold ID"],
+                    errors="coerce"
+                ).dropna().unique().tolist()
 
-                    if col in df.columns:
+                FOLD_VALIDATION.append({
+                    "path": os.path.abspath(path),
+                    "solution": df["Solution"].iloc[0],
+                    "fold_count": len(fold_ids),
+                    "fold_ids": sorted(fold_ids),
+                })
 
-                        df[col] = pd.to_numeric(
-                            df[col],
-                            errors="coerce"
-                        )
+                df_list.append(df)
 
-                # ==================================================
-                # TIPOS CATEGÓRICOS
-                # ==================================================
+                print(f"CSV lido: {path}")
+                print(f"Dataset: {dataset_name}")
+                print(f"Solução: {df['Solution'].iloc[0]}")
+                print(
+                    f"Shift Round: "
+                    f"{df['Shift Round'].iloc[0]}"
+                )
+                print(f"Linhas: {len(df)}")
 
-                if "Shift Configuration" in df.columns:
-
-                    df["Shift Configuration"] = (
-                        df["Shift Configuration"]
-                        .astype(str)
-                    )
-
-                if "Shift Type" in df.columns:
-
-                    df["Shift Type"] = (
-                        df["Shift Type"]
-                        .astype(str)
-                    )
-
-                if "Dataset" in df.columns:
-
-                    df["Dataset"] = (
-                        df["Dataset"]
-                        .astype(str)
-                    )
-
-                # ==================================================
-                # ADICIONAR AO DATAFRAME GLOBAL
-                # ==================================================
-
-                if df_concat is None:
-
-                    df_concat = df.copy()
-
-                else:
-
-                    df_concat = pd.concat(
-                        [
-                            df_concat,
-                            df
-                        ],
-                        ignore_index=True
-                    )
+            except ValueError as e:
+                print(
+                    f"\nColunas/dados esperados não encontrados "
+                    f"em: {path}"
+                )
+                print(f"Erro: {e}")
+                continue
 
             except Exception as e:
+                print(f"\nErro ao ler {path}: {e}")
+                continue
 
-                print("\n#########")
-                print(f"Erro lendo: {path}")
-                print(e)
-
-    if df_concat is None:
-
-        print(
-            "\nNenhum arquivo foi carregado."
+    if not df_list:
+        return pd.DataFrame(
+            columns=[
+                "Fold ID",
+                "Round (t)",
+                "Data shift",
+                "Solution",
+                "Dataset",
+                "Shift Round"
+            ]
         )
 
-        return pd.DataFrame()
-
-    return df_concat
+    return pd.concat(
+        df_list,
+        ignore_index=True
+    )
 
 def format_shift_configuration(shift_type, experiment_id):
     """
@@ -288,346 +227,6 @@ def format_shift_configuration(shift_type, experiment_id):
                 pass
 
     return config.replace("_", r"\_")
-
-def select_final_detection_results(df):
-    """
-    Prepara os resultados temporais para avaliação de detecção
-    de shift.
-
-    IMPORTANTE
-    ----------
-    Este método NÃO seleciona somente a última rodada.
-
-    Ele agrega os eventos temporais de cada unidade experimental:
-
-        Detector
-        Dataset
-        Fold ID
-        Model
-        Shift Type
-        Shift Configuration
-
-    A avaliação depende de:
-
-        - Shift Round
-        - First Detection Round
-        - Detection Round
-
-    Valores especiais
-    -----------------
-    First Detection Round = -1
-
-        significa que o detector NÃO detectou o shift.
-
-        Portanto, -1 é convertido para NaN e NÃO é tratado
-        como uma rodada de detecção.
-
-    Returns
-    -------
-    pd.DataFrame
-        Uma linha por unidade experimental.
-    """
-
-    required_columns = [
-
-        "Detector",
-
-        "Dataset",
-
-        "Fold ID",
-
-        "Round",
-
-        "Model",
-
-        "Shift Type",
-
-        "Shift Configuration",
-
-        "Shift Round",
-
-        "First Detection Round"
-    ]
-
-    missing = [
-
-        col
-        for col in required_columns
-        if col not in df.columns
-    ]
-
-    if missing:
-
-        raise ValueError(
-            "Missing required columns for temporal detection "
-            "evaluation: "
-            + ", ".join(missing)
-        )
-
-    if df.empty:
-
-        return df.copy()
-
-    df_work = df.copy()
-
-    # ============================================================
-    # NORMALIZE NUMERIC COLUMNS
-    # ============================================================
-
-    numeric_columns = [
-
-        "Fold ID",
-
-        "Round",
-
-        "Model",
-
-        "Shift Round",
-
-        "First Detection Round"
-    ]
-
-    if "Detection Round" in df_work.columns:
-
-        numeric_columns.append(
-            "Detection Round"
-        )
-
-    for column in numeric_columns:
-
-        df_work[column] = pd.to_numeric(
-            df_work[column],
-            errors="coerce"
-        )
-
-    # ============================================================
-    # NORMALIZE IDENTIFIERS
-    # ============================================================
-
-    for column in [
-
-        "Detector",
-
-        "Dataset",
-
-        "Shift Type",
-
-        "Shift Configuration"
-    ]:
-
-        df_work[column] = (
-            df_work[column]
-            .astype(str)
-            .str.strip()
-        )
-
-    # ============================================================
-    # EXPERIMENTAL UNIT
-    # ============================================================
-
-    group_columns = [
-
-        "Detector",
-
-        "Dataset",
-
-        "Fold ID",
-
-        "Model",
-
-        "Shift Type",
-
-        "Shift Configuration"
-    ]
-
-    rows = []
-
-    for group_key, group in df_work.groupby(
-        group_columns,
-        dropna=False
-    ):
-
-        group = group.sort_values(
-            "Round"
-        ).copy()
-
-        # ========================================================
-        # GROUND-TRUTH SHIFT ROUND
-        # ========================================================
-
-        shift_rounds = (
-            pd.to_numeric(
-                group["Shift Round"],
-                errors="coerce"
-            )
-            .dropna()
-            .unique()
-        )
-
-        if len(shift_rounds) == 0:
-
-            shift_round = np.nan
-
-        else:
-
-            shift_round = float(
-                shift_rounds[0]
-            )
-
-        # ========================================================
-        # FIRST DETECTION ROUND
-        # ========================================================
-
-        first_detection_values = (
-            pd.to_numeric(
-                group["First Detection Round"],
-                errors="coerce"
-            )
-            .dropna()
-        )
-
-        # --------------------------------------------------------
-        # -1 significa "não detectado".
-        #
-        # Portanto, NÃO pode ser considerado uma detecção.
-        # --------------------------------------------------------
-
-        first_detection_values = (
-            first_detection_values[
-                first_detection_values >= 0
-            ]
-        )
-
-        if len(first_detection_values) == 0:
-
-            first_detection_round = np.nan
-
-        else:
-
-            first_detection_round = float(
-                first_detection_values.min()
-            )
-
-        # ========================================================
-        # DETECTION ROUND
-        # ========================================================
-
-        detection_rounds = []
-
-        if "Detection Round" in group.columns:
-
-            values = (
-                pd.to_numeric(
-                    group["Detection Round"],
-                    errors="coerce"
-                )
-                .dropna()
-                .tolist()
-            )
-
-            # ----------------------------------------------------
-            # Também descartar valores negativos.
-            #
-            # Se Detection Round utilizar -1 para indicar
-            # ausência de detecção, ele não deve ser tratado
-            # como alarme.
-            # ----------------------------------------------------
-
-            values = [
-                float(x)
-                for x in values
-                if float(x) >= 0
-            ]
-
-            detection_rounds.extend(
-                values
-            )
-
-        # ========================================================
-        # FIRST DETECTION ROUND
-        # ========================================================
-
-        # First Detection Round é uma informação de detecção.
-        #
-        # Só adicionamos se for realmente uma detecção válida.
-
-        if not pd.isna(
-            first_detection_round
-        ):
-
-            detection_rounds.append(
-                first_detection_round
-            )
-
-        # ========================================================
-        # REMOVE INVALID / DUPLICATE ROUNDS
-        # ========================================================
-
-        detection_rounds = sorted(
-            set(
-                float(x)
-                for x in detection_rounds
-                if not pd.isna(x)
-                and float(x) >= 0
-            )
-        )
-
-        # ========================================================
-        # LAST EVALUATED ROUND
-        # ========================================================
-
-        evaluated_rounds = (
-            pd.to_numeric(
-                group["Round"],
-                errors="coerce"
-            )
-            .dropna()
-        )
-
-        if len(evaluated_rounds) > 0:
-
-            last_round = float(
-                evaluated_rounds.max()
-            )
-
-        else:
-
-            last_round = np.nan
-
-        # ========================================================
-        # CREATE RESULT
-        # ========================================================
-
-        row = dict(
-            zip(
-                group_columns,
-                group_key
-            )
-        )
-
-        row["Shift Round"] = (
-            shift_round
-        )
-
-        row["First Detection Round"] = (
-            first_detection_round
-        )
-
-        row["Detection Rounds"] = (
-            detection_rounds
-        )
-
-        row["Last Round"] = (
-            last_round
-        )
-
-        rows.append(row)
-
-    result = pd.DataFrame(
-        rows
-    )
-
-    return result
 
 def _get_valid_detection_rounds(
     row,
@@ -1347,7 +946,8 @@ def mean_ci(
         Nível de confiança.
 
     bounded : bool
-        Se True, limita os limites do IC ao intervalo [0, 1].
+        Mantido por compatibilidade. O IC t não é truncado, mesmo
+        para métricas bounded ([0, 1]).
 
     Returns
     -------
@@ -1444,23 +1044,12 @@ def mean_ci(
     )
 
     # ============================================================
-    # BOUND [0, 1]
-    # ============================================================
-
-    if bounded:
-
-        lower = max(
-            0.0,
-            lower
-        )
-
-        upper = min(
-            1.0,
-            upper
-        )
-
-    # ============================================================
     # IC REPRESENTADO COMO MARGEM
+    # ============================================================
+    #
+    # Para métricas bounded ([0, 1]), o IC t é mantido sem
+    # truncamento. Isso evita transformar um intervalo truncado
+    # em uma margem simétrica que não representa o IC real.
     # ============================================================
 
     margin = max(
@@ -1472,481 +1061,6 @@ def mean_ci(
         round(mean, 2),
         round(margin, 2)
     )
-
-def table_detection_quality(
-    df,
-    write_path,
-    solutions_order,
-    metrics=None,
-    ci=0.95,
-    max_detection_delay=None
-):
-    """
-    Gera uma única tabela com o desempenho dos detectores.
-
-    Estrutura:
-
-        Data shift type | Solution | Detection Rate |
-        Episode F1 | Average Detection Delay |
-        Missed Detection Rate | Alarm Rate
-
-    Para cada tipo de shift:
-
-        Concept drift
-            Solution 1
-            Solution 2
-            Solution 3
-            Solution 4
-
-        Label shift
-            Solution 1
-            Solution 2
-            Solution 3
-            Solution 4
-
-    O tipo de shift é apresentado uma única vez utilizando
-    LaTeX \\multirow.
-
-    Cada métrica é apresentada como:
-
-        mean ± 95% CI
-
-    O IC é calculado sobre as unidades experimentais.
-    """
-
-    if metrics is None:
-
-        metrics = [
-            "Detection Rate",
-            "Episode F1",
-            "Average Detection Delay",
-            "Missed Detection Rate",
-            "Alarm Rate",
-        ]
-
-    # ============================================================
-    # CREATE OUTPUT DIRECTORY
-    # ============================================================
-
-    Path(
-        write_path
-    ).mkdir(
-        parents=True,
-        exist_ok=True
-    )
-
-    # ============================================================
-    # PREPARE TEMPORAL DATA
-    # ============================================================
-
-    df_eval = select_final_detection_results(
-        df
-    )
-
-    if df_eval.empty:
-
-        print(
-            "\nWARNING: no temporal detection "
-            "records available."
-        )
-
-        return df_eval
-
-    # ============================================================
-    # NORMALIZE SHIFT TYPE
-    # ============================================================
-
-    df_eval["Shift Type"] = (
-        df_eval["Shift Type"]
-        .apply(format_shift_type)
-    )
-
-    # ============================================================
-    # VALID SHIFT TYPES
-    # ============================================================
-
-    valid_shift_types = [
-        "Concept drift",
-        "Label shift",
-    ]
-
-    df_eval = df_eval[
-        df_eval["Shift Type"].isin(
-            valid_shift_types
-        )
-    ].copy()
-
-    if df_eval.empty:
-
-        print(
-            "\nWARNING: no valid shift types."
-        )
-
-        return df_eval
-
-    # ============================================================
-    # SOLUTION ORDER
-    # ============================================================
-
-    available_solutions = (
-        df_eval["Detector"]
-        .dropna()
-        .unique()
-        .tolist()
-    )
-
-    solutions = [
-        solution
-        for solution in solutions_order
-        if solution in available_solutions
-    ]
-
-    # ============================================================
-    # METRIC DISPLAY NAMES
-    # ============================================================
-
-    metric_names = {
-        "Detection Rate":
-            "Detection Rate",
-
-        "Episode F1":
-            "Episode F1",
-
-        "Average Detection Delay":
-            "Average Detection Delay",
-
-        "Missed Detection Rate":
-            "Missed Detection Rate",
-
-        "Alarm Rate":
-            "Alarm Rate",
-    }
-
-    # ============================================================
-    # METRIC DIRECTION
-    # ============================================================
-
-    higher_is_better = {
-        "Detection Rate",
-        "Episode F1",
-    }
-
-    # ============================================================
-    # STORE RAW RESULTS
-    # ============================================================
-
-    results = {}
-
-    for shift_type in valid_shift_types:
-
-        results[shift_type] = {}
-
-        df_shift = df_eval[
-            df_eval["Shift Type"]
-            == shift_type
-        ].copy()
-
-        if df_shift.empty:
-            continue
-
-        for solution in solutions:
-
-            df_solution = df_shift[
-                df_shift["Detector"]
-                == solution
-            ].copy()
-
-            if df_solution.empty:
-                continue
-
-            results[
-                shift_type
-            ][solution] = {}
-
-            for metric in metrics:
-
-                mean_value, ci_value = (
-                    calculate_detection_metric(
-                        df_solution,
-                        metric,
-                        ci=ci,
-                        max_detection_delay=(
-                            max_detection_delay
-                        )
-                    )
-                )
-
-                results[
-                    shift_type
-                ][solution][metric] = {
-                    "mean": mean_value,
-                    "ci": ci_value,
-                }
-
-    # ============================================================
-    # DETERMINE BEST RESULTS
-    # ============================================================
-
-    best_results = {}
-
-    for shift_type in valid_shift_types:
-
-        best_results[
-            shift_type
-        ] = {}
-
-        if shift_type not in results:
-            continue
-
-        for metric in metrics:
-
-            valid_solutions = [
-                solution
-                for solution in solutions
-                if solution in results[
-                    shift_type
-                ]
-                and metric in results[
-                    shift_type
-                ][solution]
-                and not pd.isna(
-                    results[
-                        shift_type
-                    ][solution][metric]["mean"]
-                )
-            ]
-
-            if not valid_solutions:
-                continue
-
-            if metric in higher_is_better:
-
-                best_solution = max(
-                    valid_solutions,
-                    key=lambda solution:
-                        results[
-                            shift_type
-                        ][solution][metric]["mean"]
-                )
-
-            else:
-
-                best_solution = min(
-                    valid_solutions,
-                    key=lambda solution:
-                        results[
-                            shift_type
-                        ][solution][metric]["mean"]
-                )
-
-            best_results[
-                shift_type
-            ][metric] = best_solution
-
-    # ============================================================
-    # FORMAT RESULT
-    # ============================================================
-
-    def format_metric_value(
-        shift_type,
-        solution,
-        metric
-    ):
-
-        if (
-            shift_type not in results
-            or solution not in results[
-                shift_type
-            ]
-            or metric not in results[
-                shift_type
-            ][solution]
-        ):
-
-            return "--"
-
-        mean_value = results[
-            shift_type
-        ][solution][metric]["mean"]
-
-        ci_value = results[
-            shift_type
-        ][solution][metric]["ci"]
-
-        if pd.isna(mean_value):
-            return "--"
-
-        if pd.isna(ci_value):
-
-            text = (
-                f"{mean_value:.2f}"
-            )
-
-        else:
-
-            text = (
-                f"{mean_value:.2f}"
-                f" $\\pm$ "
-                f"{ci_value:.2f}"
-            )
-
-        # ========================================================
-        # BOLD BEST
-        # ========================================================
-
-        best_solution = (
-            best_results
-            .get(shift_type, {})
-            .get(metric)
-        )
-
-        if (
-            best_solution is not None
-            and solution == best_solution
-        ):
-
-            text = (
-                "\\textbf{"
-                + text
-                + "}"
-            )
-
-        return text
-
-    # ============================================================
-    # BUILD TABLE ROWS
-    # ============================================================
-
-    table_rows = []
-
-    for shift_type in valid_shift_types:
-
-        if shift_type not in results:
-            continue
-
-        # --------------------------------------------------------
-        # Somente as soluções que realmente possuem resultados.
-        # --------------------------------------------------------
-
-        shift_solutions = [
-            solution
-            for solution in solutions
-            if solution in results[
-                shift_type
-            ]
-        ]
-
-        if not shift_solutions:
-            continue
-
-        number_of_rows = len(
-            shift_solutions
-        )
-
-        for index, solution in enumerate(
-            shift_solutions
-        ):
-
-            # ----------------------------------------------------
-            # multirow somente na primeira linha do grupo.
-            # ----------------------------------------------------
-
-            if index == 0:
-
-                shift_label = (
-                    "\\multirow{"
-                    f"{number_of_rows}"
-                    "}{*}{"
-                    f"{shift_type}"
-                    "}"
-                )
-
-            else:
-
-                shift_label = ""
-
-            row = {
-                "Data shift type":
-                    shift_label,
-
-                "Solution":
-                    solution,
-            }
-
-            for metric in metrics:
-
-                row[
-                    metric_names.get(
-                        metric,
-                        metric
-                    )
-                ] = format_metric_value(
-                    shift_type,
-                    solution,
-                    metric
-                )
-
-            table_rows.append(
-                row
-            )
-
-    # ============================================================
-    # CREATE DATAFRAME
-    # ============================================================
-
-    columns = [
-        "Data shift type",
-        "Solution",
-    ] + [
-        metric_names.get(
-            metric,
-            metric
-        )
-        for metric in metrics
-    ]
-
-    df_table = pd.DataFrame(
-        table_rows,
-        columns=columns
-    )
-
-    # ============================================================
-    # OUTPUT
-    # ============================================================
-
-    filename = os.path.join(
-        write_path,
-        "detection_quality_summary.tex"
-    )
-
-    # ============================================================
-    # LATEX
-    # ============================================================
-
-    generate_latex_table(
-        df_table=df_table,
-        filename=filename,
-        caption=(
-            "Data-shift detection performance "
-            "with 95\\% confidence intervals."
-        ),
-        label=(
-            "tab:detection_quality"
-        ),
-        column_format=(
-            "llccccc"
-        ),
-    )
-
-    print(
-        "\nGenerated unified detection-quality table:"
-    )
-
-    print(
-        filename
-    )
-
-    return df_eval
 
 def normalize_configuration_for_table(configuration):
     if pd.isna(configuration):
@@ -1983,6 +1097,11 @@ def normalize_shift_type_for_table(shift_type):
         "Label Shift": "Label Shift",
         "LABEL": "Label Shift",
         "LABEL_SHIFT": "Label Shift",
+
+        "Combined": "Combined Shift",
+        "Combined Shift": "Combined Shift",
+        "COMBINED": "Combined Shift",
+        "COMBINED_SHIFT": "Combined Shift",
     }
 
     return normalized.get(
@@ -2138,6 +1257,16 @@ def format_shift_type(shift_type):
     become:
 
         Label shift
+
+    Combined-shift representations:
+        COMBINED_SHIFT
+        combined_shift
+        Combined
+        Combined Shift
+
+    become:
+
+        Combined shift
     """
 
     if pd.isna(shift_type):
@@ -2153,6 +1282,15 @@ def format_shift_type(shift_type):
         .replace("_", " ")
         .replace("-", " ")
     )
+
+    # ------------------------------------------------------------
+    # Combined shift
+    # ------------------------------------------------------------
+    if (
+        "combined" in normalized
+        or "combined shift" in normalized
+    ):
+        return "Combined shift"
 
     # ------------------------------------------------------------
     # Concept drift
@@ -2292,7 +1430,9 @@ def generate_latex_table(
     # pacote ainda não esteja sendo carregado.
 
     latex = (
+        "% Requires: \\usepackage{booktabs}\n"
         "% Requires: \\usepackage{multirow}\n"
+        "% Requires: \\usepackage{graphicx}\n"
         + latex
     )
 
@@ -2335,107 +1475,543 @@ def calculate_detection_metric(
         bounded=bounded
     )
 
+def _extract_detection_rounds_from_unit(df_experiment):
+    """
+    Extrai as rodadas em que o detector realmente gerou DATA_SHIFT.
+
+    Os CSVs atuais não possuem uma coluna "Detection Rounds".
+    Eles registram o resultado do detector por rodada na coluna
+    "Data shift":
+
+        DATA_SHIFT -> alarme/detecção
+        NO_SHIFT   -> ausência de alarme
+
+    Portanto, Detection Rounds deve ser reconstruído diretamente
+    a partir de "Data shift".
+    """
+
+    if "Data shift" not in df_experiment.columns:
+        return []
+
+    shift_values = (
+        df_experiment["Data shift"]
+        .astype(str)
+        .str.strip()
+        .str.upper()
+    )
+
+    rounds = pd.to_numeric(
+        df_experiment["Round (t)"],
+        errors="coerce"
+    )
+
+    detection_rounds = rounds[
+        shift_values == "DATA_SHIFT"
+    ].dropna().astype(float).tolist()
+
+    return sorted(set(detection_rounds))
+
+
+def _calculate_experiment_detection_metrics(
+    df_experiment,
+    max_detection_delay=None
+):
+    """
+    Calcula as métricas para UMA unidade experimental:
+
+        Solution × Dataset × Experiment × Fold ID
+
+    IMPORTANTE:
+    Os CSVs atuais armazenam a decisão do detector por rodada na
+    coluna "Data shift". Portanto, as rodadas de detecção são
+    reconstruídas dessa coluna, em vez de procurar uma coluna
+    inexistente chamada "Detection Rounds".
+    """
+
+    if df_experiment.empty:
+        return {
+            "Detection Rate": np.nan,
+            "Episode F1": np.nan,
+            "Average Detection Delay": np.nan,
+            "Missed Detection Rate": np.nan,
+            "False Alarm Rate": np.nan,
+        }
+
+    row = df_experiment.iloc[0].copy()
+
+    # ============================================================
+    # GROUND TRUTH
+    # ============================================================
+
+    shift_round = row.get("Shift Round", np.nan)
+
+    if pd.isna(shift_round):
+        return {
+            "Detection Rate": np.nan,
+            "Episode F1": np.nan,
+            "Average Detection Delay": np.nan,
+            "Missed Detection Rate": np.nan,
+            "False Alarm Rate": np.nan,
+        }
+
+    shift_round = float(shift_round)
+
+    # ============================================================
+    # DETECTIONS
+    # ============================================================
+    #
+    # ESTA É A CORREÇÃO PRINCIPAL.
+    #
+    # O CSV não contém "Detection Rounds". A detecção está codificada
+    # diretamente em:
+    #
+    #     Data shift == DATA_SHIFT
+    #
+    # Portanto:
+    #
+    #     Detection Rounds =
+    #         Round (t) onde Data shift == DATA_SHIFT
+    # ============================================================
+
+    detection_rounds = _extract_detection_rounds_from_unit(
+        df_experiment
+    )
+
+    valid_detections = [
+        detection_round
+        for detection_round in detection_rounds
+        if detection_round >= shift_round
+        and (
+            max_detection_delay is None
+            or detection_round
+            <= shift_round + max_detection_delay
+        )
+    ]
+
+    valid_detections = sorted(
+        set(valid_detections)
+    )
+
+    # ============================================================
+    # DETECTION RATE
+    # ============================================================
+
+    detection_rate = (
+        1.0 if valid_detections else 0.0
+    )
+
+    # ============================================================
+    # MISSED DETECTION RATE
+    # ============================================================
+
+    missed_detection_rate = (
+        0.0 if valid_detections else 1.0
+    )
+
+    # ============================================================
+    # DETECTION DELAY
+    # ============================================================
+
+    if valid_detections:
+
+        first_detection = float(
+            valid_detections[0]
+        )
+
+        average_detection_delay = (
+            first_detection
+            - shift_round
+        )
+
+    else:
+        average_detection_delay = np.nan
+
+    # ============================================================
+    # FALSE POSITIVES
+    # ============================================================
+
+    false_alarms = []
+    pre_shift_false_alarms = []
+
+    for detection_round in detection_rounds:
+
+        # Alarm before the actual shift.
+        # It is an FP for Episode F1 and also contributes to FAR.
+        if detection_round < shift_round:
+            false_alarms.append(
+                detection_round
+            )
+            pre_shift_false_alarms.append(
+                detection_round
+            )
+            continue
+
+        # Alarm after the allowed detection window.
+        # It is an FP for Episode F1, but NOT for FAR because FAR
+        # measures false alarms during the stable pre-shift regime.
+        if (
+            max_detection_delay is not None
+            and detection_round
+            > shift_round + max_detection_delay
+        ):
+            false_alarms.append(
+                detection_round
+            )
+
+    # ============================================================
+    # EPISODE F1
+    # ============================================================
+
+    tp = 1 if valid_detections else 0
+    fn = 0 if valid_detections else 1
+    fp = len(false_alarms)
+
+    precision_denominator = tp + fp
+    recall_denominator = tp + fn
+
+    precision = (
+        tp / precision_denominator
+        if precision_denominator > 0
+        else 0.0
+    )
+
+    recall = (
+        tp / recall_denominator
+        if recall_denominator > 0
+        else 0.0
+    )
+
+    if precision + recall == 0:
+        episode_f1 = 0.0
+    else:
+        episode_f1 = (
+            2.0
+            * precision
+            * recall
+            / (precision + recall)
+        )
+
+    # ============================================================
+    # FALSE ALARM RATE
+    # ============================================================
+    #
+    # FAR = FP / number of stable rounds
+    #
+    # Como o experimento possui um shift conhecido em Shift Round,
+    # as rodadas estáveis anteriores ao shift são:
+    #
+    #     1, ..., Shift Round - 1
+    #
+    # Alarmes após a janela máxima são FP para o Episode F1, mas
+    # não entram no FAR. O FAR mede exclusivamente falsos alarmes
+    # durante o regime estável pré-shift. Assim, MAX_DETECTION_DELAY
+    # afeta DR/MDR/MTD/F1, mas não altera o FAR.
+    # ============================================================
+
+    stable_rounds = max(
+        shift_round - 1.0,
+        0.0
+    )
+
+    if stable_rounds > 0:
+        false_alarm_rate = (
+            len(pre_shift_false_alarms)
+            / stable_rounds
+        )
+    else:
+        false_alarm_rate = np.nan
+
+    return {
+        "Detection Rate": detection_rate,
+        "Episode F1": episode_f1,
+        "Average Detection Delay": average_detection_delay,
+        "Missed Detection Rate": missed_detection_rate,
+        "False Alarm Rate": false_alarm_rate,
+    }
+
+
 def table_detection_quality_by_shift_type(
     df_final,
     write_path,
     solutions,
-    metrics,
-    higher_is_better_metrics,
+    metrics=None,
+    higher_is_better_metrics=None,
     ci=0.95,
     max_detection_delay=None,
 ):
     """
-    Gera a tabela geral de desempenho dos detectores
-    por tipo de shift.
+    Gera uma única tabela LaTeX consolidada para Concept Drift e
+    Label Shift.
 
-    A avaliação utiliza os eventos temporais de detecção.
+    Unidade experimental
+    --------------------
+    Cada combinação
 
-    Aggregation
-    -----------
-        Shift Type × Detector
+        Solution × Dataset × Experiment × Fold ID
 
-    Metrics
-    -------
-        Detection Rate
-        Episode F1
-        Average Detection Delay
-        Missed Detection Rate
-        Alarm Rate
+    é tratada como uma unidade experimental independente.
 
-    Higher is better
-    -----------------
-        Detection Rate
-        Episode F1
+    Primeiro são calculadas as métricas para cada unidade experimental.
+    Somente depois é feita a agregação:
 
-    Lower is better
-    ----------------
-        Average Detection Delay
-        Missed Detection Rate
-        Alarm Rate
+        Shift Type × Solution
+
+    sobre todos os datasets, experimentos e folds.
+
+    Métricas
+    --------
+    Detection Rate (DR)                 : higher is better
+    Episode F1                          : higher is better
+    Mean Time to Detection (MTD)       : lower is better; computed
+                                          only over detected shifts
+    Missed Detection Rate (MDR)         : lower is better
+    False Alarm Rate (FAR)              : lower is better
+
+    O resultado é apresentado como:
+
+        mean ± 95% CI
+
+    O melhor resultado de cada métrica dentro de cada tipo de shift
+    é destacado em negrito.
     """
 
-    if df_final.empty:
+    if df_final is None or df_final.empty:
         print(
             "\nWARNING: empty dataframe passed "
             "to table_detection_quality_by_shift_type."
         )
         return
 
+    if metrics is None:
+        metrics = [
+            "Detection Rate",
+            "Episode F1",
+            "Average Detection Delay",
+            "Missed Detection Rate",
+            "False Alarm Rate",
+        ]
+
+    if higher_is_better_metrics is None:
+        higher_is_better_metrics = {
+            "Detection Rate",
+            "Episode F1",
+        }
+
     df_eval = df_final.copy()
 
     # ============================================================
     # NORMALIZE SHIFT TYPE
     # ============================================================
+    #
+    # Prefer Experiment ID as the authoritative source whenever it
+    # is available. This is especially important for Combined Shift:
+    # a row originating from combined_shift#... must never be silently
+    # classified as Concept/Label/N/A because of a stale Shift Type
+    # value.
+    # ============================================================
 
-    df_eval["Shift Type"] = (
-        df_eval["Shift Type"]
-        .apply(format_shift_type)
-    )
+    if "Experiment ID" in df_eval.columns:
+        experiment_ids_for_type = (
+            df_eval["Experiment ID"]
+            .astype(str)
+            .str.strip()
+        )
+
+        df_eval["Shift Type"] = np.select(
+            [
+                experiment_ids_for_type.str.startswith("concept_drift#"),
+                experiment_ids_for_type.str.startswith("label_shift#"),
+                experiment_ids_for_type.str.startswith("combined_shift#"),
+            ],
+            [
+                "Concept drift",
+                "Label shift",
+                "Combined shift",
+            ],
+            default=df_eval["Shift Type"] if "Shift Type" in df_eval.columns else "N/A",
+        )
+
+    if "Shift Type" in df_eval.columns:
+        df_eval["Shift Type"] = (
+            df_eval["Shift Type"]
+            .apply(format_shift_type)
+        )
+    else:
+        raise KeyError(
+            "The dataframe must contain 'Shift Type' or 'Experiment ID'."
+        )
+
+    print("\n" + "=" * 100)
+    print("DEBUG - SHIFT TYPES BEFORE TABLE FILTER")
+    print("=" * 100)
+    print(df_eval["Shift Type"].value_counts(dropna=False))
+
+    if "Experiment ID" in df_eval.columns:
+        print("\nDEBUG - EXPERIMENTS BY SHIFT TYPE")
+        print(
+            df_eval.groupby(
+                ["Shift Type", "Experiment ID"]
+            ).size()
+        )
 
     valid_shift_types = [
         "Concept drift",
         "Label shift",
+        "Combined shift",
     ]
 
     df_eval = df_eval[
-        df_eval["Shift Type"].isin(
-            valid_shift_types
-        )
+        df_eval["Shift Type"].isin(valid_shift_types)
     ].copy()
 
     if df_eval.empty:
+        print(
+            "\nWARNING: no valid shift types found."
+        )
         return
 
     # ============================================================
-    # METRIC DIRECTION
+    # NORMALIZE EXPERIMENT IDENTIFIER
+    # ============================================================
+    #
+    # O dataframe precisa possuir o experimento que originou cada
+    # CSV. Em versões anteriores isso pode estar em Experiment ID,
+    # experiment_id ou Experiment.
     # ============================================================
 
-    higher_is_better = {
-        "Detection Rate",
-        "Episode F1",
+    experiment_column = None
+
+    for candidate in [
+        "Experiment ID",
+        "experiment_id",
+        "Experiment",
+    ]:
+        if candidate in df_eval.columns:
+            experiment_column = candidate
+            break
+
+    if experiment_column is None:
+        raise KeyError(
+            "The dataframe must contain an experiment identifier "
+            "('Experiment ID', 'experiment_id' or 'Experiment') "
+            "to calculate metrics per experiment."
+        )
+
+    df_eval["_Experiment"] = (
+        df_eval[experiment_column]
+        .astype(str)
+    )
+
+    # ============================================================
+    # BUILD ONE OBSERVATION PER EXPERIMENTAL UNIT
+    #
+    # Solution × Dataset × Experiment × Fold ID
+    # ============================================================
+
+    required_columns = [
+        "Solution",
+        "Dataset",
+        "_Experiment",
+        "Fold ID",
+    ]
+
+    missing_columns = [
+        col
+        for col in required_columns
+        if col not in df_eval.columns
+    ]
+
+    if missing_columns:
+        raise KeyError(
+            "Missing columns required for experimental-unit "
+            f"aggregation: {missing_columns}"
+        )
+
+    experimental_rows = []
+
+    group_columns = [
+        "Solution",
+        "Dataset",
+        "_Experiment",
+        "Fold ID",
+        "Shift Type",
+    ]
+
+    for group_key, df_unit in df_eval.groupby(
+        group_columns,
+        dropna=False
+    ):
+
+        (
+            solution,
+            dataset,
+            experiment,
+            fold_id,
+            shift_type,
+        ) = group_key
+
+        metric_values = (
+            _calculate_experiment_detection_metrics(
+                df_unit,
+                max_detection_delay=max_detection_delay,
+            )
+        )
+
+        row = {
+            "Solution": solution,
+            "Dataset": dataset,
+            "Experiment": experiment,
+            "Fold ID": fold_id,
+            "Shift Type": shift_type,
+        }
+
+        row.update(metric_values)
+
+        experimental_rows.append(row)
+
+    df_experimental = pd.DataFrame(
+        experimental_rows
+    )
+
+    if df_experimental.empty:
+        print(
+            "\nWARNING: no experimental units were created."
+        )
+        return
+
+    print("\n" + "=" * 100)
+    print("DEBUG - EXPERIMENTAL UNITS BY SHIFT TYPE")
+    print("=" * 100)
+    print(
+        df_experimental["Shift Type"]
+        .value_counts(dropna=False)
+    )
+    print("\nDEBUG - EXPERIMENTAL UNITS BY SHIFT TYPE / SOLUTION")
+    print(
+        df_experimental.groupby(
+            ["Shift Type", "Solution"]
+        ).size()
+    )
+
+    # ============================================================
+    # AGGREGATE ONLY AFTER EXPERIMENTAL UNITS EXIST
+    # ============================================================
+
+    rows_raw = {
+        shift_type: {}
+        for shift_type in valid_shift_types
     }
-
-    # ============================================================
-    # BUILD AGGREGATED RESULTS
-    # ============================================================
-
-    rows_raw = {}
 
     for shift_type in valid_shift_types:
 
-        df_shift = df_eval[
-            df_eval["Shift Type"] == shift_type
+        df_shift = df_experimental[
+            df_experimental["Shift Type"] == shift_type
         ].copy()
-
-        if df_shift.empty:
-            continue
-
-        rows_raw[shift_type] = {}
 
         for solution in solutions:
 
             df_solution = df_shift[
-                df_shift["Detector"] == solution
+                df_shift["Solution"] == solution
             ].copy()
 
             if df_solution.empty:
@@ -2447,15 +2023,19 @@ def table_detection_quality_by_shift_type(
 
             for metric in metrics:
 
-                mean_value, ci_value = (
-                    calculate_detection_metric(
-                        df_solution,
-                        metric,
-                        ci=ci,
-                        max_detection_delay=(
-                            max_detection_delay
-                        ),
-                    )
+                values = pd.to_numeric(
+                    df_solution[metric],
+                    errors="coerce"
+                ).dropna()
+
+                mean_value, ci_value = mean_ci(
+                    values,
+                    ci=ci,
+                    bounded=metric in {
+                        "Detection Rate",
+                        "Episode F1",
+                        "Missed Detection Rate",
+                    }
                 )
 
                 rows_raw[
@@ -2463,25 +2043,49 @@ def table_detection_quality_by_shift_type(
                 ][solution][metric] = {
                     "mean": mean_value,
                     "ci": ci_value,
+                    "n": len(values),
                 }
 
     # ============================================================
-    # BUILD TABLE
+    # BUILD CONSOLIDATED TABLE
     # ============================================================
+
+    print("\n" + "=" * 100)
+    print("DEBUG - ROWS AVAILABLE FOR FINAL LATEX TABLE")
+    print("=" * 100)
+    for _shift_type in valid_shift_types:
+        _solutions_present = list(rows_raw[_shift_type].keys())
+        print(
+            f"{_shift_type}: "
+            f"{len(_solutions_present)} solution(s) -> "
+            f"{_solutions_present}"
+        )
+
+    table_rows = []
+
+    shift_type_labels = {
+        "Concept drift": "Concept Drift",
+        "Label shift": "Label Shift",
+        "Combined shift": "Combined Shift",
+    }
 
     for shift_type in valid_shift_types:
 
-        if shift_type not in rows_raw:
+        if not rows_raw[shift_type]:
             continue
+
+        # --------------------------------------------------------
+        # Determine best solution independently for every metric.
+        # --------------------------------------------------------
+
+        best_by_metric = {}
 
         for metric in metrics:
 
             valid_solutions = [
                 solution
                 for solution in solutions
-                if solution in rows_raw[
-                    shift_type
-                ]
+                if solution in rows_raw[shift_type]
                 and not pd.isna(
                     rows_raw[
                         shift_type
@@ -2492,12 +2096,7 @@ def table_detection_quality_by_shift_type(
             if not valid_solutions:
                 continue
 
-            metric_is_higher_better = (
-                metric in higher_is_better
-            )
-
-            if metric_is_higher_better:
-
+            if metric in higher_is_better_metrics:
                 best_solution = max(
                     valid_solutions,
                     key=lambda solution:
@@ -2505,9 +2104,7 @@ def table_detection_quality_by_shift_type(
                             shift_type
                         ][solution][metric]["mean"]
                 )
-
             else:
-
                 best_solution = min(
                     valid_solutions,
                     key=lambda solution:
@@ -2516,48 +2113,86 @@ def table_detection_quality_by_shift_type(
                         ][solution][metric]["mean"]
                 )
 
-            best_mean = rows_raw[
-                shift_type
-            ][best_solution][metric]["mean"]
+            best_by_metric[metric] = best_solution
 
-            best_ci = rows_raw[
-                shift_type
-            ][best_solution][metric]["ci"]
+        # --------------------------------------------------------
+        # One row per solution.
+        # --------------------------------------------------------
+
+        valid_solutions_for_shift = [
+            solution
+            for solution in solutions
+            if solution in rows_raw[shift_type]
+        ]
+
+        first_row = True
+
+        for solution in valid_solutions_for_shift:
+
+            row = {}
+
+            if first_row:
+                row["Shift Type"] = (
+                    "\\multirow{"
+                    f"{len(valid_solutions_for_shift)}"
+                    "}{*}{"
+                    + shift_type_labels[shift_type]
+                    + "}"
+                )
+                first_row = False
+            else:
+                row["Shift Type"] = ""
 
             # ----------------------------------------------------
-            # BUILD ROWS
+            # Solution name
             # ----------------------------------------------------
 
-            table_rows = []
+            solution_display = str(solution)
 
-            for solution in solutions:
+            # Escape underscores in plain-text solution names.
+            # This is required because escape=False is used by pandas
+            # when generating the LaTeX table.
+            if solution_display == "MFP_v2_dh":
+                solution_display = (
+                    "$\\textit{MFP}_{\\textit{DDH}}$"
+                )
+            elif solution_display == "MFP_v2_iti":
+                solution_display = (
+                    "$\\textit{MFP}_{\\textit{ITI}}$"
+                )
+            elif solution_display == "MFP_v2":
+                solution_display = "MFP"
+            elif solution_display == "MultiFedAvg+MFP_v2":
+                solution_display = "MultiFedAvg+MFP"
+            else:
+                solution_display = solution_display.replace("_", r"\_")
 
-                if solution not in valid_solutions:
+            row["Solution"] = solution_display
+
+            # ----------------------------------------------------
+            # Metrics
+            # ----------------------------------------------------
+
+            for metric in metrics:
+
+                result = rows_raw[
+                    shift_type
+                ][solution].get(metric)
+
+                if result is None:
+                    row[metric] = "--"
                     continue
 
-                mean_value = rows_raw[
-                    shift_type
-                ][solution][metric]["mean"]
-
-                ci_value = rows_raw[
-                    shift_type
-                ][solution][metric]["ci"]
+                mean_value = result["mean"]
+                ci_value = result["ci"]
 
                 if pd.isna(mean_value):
+                    row[metric] = "--"
                     continue
 
-                # ------------------------------------------------
-                # Formatting
-                # ------------------------------------------------
-
                 if pd.isna(ci_value):
-
-                    text = (
-                        f"{mean_value:.2f}"
-                    )
-
+                    text = f"{mean_value:.2f}"
                 else:
-
                     text = (
                         f"{mean_value:.2f}"
                         f" $\\pm$ "
@@ -2565,207 +2200,244 @@ def table_detection_quality_by_shift_type(
                     )
 
                 # ------------------------------------------------
-                # BOLD
+                # Bold best result.
+                #
+                # A solution is bold if its mean is inside the
+                # 95% CI of the best solution, preserving the
+                # previous presentation convention.
                 # ------------------------------------------------
 
-                if not pd.isna(best_ci):
+                best_solution = best_by_metric.get(metric)
 
-                    best_lower = (
-                        best_mean
-                        - best_ci
-                    )
+                is_bold = False
 
-                    best_upper = (
-                        best_mean
-                        + best_ci
-                    )
+                if best_solution is not None:
 
-                    is_bold = (
-                        best_lower
-                        <= mean_value
-                        <= best_upper
-                    )
+                    best_result = rows_raw[
+                        shift_type
+                    ][best_solution][metric]
 
-                else:
+                    best_mean = best_result["mean"]
+                    best_ci = best_result["ci"]
 
-                    is_bold = np.isclose(
-                        mean_value,
-                        best_mean,
-                        rtol=1e-12,
-                        atol=1e-12,
-                    )
+                    if not pd.isna(best_mean):
+
+                        if pd.isna(best_ci):
+                            is_bold = np.isclose(
+                                mean_value,
+                                best_mean,
+                                rtol=1e-12,
+                                atol=1e-12,
+                            )
+                        else:
+                            best_lower = (
+                                best_mean - best_ci
+                            )
+                            best_upper = (
+                                best_mean + best_ci
+                            )
+
+                            is_bold = (
+                                best_lower
+                                <= mean_value
+                                <= best_upper
+                            )
 
                 if is_bold:
-
                     text = (
                         "\\textbf{"
                         + text
                         + "}"
                     )
 
-                table_rows.append(
-                    {
-                        "Detector": solution,
-                        metric: text,
-                    }
+                row[metric] = text
+
+                # MTD is computed only over experimental units in which
+                # the shift was successfully detected within the valid
+                # detection window. Report its effective sample size.
+                if metric == "Average Detection Delay":
+                    row["MTD n"] = str(result["n"])
+
+            table_rows.append(row)
+
+    # ============================================================
+    # DATAFRAME FOR LATEX
+    # ============================================================
+
+    df_table = pd.DataFrame(
+        table_rows,
+        columns=[
+            "Shift Type",
+            "Solution",
+        ] + metrics
+    )
+
+    # ============================================================
+    # COLUMN NAMES FOR PAPER
+    # ============================================================
+
+    df_table = df_table.rename(
+        columns={
+            "Shift Type": "Shift Type",
+            "Solution": "Solution",
+            "Detection Rate": "DR $\\uparrow$",
+            "Episode F1": "Episode F1 $\\uparrow$",
+            "Average Detection Delay": "MTD $\\downarrow$",
+            "MTD n": "$n_{\\mathrm{MTD}}$",
+            "Missed Detection Rate": "MDR $\\downarrow$",
+            "False Alarm Rate": "FAR $\\downarrow$",
+        }
+    )
+
+    # ============================================================
+    # LATEX
+    # ============================================================
+
+    filename = os.path.join(
+        write_path,
+        "overall_detection_quality.tex"
+    )
+
+    latex = df_table.to_latex(
+        index=False,
+        escape=False,
+        caption=(
+            "Performance of data-shift detection methods. "
+            "Detection Rate (DR) is the proportion of shifts detected "
+            "within the allowed detection window; Episode F1 is the "
+            "episode-level F1 score balancing correct detections and "
+            "false alarms; Mean Time to Detection (MTD) is the mean "
+            "number of rounds from the shift to the first valid detection; "
+            "Missed Detection Rate (MDR) is the proportion of shifts not "
+            "detected within the allowed window; and False Alarm Rate "
+            "(FAR) is the proportion of stable pre-shift rounds that "
+            "produce false alarms. Each metric is reported per solution "
+            "across all executed experiments with five folds and as "
+            "mean $\\pm$ 95\\% confidence interval."
+        ),
+        label="tab:overall_detection_quality",
+        column_format="llcccccc",
+    )
+
+    # ------------------------------------------------------------
+    # Use the two-column table environment so the table can span
+    # the full page width in a two-column document.
+    # ------------------------------------------------------------
+    latex = latex.replace("\\begin{table}", "\\begin{table*}", 1)
+    latex = latex.replace("\\end{table}", "\\end{table*}", 1)
+
+    # ------------------------------------------------------------
+    # Make the table occupy the full text width.
+    # ------------------------------------------------------------
+    latex = latex.replace(
+        "\\begin{tabular}{llcccccc}",
+        "\\resizebox{\\textwidth}{!}{%\n"
+        "\\begin{tabular}{llccccc}",
+        1,
+    )
+
+    # Close the resizebox after the tabular environment.
+    latex = latex.replace(
+        "\\end{tabular}",
+        "\\end{tabular}%\n"
+        "}",
+        1,
+    )
+
+    # ------------------------------------------------------------
+    # Insert the separator directly into the generated LaTeX.
+    # It must be a LaTeX row command, not a DataFrame cell.
+    # ------------------------------------------------------------
+
+    lines = latex.splitlines()
+    cleaned_lines = []
+    first_shift_group = True
+
+    for line in lines:
+        is_shift_group = (
+            r"\multirow{" in line
+            and any(
+                marker in line
+                for marker in (
+                    "}{*}{Concept Drift}",
+                    "}{*}{Label Shift}",
+                    "}{*}{Combined Shift}",
                 )
-
-            if not table_rows:
-                continue
-
-            df_table = pd.DataFrame(
-                table_rows
             )
+        )
 
-            filename = os.path.join(
-                write_path,
-                (
-                    "overall_detection_"
-                    f"{metric.lower().replace(' ', '_')}_"
-                    f"{shift_type.lower().replace(' ', '_')}.tex"
-                )
-            )
+        if is_shift_group and not first_shift_group:
+            cleaned_lines.append(r"\midrule")
 
-            generate_latex_table(
-                df_table=df_table,
-                filename=filename,
-                caption=(
-                    f"{metric} for "
-                    f"{shift_type} detection."
-                ),
-                label=(
-                    "tab:overall_detection_"
-                    f"{metric.lower().replace(' ', '_')}_"
-                    f"{shift_type.lower().replace(' ', '_')}"
-                ),
-                column_format="lr",
-            )
+        if is_shift_group:
+            first_shift_group = False
 
-def table_per_dataset(df, write_path, metric, solutions_order, ci=0.95):
+        cleaned_lines.append(line)
 
-    datasets = sorted(df["Dataset"].unique().tolist())
-    alphas = sorted(df["Alpha"].unique().tolist())
-    solutions = [
-        df[df["Solution"] == s]["Table"].iloc[0]
-        for s in solutions_order
-        if s in df["Solution"].values
-    ]
+    latex = "\n".join(cleaned_lines)
 
-    Path(write_path).mkdir(parents=True, exist_ok=True)
+    # ============================================================
+    # ADD REQUIRED MULTIROW PACKAGE
+    # ============================================================
 
-    for dataset in datasets:
+    latex = (
+        "% Requires: \\usepackage{booktabs}\n"
+        "% Requires: \\usepackage{multirow}\n"
+        "% Requires: \\usepackage{graphicx}\n"
+        + latex
+    )
 
-        rows_raw = {}
+    # ============================================================
+    # WRITE FILE
+    # ============================================================
 
-        # ==============================
-        # 1️⃣ CALCULAR MÉDIA E CI
-        # ==============================
+    with open(
+        filename,
+        "w",
+        encoding="utf-8"
+    ) as f:
+        f.write(latex)
 
-        for solution in solutions:
-            rows_raw[solution] = {}
+    # ============================================================
+    # PRINT STATISTICS FOR VALIDATION
+    # ============================================================
 
-            for alpha in alphas:
+    print("\n" + "=" * 100)
+    print("DETECTION TABLE - EXPERIMENTAL UNITS")
+    print("=" * 100)
 
-                filtered = df.query(
-                    f"Dataset == '{dataset}' and Table == '{solution}' and Alpha == {alpha}"
-                )
+    print(
+        "\nEach metric was first calculated for:"
+        "\n  Solution × Dataset × Experiment × Fold ID"
+    )
 
-                mean, ci_margin = mean_ci(filtered[metric], ci=ci)
+    print(
+        "\nNumber of experimental units by shift type:"
+    )
 
-                rows_raw[solution][alpha] = {
-                    "mean": mean,
-                    "ci": ci_margin
-                }
+    print(
+        df_experimental.groupby(
+            "Shift Type"
+        ).size()
+    )
 
-        # ==============================
-        # 2️⃣ IDENTIFICAR MELHORES COM IC
-        # ==============================
+    print(
+        "\nNumber of units by shift type and solution:"
+    )
 
-        for alpha in alphas:
+    print(
+        df_experimental.groupby(
+            ["Shift Type", "Solution"]
+        ).size()
+    )
 
-            # coletar valores da coluna
-            col_values = {
-                sol: rows_raw[sol][alpha]
-                for sol in solutions
-            }
+    print(
+        f"\nLaTeX table written to:\n{filename}"
+    )
 
-            # encontrar maior média
-            best_sol = max(col_values, key=lambda x: col_values[x]["mean"])
-            best_mean = col_values[best_sol]["mean"]
-            best_ci = col_values[best_sol]["ci"]
+    print("=" * 100)
 
-            best_lower = best_mean - best_ci
-            best_upper = best_mean + best_ci
-
-            # verificar sobreposição
-            for sol in solutions:
-                mean_val = col_values[sol]["mean"]
-                ci_val = col_values[sol]["ci"]
-
-                lower = mean_val - ci_val
-                upper = mean_val + ci_val
-
-                overlap = not (upper < best_lower or lower > best_upper)
-
-                rows_raw[sol][alpha]["bold"] = overlap
-
-        # ==============================
-        # 3️⃣ FORMATAR TABELA FINAL
-        # ==============================
-
-        rows_final = []
-
-        for solution in solutions:
-            safe_solution = solution.replace("_", r"\_")
-            row = {"Solution": safe_solution}
-
-            for alpha in alphas:
-
-                mean_val = rows_raw[solution][alpha]["mean"]
-                ci_val = rows_raw[solution][alpha]["ci"]
-                bold = rows_raw[solution][alpha]["bold"]
-
-                # CORREÇÃO AQUI
-                value_str = f"{mean_val:.2f}$\\pm${ci_val:.2f}"
-
-                if bold:
-                    value_str = f"\\textbf{{{value_str}}}"
-
-                row[f"$\\alpha={alpha}$"] = value_str
-
-            rows_final.append(row)
-
-        df_dataset = pd.DataFrame(rows_final)
-        df_dataset.set_index("Solution", inplace=True)
-
-        # ==============================
-        # 4️⃣ GERAR LATEX
-        # ==============================
-
-        latex = df_dataset.to_latex(
-            escape=False,
-            column_format="l" + "c" * len(alphas),
-            index_names=False
-        ).replace("MFP\_v2\_dh", "$\\textit{MFP}_{\\textit{DDH}}$").replace("MFP\_v2\_iti", "$\\textit{MFP}_{\\textit{ITI}}$").replace("MFP\_v2", "$\\textit{MFP}$").replace(" Concept ", " Concept drift ").replace(" Label ", " Label shift ")
-        print("Latexx: ", latex)
-        latex_complete = f"""
-        \\begin{{table}}[t]
-        \\centering
-        \\caption{{Concept Drift -- {dataset} - {metric.replace("%", "\%")}}}
-        \\label{{tab:concept_drift_{dataset}_{metric.replace(' ', '_').replace('_(%)', '')}}}
-        \\resizebox{{\\columnwidth}}{{!}}{{%
-        {latex}
-        }}
-        \\end{{table}}
-        """.replace(" Concept ", " Concept drift ").replace(" Label ", " Label shift ")
-
-        filename = f"{write_path}/latex_table_concept_dirft_{dataset}_{metric.replace(' ','_')}.tex".replace("_(%)", "")
-
-        with open(filename, "w") as f:
-            f.write(latex_complete)
-
-        print(f"\nTabela salva para {dataset} em:")
-        print(filename)
+    return df_experimental, df_table
 
 def extract_alpha_from_experiment(experiment_id):
     """
@@ -2778,6 +2450,14 @@ def extract_alpha_from_experiment(experiment_id):
     Label Shift:
         label_shift#0.1-1.0_sudden
         -> (0.1, 1.0)
+
+    Combined Shift:
+        combined_shift#0.1-1.0_sudden
+        -> (0.1, 1.0)
+
+        The result directory uses:
+        alpha_[0.1, 0.1, 0.1]
+        i.e., alpha_before for all datasets.
     """
 
     experiment_id = str(experiment_id).strip()
@@ -2813,14 +2493,14 @@ def extract_alpha_from_experiment(experiment_id):
             ) from e
 
     # ============================================================
-    # LABEL SHIFT
+    # LABEL SHIFT / COMBINED SHIFT
     # ============================================================
 
-    if shift_type == "label_shift":
+    if shift_type in ("label_shift", "combined_shift"):
 
         if "-" not in config:
             raise ValueError(
-                f"Configuração de Label Shift inválida: "
+                f"Configuração de {shift_type} inválida: "
                 f"{experiment_id}"
             )
 
@@ -2984,6 +2664,13 @@ if __name__ == "__main__":
         "Foursquare"
     ]
 
+    # Rodada em que o data shift ocorre em cada dataset.
+    dataset_shift_rounds = {
+        "WISDM-W": 30,
+        "ImageNet10": 50,
+        "Foursquare": 70
+    }
+
     model_name = [
         "gru",
         "CNN",
@@ -2993,10 +2680,23 @@ if __name__ == "__main__":
     fraction_fit = 0.375
     number_of_rounds = 100
     local_epochs = 1
+
+    # ============================================================
+    # JANELA MÁXIMA DE DETECÇÃO
+    # ============================================================
+    # Número máximo de rodadas após a ocorrência do ground-truth
+    # data shift em que uma detecção será considerada válida.
+    #
+    # Exemplo: com shift na rodada 70 e valor 10, são válidas
+    # detecções nas rodadas 70 até 80 (inclusive).
+    #
+    # Use None para considerar qualquer detecção após o shift
+    # como válida.
+    MAX_DETECTION_DELAY = 10
     train_test = "test"
 
     solutions = [
-        "MultiFedAvg+MFP",
+        "MultiFedAvg+MFP_v2",
         "FedConD",
         "FedDCA",
         "CDA-FedAvg"
@@ -3011,16 +2711,22 @@ if __name__ == "__main__":
 
     label_experiments = [
         "label_shift#0.1-1.0_sudden",
-        "label_shift#0.1-10.0_sudden",
-        "label_shift#1.0-0.1_sudden",
-        "label_shift#1.0-10.0_sudden",
-        "label_shift#10.0-0.1_sudden",
-        "label_shift#10.0-1.0_sudden"
+        # "label_shift#0.1-10.0_sudden",
+        # "label_shift#1.0-0.1_sudden",
+        # "label_shift#1.0-10.0_sudden",
+        # "label_shift#10.0-0.1_sudden",
+        # "label_shift#10.0-1.0_sudden"
+    ]
+
+    combined_experiments = [
+        "combined_shift#0.1-1.0_sudden",
+        "combined_shift#0.1-10.0_sudden"
     ]
 
     experiment_ids = (
             concept_experiments
             + label_experiments
+            + combined_experiments
     )
 
     df_all = None
@@ -3080,6 +2786,33 @@ if __name__ == "__main__":
             # Label Shift.
             alpha_value = alpha_config
 
+        # ============================================================
+        # COMBINED SHIFT
+        # ============================================================
+        elif experiment_id.startswith("combined_shift#"):
+            alpha_before, alpha_after = alpha_config
+
+            # IMPORTANT:
+            # The result directories generated for Combined Shift use
+            # the same alpha value for all datasets. For example:
+            #
+            # combined_shift#0.1-1.0_sudden
+            #
+            # is stored under:
+            #
+            # alpha_[0.1, 0.1, 0.1]
+            #
+            # The alpha_after value is part of the Experiment ID and
+            # identifies the shift configuration, but it is NOT used
+            # in the directory name.
+            alphas = [
+                alpha_before,
+                alpha_before,
+                alpha_before
+            ]
+
+            alpha_value = alpha_config
+
         else:
 
             raise ValueError(
@@ -3094,6 +2827,9 @@ if __name__ == "__main__":
         read_dataset_order = []
 
         for solution in solutions:
+
+            # A diretoria continua sendo construída com a LISTA
+            # completa de datasets, exatamente como no código original.
             read_path = (
                 "../system/results/"
                 "experiment_id_{}/"
@@ -3117,19 +2853,24 @@ if __name__ == "__main__":
                 train_test
             )
 
-            detection_file = (
-                f"{read_path}"
-                f"shift_detection_metrics_{solution.replace("MultiFedAvg+MFP", "MultiFedAvg+MFP_v2")}.csv"
-            )
+            # Existe um CSV por dataset para cada solução.
+            # Portanto, o nome do dataset entra SOMENTE no nome do CSV,
+            # e não substitui a lista 'dataset' utilizada na diretoria.
+            for dataset_name in dataset:
 
-            read_solutions[solution].append(
-                detection_file
-            )
+                detection_file = os.path.join(
+                    read_path,
+                    f"{dataset_name}_{solution}.csv"
+                )
 
-            print(
-                f"\nLendo métricas de detecção para {solution}:"
-                f"\n{detection_file}"
-            )
+                read_solutions[solution].append(
+                    detection_file
+                )
+
+                print(
+                    f"\nLendo resultados para {solution} / {dataset_name}:"
+                    f"\n{detection_file}"
+                )
 
         print("\n" + "=" * 80)
         print("DEBUG - DIRETÓRIO DE LEITURA")
@@ -3181,8 +2922,24 @@ if __name__ == "__main__":
         df = read_data(
             read_solutions,
             experiment_id=experiment_id,
-            alpha_value=alpha_value
+            alpha_value=alpha_value,
+            dataset_shift_rounds=dataset_shift_rounds
         )
+
+        # Preserve the experiment identifier in the final dataframe.
+        # This is required so that detection metrics are first computed
+        # independently for each Solution × Dataset × Experiment × Fold ID.
+        if df is not None and not df.empty:
+            df["Experiment ID"] = experiment_id
+            df["Shift Type"] = (
+                "Concept drift"
+                if experiment_id.startswith("concept_drift#")
+                else "Label shift"
+                if experiment_id.startswith("label_shift#")
+                else "Combined shift"
+                if experiment_id.startswith("combined_shift#")
+                else "N/A"
+            )
 
         print(df)
 
@@ -3204,7 +2961,7 @@ if __name__ == "__main__":
     if df_all is None or df_all.empty:
 
         raise RuntimeError(
-            "Nenhum CSV de shift detection foi encontrado."
+            "Nenhum CSV de resultados foi encontrado."
         )
 
     print(
@@ -3221,22 +2978,16 @@ if __name__ == "__main__":
 
     print(df_all.columns)
 
+    # A leitura atual utiliza somente as colunas do novo CSV:
+    # Fold ID, Round (t), Data shift e Solution.
     print(
         df_all[
             [
-                "Detector",
+                "Solution",
                 "Dataset",
                 "Fold ID",
-                "Round",
-                "Model",
-                "Shift Type",
-                "Shift Configuration",
-                "Precision",
-                "Recall",
-                "F1",
-                "Detection Delay",
-                "False Alarms",
-                "First Detection Round",
+                "Round (t)",
+                "Data shift",
                 "Shift Round",
             ]
         ].head(20)
@@ -3257,12 +3008,16 @@ if __name__ == "__main__":
     # TABELA PRINCIPAL
     # ============================================================
 
+    # Detection metrics are computed per:
+    # Solution × Dataset × Experiment × Fold ID
+    #
+    # "Data shift == DATA_SHIFT" is interpreted as a detector alarm.
     metrics = [
         "Detection Rate",
         "Episode F1",
         "Average Detection Delay",
         "Missed Detection Rate",
-        "Alarm Rate",
+        "False Alarm Rate",
     ]
 
     higher_is_better_metrics = {
@@ -3274,96 +3029,88 @@ if __name__ == "__main__":
     print("VALIDAÇÃO DOS CSVs UTILIZADOS NA TABELA")
     print("=" * 100)
 
-    for detector in solutions:
+    for solution in solutions:
 
-        detector_df = df_all[
-            df_all["Detector"] == detector
+        solution_df = df_all[
+            df_all["Solution"] == solution
             ].copy()
 
-        print(f"\nDetector: {detector}")
+        print(f"\nSolution: {solution}")
 
-        if detector_df.empty:
+        if solution_df.empty:
             print("  *** NENHUM DADO CARREGADO ***")
             continue
 
-        print(f"  Número de linhas: {len(detector_df)}")
-        print(f"  Datasets: {detector_df['Dataset'].unique()}")
-        print(f"  Models: {detector_df['Model'].unique()}")
-        print(f"  Shift Types: {detector_df['Shift Type'].unique()}")
-        print(f"  Configurations: {detector_df['Shift Configuration'].unique()}")
-        print(f"  Rounds: {detector_df['Round'].min()} -> {detector_df['Round'].max()}")
+        print(f"  Número de linhas: {len(solution_df)}")
+        print(f"  Datasets: {solution_df['Dataset'].unique()}")
+        print(f"  Fold IDs: {solution_df['Fold ID'].unique()}")
+        print(f"  Data shift: {solution_df['Data shift'].unique()}")
+        print(
+            f"  Shift Rounds: "
+            f"{solution_df[['Dataset', 'Shift Round']].drop_duplicates().to_dict('records')}"
+        )
+        print(
+            f"  Rounds: {solution_df['Round (t)'].min()} "
+            f"-> {solution_df['Round (t)'].max()}"
+        )
+
+    print(df_all)
 
     # ============================================================
-    # SELECIONAR SOMENTE A ÚLTIMA RODADA DE CADA UNIDADE EXPERIMENTAL
+    # VERIFICAÇÃO FINAL: 5 FOLDS POR ARQUIVO
     # ============================================================
-
-    df_final = select_final_detection_results(
-        df_all
-    )
 
     print("\n" + "=" * 100)
-    print("VALIDAÇÃO - DADOS FINAIS USADOS NA TABELA")
+    print("ARQUIVOS SEM 5 FOLDS COMPLETOS")
     print("=" * 100)
 
-    print(f"Total de linhas originais: {len(df_all)}")
-    print(f"Total de linhas finais:   {len(df_final)}")
+    incomplete_fold_files = [
+        record
+        for record in FOLD_VALIDATION
+        if record["fold_count"] != 5
+    ]
 
-    print("\nLinhas por detector:")
+    if incomplete_fold_files:
+        # Agrupa por solução e diretório para evitar repetir os
+        # diferentes datasets/arquivos que pertencem ao mesmo conjunto.
+        incomplete_solution_dirs = {}
+
+        for record in incomplete_fold_files:
+            solution = record.get("solution")
+            directory = os.path.dirname(record["path"])
+
+            key = (solution, directory)
+            incomplete_solution_dirs[key] = True
+
+        for solution, directory in sorted(
+            incomplete_solution_dirs.keys(),
+            key=lambda item: (str(item[0]), item[1])
+        ):
+            print(f"\nSolução: {solution}")
+            print(f"Diretório: {directory}")
+    else:
+        print("Todos os arquivos lidos possuem exatamente 5 folds distintos.")
+
+    print("=" * 100 + "\n")
+
     print(
-        df_final["Detector"]
-        .value_counts()
-        .sort_index()
-        .to_string()
+        f"\nJanela máxima de detecção: {MAX_DETECTION_DELAY} rodada(s) após o shift"
+        if MAX_DETECTION_DELAY is not None
+        else "\nJanela máxima de detecção: ilimitada"
     )
-
-    print("\nLinhas por detector e tipo de shift:")
-    print(
-        df_final
-        .groupby(
-            ["Detector", "Shift Type"]
-        )
-        .size()
-        .to_string()
-    )
-
-    print("\nDados temporais selecionados para detecção:")
-    print(
-        df_final[
-            [
-                "Detector",
-                "Dataset",
-                "Fold ID",
-                "Model",
-                "Shift Type",
-                "Shift Configuration",
-                "Shift Round",
-                "First Detection Round",
-                "Detection Rounds",
-                "Last Round",
-            ]
-        ]
-        .sort_values(
-            [
-                "Detector",
-                "Shift Type",
-                "Dataset",
-                "Model",
-            ]
-        )
-        .to_string(index=False)
-    )
-
-    print("=" * 100)
 
     # ============================================================
-    # GERAR TABELA COM OS DADOS FINAIS
+    # TABELA CONSOLIDADA DE QUALIDADE DA DETECÇÃO
     # ============================================================
 
-    table_detection_quality(
-        df=df_all,
-        write_path=write_path,
-        solutions_order=solutions,
-        metrics=metrics,
-        ci=0.95,
-        max_detection_delay=None,
+    df_experimental, df_detection_table = (
+        table_detection_quality_by_shift_type(
+            df_final=df_all,
+            write_path=write_path,
+            solutions=solutions,
+            metrics=metrics,
+            higher_is_better_metrics=higher_is_better_metrics,
+            ci=0.95,
+            max_detection_delay=MAX_DETECTION_DELAY,
+        )
     )
