@@ -19,6 +19,7 @@ import random
 import sys
 import copy
 import os
+import re
 import torch
 import numpy as np
 from .utils.models_utils import load_model, get_weights, load_data, set_weights, test, train
@@ -60,7 +61,11 @@ class MultiFedAvgClient:
             self.model = model
             self.alpha_train = [float(i) for i in args.alpha]
             self.alpha_test = [float(i) for i in args.alpha]
+            self.initial_alpha = [float(i) for i in args.alpha]
             self.ME = len(self.model)
+            self.label_shift_progress_train = [0.0] * self.ME
+            self.label_shift_progress_test = [0.0] * self.ME
+
             self.concept_drift_window_train = [0] * self.ME
             self.concept_drift_window_test = [0] * self.ME
             self.total_clients  = args.total_clients
@@ -233,6 +238,40 @@ class MultiFedAvgClient:
                     type_ = "label_shift"
                     config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                    "type": type_} for me in range(ME)}
+                elif re.fullmatch(r"label_shift#(?:0\.1|1\.0|10\.0)-(?:0\.1|1\.0|10\.0)_gradual", experiment_id):
+                    # Generic gradual label-shift transition.
+                    # The experiment id encodes the fixed initial alpha and
+                    # target alpha (e.g. 0.1-1.0). The transition is performed
+                    # by mixing endpoint datasets; alpha itself is not
+                    # interpolated.
+                    transition = experiment_id[len("label_shift#"):-len("_gradual")]
+                    initial_alpha_str, target_alpha_str = transition.split("-", 1)
+                    initial_alpha = float(initial_alpha_str)
+                    target_alpha = float(target_alpha_str)
+
+                    if not all(abs(float(alpha) - initial_alpha) <= 1e-8 for alpha in self.alpha_train):
+                        raise ValueError(
+                            f"{experiment_id} requires initial alpha={initial_alpha}, "
+                            f"but received {self.alpha_train}"
+                        )
+
+                    ME_concept_drift_rounds = [
+                        [int(n_rounds * 0.3)],
+                        [int(n_rounds * 0.5)],
+                        [int(n_rounds * 0.7)]
+                    ]
+                    new_alphas = [[target_alpha] for _ in range(ME)]
+                    type_ = "label_shift"
+
+                    config = {
+                        me: {
+                            "data_shift_rounds": ME_concept_drift_rounds[me],
+                            "new_alphas": new_alphas[me],
+                            "transition_window": self.label_shift_transition_window,
+                            "type": type_
+                        }
+                        for me in range(ME)
+                    }
                 elif experiment_id == "label_shift#0.1-10.0_gradual":
 
                     ME_concept_drift_rounds = [
@@ -315,6 +354,36 @@ class MultiFedAvgClient:
                     type_ = "label_shift"
                     config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
                                    "type": type_} for me in range(ME)}
+                elif experiment_id.startswith("combined_shift#") and experiment_id.endswith("_gradual"):
+                    combined_transitions = {
+                        "0.1_1.0": (0.1, 1.0), "0.1-1.0": (0.1, 1.0),
+                        "0.1_10.0": (0.1, 10.0), "0.1-10.0": (0.1, 10.0),
+                        "1.0_0.1": (1.0, 0.1), "1.0-0.1": (1.0, 0.1),
+                        "1.0_10.0": (1.0, 10.0), "1.0-10.0": (1.0, 10.0),
+                        "10.0_0.1": (10.0, 0.1), "10.0-0.1": (10.0, 0.1),
+                        "10.0_1.0": (10.0, 1.0), "10.0-1.0": (10.0, 1.0),
+                    }
+                    transition_key = experiment_id.replace("combined_shift#", "").replace("_gradual", "")
+                    if transition_key not in combined_transitions:
+                        config = {}
+                    else:
+                        initial_alpha, target_alpha = combined_transitions[transition_key]
+                        if not all(abs(float(alpha) - initial_alpha) <= 1e-8 for alpha in self.alpha_train):
+                            raise ValueError(
+                                f"{experiment_id} requires initial alpha={initial_alpha}, but received {self.alpha_train}"
+                            )
+                        rounds = [[int(n_rounds * 0.3)], [int(n_rounds * 0.5)], [int(n_rounds * 0.7)]]
+                        config = {
+                            me: {
+                                "data_shift_rounds": rounds[me],
+                                "new_alphas": [target_alpha],
+                                "new_concept_drift_window": [1],
+                                "transition_window": self.label_shift_transition_window,
+                                "type": "combined_shift",
+                            }
+                            for me in range(ME)
+                        }
+
                 elif experiment_id.startswith("combined_shift#") and experiment_id.endswith("_sudden"):
                     # ---------------------------------------------------------
                     # Combined shift:
@@ -428,15 +497,19 @@ class MultiFedAvgClient:
                                "new_concept_drift_window": new_concept_drift_window[me], "type": type_} for me in
                           range(ME)}
             elif experiment_id == "concept_drift#0.1_gradual":
-                ME_concept_drift_rounds = [[int(n_rounds * 0.3) + client_id // gradual_rounds],
-                                           [int(n_rounds * 0.5) + client_id // gradual_rounds],
-                                           [int(n_rounds * 0.7) + client_id // gradual_rounds]]
+                # Correct gradual drift: every client starts at the same
+                # change point and the probability of drawing the new
+                # concept increases continuously during transition_window.
+                ME_concept_drift_rounds = [[int(n_rounds * 0.3)],
+                                           [int(n_rounds * 0.5)],
+                                           [int(n_rounds * 0.7)]]
                 new_alphas = [[0.1], [0.1], [0.1]]
                 new_concept_drift_window = [[1], [1], [1]]
                 type_ = "concept_drift"
 
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
-                               "new_concept_drift_window": new_concept_drift_window[me], "type": type_} for me in
+                               "new_concept_drift_window": new_concept_drift_window[me],
+                               "transition_window": self.label_shift_transition_window, "type": type_} for me in
                           range(ME)}
             elif experiment_id == "concept_drift#0.1_recurrent":
                 ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5)],
@@ -461,15 +534,17 @@ class MultiFedAvgClient:
                                "new_concept_drift_window": new_concept_drift_window[me], "type": type_} for me in
                           range(ME)}
             elif experiment_id == "concept_drift#10.0_gradual":
-                ME_concept_drift_rounds = [[int(n_rounds * 0.3) + client_id // gradual_rounds],
-                                           [int(n_rounds * 0.5) + client_id // gradual_rounds],
-                                           [int(n_rounds * 0.7) + client_id // gradual_rounds]]
+                # Correct gradual drift: same change point for all clients;
+                # only the fraction of new-concept samples changes over time.
+                ME_concept_drift_rounds = [[int(n_rounds * 0.3)],
+                                           [int(n_rounds * 0.5)],
+                                           [int(n_rounds * 0.7)]]
                 new_alphas = [[10.0], [10.0], [10.0]]
                 new_concept_drift_window = [[1], [1], [1]]
                 type_ = "concept_drift"
 
                 config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me], "new_alphas": new_alphas[me],
-                               "new_concept_drift_window": new_concept_drift_window[me], "type": type_} for me in
+                               "new_concept_drift_window": new_concept_drift_window[me], "transition_window": self.label_shift_transition_window, "type": type_} for me in
                           range(ME)}
             elif experiment_id == "concept_drift#10.0_recurrent":
                 ME_concept_drift_rounds = [[int(n_rounds * 0.2), int(n_rounds * 0.5)],
@@ -496,6 +571,18 @@ class MultiFedAvgClient:
                           range(ME)}
 
 
+            elif experiment_id == "concept_drift#1.0_gradual":
+                ME_concept_drift_rounds = [[int(n_rounds * 0.3)],
+                                           [int(n_rounds * 0.5)],
+                                           [int(n_rounds * 0.7)]]
+                new_alphas = [[1.0], [1.0], [1.0]]
+                new_concept_drift_window = [[1], [1], [1]]
+                type_ = "concept_drift"
+                config = {me: {"data_shift_rounds": ME_concept_drift_rounds[me],
+                               "new_alphas": new_alphas[me],
+                               "new_concept_drift_window": new_concept_drift_window[me],
+                               "transition_window": self.label_shift_transition_window,
+                               "type": type_} for me in range(ME)}
             else:
                 config = {}
 
@@ -639,6 +726,116 @@ class MultiFedAvgClient:
             print("evaluate error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
+    def _mix_label_shift_loaders(self, old_loader, new_loader, progress, shuffle=True):
+        """Create a probabilistic gradual label-shift mixture.
+
+        With probability (1-progress) a sample comes from the old local
+        distribution and with probability progress it comes from the fixed
+        target local distribution. Labels are copied with the selected sample;
+        no interpolation of alpha is performed during the transition.
+        """
+        progress = float(np.clip(progress, 0.0, 1.0))
+        if progress <= 0.0:
+            return old_loader
+        if progress >= 1.0:
+            return new_loader
+
+        def materialize(loader):
+            data = []
+            for batch in loader:
+                bs = batch["label"].shape[0]
+                for i in range(bs):
+                    sample = {}
+                    for key, value in batch.items():
+                        if isinstance(value, torch.Tensor):
+                            sample[key] = value[i].detach().cpu().clone()
+                        elif hasattr(value, "__getitem__"):
+                            try:
+                                sample[key] = copy.deepcopy(value[i])
+                            except Exception:
+                                sample[key] = copy.deepcopy(value)
+                        else:
+                            sample[key] = copy.deepcopy(value)
+                    data.append(sample)
+            return data
+
+        old_samples = materialize(old_loader)
+        new_samples = materialize(new_loader)
+        if not old_samples or not new_samples:
+            return old_loader if progress < 0.5 else new_loader
+
+        rng = np.random.RandomState(
+            17011 + int(self.client_id) * 100003 + int(self.fold_id) * 1009
+        )
+        mixed = []
+        for i, old_sample in enumerate(old_samples):
+            if rng.rand() < progress:
+                mixed.append(copy.deepcopy(new_samples[rng.randint(len(new_samples))]))
+            else:
+                mixed.append(copy.deepcopy(old_sample))
+
+        class MixedLabelShiftDataset(torch.utils.data.Dataset):
+            def __init__(self, data): self.data = data
+            def __len__(self): return len(self.data)
+            def __getitem__(self, index): return self.data[index]
+
+        kwargs = {
+            "batch_size": old_loader.batch_size,
+            "shuffle": shuffle,
+            "num_workers": old_loader.num_workers,
+            "drop_last": old_loader.drop_last,
+            "pin_memory": old_loader.pin_memory,
+        }
+        if getattr(old_loader, "collate_fn", None) is not None:
+            kwargs["collate_fn"] = old_loader.collate_fn
+        if getattr(old_loader, "persistent_workers", False) and old_loader.num_workers > 0:
+            kwargs["persistent_workers"] = True
+        if getattr(old_loader, "prefetch_factor", None) is not None and old_loader.num_workers > 0:
+            kwargs["prefetch_factor"] = old_loader.prefetch_factor
+        return torch.utils.data.DataLoader(MixedLabelShiftDataset(mixed), **kwargs)
+
+    def _get_label_shift_state(self, server_round, me, train):
+        """Return (base_alpha, target_alpha, progress, active, gradual)."""
+        if self.data_shift_config == {}:
+            a = self.initial_alpha[me]
+            return a, a, 0.0, False, False
+        config = self.data_shift_config[me]
+        if config.get("type") not in ("label_shift", "combined_shift"):
+            a = self.initial_alpha[me]
+            return a, a, 0.0, False, False
+        rounds = config.get("data_shift_rounds", [])
+        targets = config.get("new_alphas", [])
+        gradual = "gradual" in self.experiment_id
+        base = self.initial_alpha[me]
+        target = base
+        progress = 0.0
+        active = False
+        for i, start in enumerate(rounds):
+            if server_round < start:
+                break
+            base = target
+            target = float(targets[i])
+            active = True
+            if gradual:
+                # transition_window=0 is an explicit alias for sudden:
+                # the target distribution must be active immediately at
+                # the change point, exactly as in the sudden experiment.
+                w = int(config.get("transition_window", self.label_shift_transition_window))
+                if w <= 0:
+                    progress = 1.0
+                else:
+                    progress = float(np.clip((server_round - start) / float(w), 0.0, 1.0))
+            else:
+                progress = 1.0
+        if not active:
+            base = self.initial_alpha[me]
+            target = base
+            progress = 0.0
+        state = self.label_shift_progress_train if train else self.label_shift_progress_test
+        changed = abs(progress - state[me]) > 1e-12
+        state[me] = progress
+        return base, target, progress, changed, gradual
+
     def _apply_concept_drift_to_loader(
             self,
             loader,
@@ -702,9 +899,7 @@ class MultiFedAvgClient:
             if concept_drift_window is None:
                 return loader
 
-            concept_drift_window = int(
-                concept_drift_window
-            )
+            concept_drift_window = float(concept_drift_window)
 
             # No drift
             if concept_drift_window <= 0:
@@ -886,28 +1081,39 @@ class MultiFedAvgClient:
             rng = np.random.RandomState(seed)
 
             # ================================================================
-            # DRIFT STRENGTH
+            # GRADUAL CONCEPT DRIFT: WINDOW = NUMBER OF AFFECTED CLASSES
             #
-            # We deliberately use a strong progression.
+            # The gradual transition is defined over classes, not by
+            # continuously changing the strength of the transformation.
+            # For k affected classes, ALL samples whose label belongs to one
+            # of those k classes are exposed to the new concept.
             #
-            # window 1 -> 50%
-            # window 2 -> 75%
-            # window >=3 -> 100%
-            #
-            # This avoids the very weak perturbation used previously.
+            # The selected classes are cumulative: the set for window=k is
+            # always a subset of the set for window=k+1.  This is essential
+            # for a true gradual transition from a few affected classes to
+            # all classes.
             # ================================================================
 
-            if concept_drift_window == 1:
+            n_drift_classes = int(np.clip(
+                round(concept_drift_window),
+                0,
+                len(present_classes)
+            ))
 
-                drift_strength = 0.50
+            if n_drift_classes == 0:
+                return loader
 
-            elif concept_drift_window == 2:
-
-                drift_strength = 0.75
-
-            else:
-
-                drift_strength = 1.00
+            # Use a seed independent of the current window so that the
+            # permutation of classes is stable across the transition.
+            class_seed = (
+                42
+                + int(self.client_id) * 100003
+                + int(me) * 1009
+            )
+            class_rng = np.random.RandomState(class_seed)
+            ordered_classes = present_classes.copy()
+            class_rng.shuffle(ordered_classes)
+            drift_classes = set(ordered_classes[:n_drift_classes])
 
             # ================================================================
             # CREATE OUTPUT DATASET
@@ -977,39 +1183,14 @@ class MultiFedAvgClient:
                     dtype=np.int64
                 )
 
-                n_class = len(
-                    original_positions
-                )
-
-                n_shift = int(
-                    round(
-                        drift_strength
-                        * n_class
-                    )
-                )
-
-                n_shift = max(
-                    0,
-                    min(
-                        n_shift,
-                        n_class
-                    )
-                )
-
-                if n_shift == 0:
-                    target_positions[target_class] = (
-                        np.asarray(
-                            [],
-                            dtype=np.int64
-                        )
-                    )
+                # In gradual concept drift, a class is either affected or
+                # unaffected. Once a class enters the drift window, all of
+                # its samples participate in the new concept.
+                if target_class not in drift_classes:
+                    target_positions[target_class] = np.asarray([], dtype=np.int64)
                     continue
 
-                selected = rng.choice(
-                    original_positions,
-                    size=n_shift,
-                    replace=False
-                )
+                selected = original_positions
 
                 target_positions[target_class] = (
                     np.asarray(
@@ -1018,7 +1199,7 @@ class MultiFedAvgClient:
                     )
                 )
 
-                total_shifted += n_shift
+                total_shifted += len(selected)
 
             # ================================================================
             # ASSIGN SOURCE SAMPLES
@@ -1555,7 +1736,7 @@ class MultiFedAvgClient:
                 f"model={me} "
                 f"dataset={dataset_name} "
                 f"window={concept_drift_window} "
-                f"strength={drift_strength:.2f} "
+                f"affected_classes={len(drift_classes)} "
                 f"samples={len(samples)} "
                 f"reassigned={valid_cross_class_assignments} "
                 f"fraction={changed_fraction:.3f} "
@@ -1670,6 +1851,48 @@ class MultiFedAvgClient:
                     f"{self.concept_drift_window_train[me]} "
                     f"novo {concept_drift_window}"
                 )
+
+                # =====================================================
+                # TRUE GRADUAL LABEL / COMBINED SHIFT
+                # =====================================================
+                if data_shift_flag and "gradual" in self.experiment_id and self.data_shift_config[me]["type"] in ("label_shift", "combined_shift"):
+                    base_alpha, target_alpha, label_progress, _, _ = self._get_label_shift_state(t, me, True)
+                    old_loader, old_val = load_data(
+                        dataset_name=self.args.dataset[me], alpha=base_alpha,
+                        data_sampling_percentage=self.args.data_percentage,
+                        partition_id=self.client_id, num_partitions=self.args.total_clients + 1,
+                        batch_size=self.batch_size[me], fold_id=self.fold_id, partition_seed=partition_seed
+                    )
+                    target_loader, target_val = load_data(
+                        dataset_name=self.args.dataset[me], alpha=target_alpha,
+                        data_sampling_percentage=self.args.data_percentage,
+                        partition_id=self.client_id, num_partitions=self.args.total_clients + 1,
+                        batch_size=self.batch_size[me], fold_id=self.fold_id, partition_seed=partition_seed
+                    )
+                    mixed_loader = self._mix_label_shift_loaders(old_loader, target_loader, label_progress, shuffle=True)
+                    if self.data_shift_config[me]["type"] == "combined_shift" and concept_drift_window > 0:
+                        mixed_loader = self._apply_concept_drift_to_loader(
+                            mixed_loader, me, concept_drift_window, shuffle=True, shift_context="combined_shift"
+                        )
+                    self.trainloader[me] = mixed_loader
+                    self.valloader[me] = target_val if label_progress >= 1.0 else old_val
+                    self.recent_trainloader[me] = copy.deepcopy(old_loader)
+                    self.alpha_train[me] = target_alpha
+                    self.alpha_test[me] = target_alpha
+                    self.partition_seed_train[me] = int(partition_seed)
+                    self.partition_seed_test[me] = int(partition_seed)
+                    if self.data_shift_config[me]["type"] == "combined_shift":
+                        self.concept_drift_window_train[me] = concept_drift_window
+                    print(
+                        f"[GRADUAL DATA SHIFT - TRAIN] client={self.client_id} model={me} "
+                        f"round={t} label_progress={label_progress:.4f} "
+                        f"concept_progress={float(concept_drift_window):.4f}"
+                    )
+                    (self.p_ME[me], self.fc_ME[me], self.il_ME[me]) = self._get_datasets_metrics(
+                        self.trainloader, self.ME, self.client_id, self.n_classes, me=me
+                    )
+                    self.num_examples[me] = len(self.trainloader[me].dataset)
+                    return
 
                 # =====================================================
                 # LABEL SHIFT
@@ -1956,6 +2179,41 @@ class MultiFedAvgClient:
             )
 
             # =========================================================
+            # TRUE GRADUAL LABEL / COMBINED SHIFT - TEST
+            # =========================================================
+            if data_shift_flag and "gradual" in self.experiment_id and self.data_shift_config[me]["type"] in ("label_shift", "combined_shift"):
+                base_alpha, target_alpha, label_progress, _, _ = self._get_label_shift_state(t, me, False)
+                old_loader, _ = load_data(
+                    dataset_name=self.args.dataset[me], alpha=base_alpha,
+                    data_sampling_percentage=self.args.data_percentage,
+                    partition_id=self.client_id, num_partitions=self.args.total_clients + 1,
+                    batch_size=self.batch_size[me], fold_id=self.fold_id, partition_seed=partition_seed
+                )
+                target_loader, _ = load_data(
+                    dataset_name=self.args.dataset[me], alpha=target_alpha,
+                    data_sampling_percentage=self.args.data_percentage,
+                    partition_id=self.client_id, num_partitions=self.args.total_clients + 1,
+                    batch_size=self.batch_size[me], fold_id=self.fold_id, partition_seed=partition_seed
+                )
+                mixed_loader = self._mix_label_shift_loaders(old_loader, target_loader, label_progress, shuffle=False)
+                if self.data_shift_config[me]["type"] == "combined_shift" and concept_drift_window > 0:
+                    mixed_loader = self._apply_concept_drift_to_loader(
+                        mixed_loader, me, concept_drift_window, shuffle=False, shift_context="combined_shift"
+                    )
+                self.valloader[me] = mixed_loader
+                self.recent_trainloader[me] = copy.deepcopy(old_loader)
+                self.alpha_test[me] = target_alpha
+                self.partition_seed_test[me] = int(partition_seed)
+                if self.data_shift_config[me]["type"] == "combined_shift":
+                    self.concept_drift_window_test[me] = concept_drift_window
+                print(
+                    f"[GRADUAL DATA SHIFT - TEST] client={self.client_id} model={me} "
+                    f"round={t} label_progress={label_progress:.4f} "
+                    f"concept_progress={float(concept_drift_window):.4f}"
+                )
+                return self.p_ME, self.fc_ME, self.il_ME
+
+            # =========================================================
             # LABEL SHIFT
             # =========================================================
 
@@ -2231,89 +2489,28 @@ class MultiFedAvgClient:
             return 1, False
 
     def _get_current_alpha(self, server_round, me, train):
+        """Return the fixed target alpha and the transition-change flag.
+
+        For gradual label/combined shift, alpha itself is NOT interpolated.
+        The old and target partitions are mixed probabilistically by
+        ``_mix_label_shift_loaders``. This is a true gradual transition:
+        P_t(Y) is a mixture of the old and target local label distributions.
         """
-        Retorna o alpha atual.
-
-        Para cenários sudden:
-            alpha muda instantaneamente.
-
-        Para cenários gradual:
-            alpha é interpolado linearmente ao longo de
-            transition_window rodadas.
-        """
-
         try:
-
-            reference_alpha = (
-                self.alpha_train[me]
-                if train
-                else self.alpha_test[me]
+            reference = self.alpha_train[me] if train else self.alpha_test[me]
+            base, target, progress, progress_changed, gradual = self._get_label_shift_state(
+                server_round, me, train
             )
-
-            if self.data_shift_config == {}:
-                return reference_alpha, False
-
-            config = self.data_shift_config[me]
-
-            shift_rounds = config["data_shift_rounds"]
-            target_alphas = config["new_alphas"]
-
-            transition_window = config.get(
-                "transition_window",
-                1
-            )
-
-            alpha = None
-
-            initial_alpha = float(self.alpha_train[me])
-
-            for i, start_round in enumerate(shift_rounds):
-
-                target_alpha = float(target_alphas[i])
-
-                if "gradual" in self.experiment_id:
-
-                    end_round = start_round + transition_window
-
-                    if server_round < start_round:
-                        continue
-
-                    elif start_round <= server_round < end_round:
-
-                        progress = (
-                                (server_round - start_round)
-                                / transition_window
-                        )
-
-                        alpha = (
-                                initial_alpha
-                                + progress *
-                                (target_alpha - initial_alpha)
-                        )
-
-                        break
-
-                    else:
-                        alpha = target_alpha
-                        initial_alpha = target_alpha
-
-                else:
-
-                    if server_round >= start_round:
-                        alpha = target_alpha
-
-            if alpha is None:
-                alpha = initial_alpha
-
-            return alpha, abs(alpha - reference_alpha) > 1e-8
-
+            if not self.data_shift_config or self.data_shift_config[me].get("type") not in ("label_shift", "combined_shift"):
+                return reference, False
+            if gradual:
+                return target, progress_changed or abs(float(target) - float(reference)) > 1e-8
+            changed = abs(float(target) - float(reference)) > 1e-8
+            return target, changed
         except Exception as e:
             print(f"_get_current_alpha error {self.data_shift_config}")
-            print("""Error on line {} {} {}""".format(
-                sys.exc_info()[-1].tb_lineno,
-                type(e).__name__,
-                e
-            ))
+            print("Error on line {} {} {}".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+            return self.alpha_train[me] if train else self.alpha_test[me], False
 
     def _data_shift_flag(self, server_round, me, train):
 
@@ -2328,26 +2525,76 @@ class MultiFedAvgClient:
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def _check_concept_drift(self, server_round, me, train):
+        """Return the number of classes currently affected by concept drift.
 
+        Sudden drift activates the new concept for all classes at the change
+        point.  Gradual drift increases the concept-drift window from zero
+        affected classes to all classes over ``transition_window`` rounds.
+        The window therefore represents *how many classes are affected*, not
+        the strength of a transformation.
+        """
         try:
-            if self.data_shift_config == {} or self.data_shift_config[me]["type"] not in ("concept_drift", "combined_shift"):
+            if (self.data_shift_config == {} or
+                    self.data_shift_config[me]["type"] not in (
+                        "concept_drift", "combined_shift"
+                    )):
                 return 0, False
-            else:
-                reference_concept_drift_window = self.concept_drift_window_train[me] if train else self.concept_drift_window_test[me]
-                config = self.data_shift_config[me]
-                new_concept_drift_window = 0
-                flag = False
 
-                for i, round_ in enumerate(config["data_shift_rounds"]):
-                    if server_round >= round_:
-                        new_concept_drift_window = config["new_concept_drift_window"][i]
+            reference = (
+                self.concept_drift_window_train[me]
+                if train else self.concept_drift_window_test[me]
+            )
+            config = self.data_shift_config[me]
+            gradual = "gradual" in self.experiment_id
 
-                flag = new_concept_drift_window != reference_concept_drift_window
+            # Number of classes cannot be inferred from the config's
+            # ``new_concept_drift_window`` because the old config used 1 as
+            # an on/off marker.  For sudden/recurrent activation, the actual
+            # window is therefore all classes.  For gradual drift, the window
+            # grows from 0 to the number of local classes.
+            n_classes = int(self.n_classes[me])
+            current_window = 0
 
-                return new_concept_drift_window, flag
+            for i, start_round in enumerate(config.get("data_shift_rounds", [])):
+                if server_round < start_round:
+                    break
+
+                if gradual:
+                    # transition_window=0 is an explicit alias for sudden:
+                    # affect all classes immediately at the change point.
+                    w = int(config.get(
+                        "transition_window",
+                        self.label_shift_transition_window
+                    ))
+                    if w <= 0:
+                        current_window = n_classes
+                    else:
+                        progress = float(np.clip(
+                            (server_round - start_round) / float(w),
+                            0.0,
+                            1.0
+                        ))
+                        # At the end of the transition every class is affected.
+                        current_window = int(np.ceil(progress * n_classes))
+                else:
+                    # Existing sudden/recurrent configs use the window value
+                    # as an activation marker. Once active, affect all classes.
+                    marker = int(config.get(
+                        "new_concept_drift_window", [1]
+                    )[i])
+                    current_window = n_classes if marker > 0 else 0
+
+            changed = int(current_window) != int(reference)
+            return int(current_window), changed
+
         except Exception as e:
             print(f"_check_concept_drift error {self.data_shift_config}")
-            print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+            print("Error on line {} {} {}".format(
+                sys.exc_info()[-1].tb_lineno,
+                type(e).__name__,
+                e
+            ))
+            return 0, False
 
     def _get_models_size(self):
         try:
@@ -2640,6 +2887,3 @@ class MultiFedAvgClient:
                     e
                 )
             )
-
-
-
