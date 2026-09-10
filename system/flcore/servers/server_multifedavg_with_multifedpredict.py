@@ -44,7 +44,6 @@ from flwr.common import FitRes, NDArray, NDArrays, parameters_to_ndarrays
 from flwr.server.client_proxy import ClientProxy
 import torch
 import random
-from scipy.stats import ks_2samp
 
 from flwr.server.strategy.aggregate import aggregate, aggregate_inplace, weighted_loss_avg
 
@@ -187,26 +186,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             # The server never receives X, Y, P(Y), or P(X|Y).
             # ============================================================
 
-            self.gds = [
-                          0.0
-                      ] * self.ME
-
-            self.gds_pvalue = [
-                               1.0
-                           ] * self.ME
-
-            self.gds_pvalue_list = {
-                me: [] for me in range(self.ME)
-            }
-
-            self.gds_evidence_streak = [
-                                         0
-                                     ] * self.ME
-
-            self.gds_list = {
-                me: [] for me in range(self.ME)
-            }
-
             # ============================================================
             # DATA HETEROGENEITY
             #
@@ -332,21 +311,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             # Client-level generic-data-shift information
             # ============================================================
 
-            self.gds_clients = {
-                me: 0
-                for me in range(self.ME)
-            }
-
-            self.gds_rate = {
-                me: 0.0
-                for me in range(self.ME)
-            }
-
-            self.max_gds = {
-                me: 0.0
-                for me in range(self.ME)
-            }
-
             # ============================================================
             # Shift history
             # ============================================================
@@ -362,11 +326,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             }
 
             self.shift_ground_truth = {
-                me: []
-                for me in range(self.ME)
-            }
-
-            self.gds_rate_history = {
                 me: []
                 for me in range(self.ME)
             }
@@ -450,11 +409,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 for me in range(self.ME)
             }
 
-            self.gds = {
-                me: 0.0
-                for me in range(self.ME)
-            }
-
             self.similarity = {
                 me: 1.0
                 for me in range(self.ME)
@@ -485,11 +439,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             }
 
             self.ls_list = {
-                me: []
-                for me in range(self.ME)
-            }
-
-            self.gds_list = {
                 me: []
                 for me in range(self.ME)
             }
@@ -837,27 +786,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 for me in range(self.ME)
             }
 
-            gds_list = {
-                me: []
-                for me in range(self.ME)
-            }
-
             data_shift_score_list = {
-                me: []
-                for me in range(self.ME)
-            }
-
-            gds_client_ids = {
-                me: []
-                for me in range(self.ME)
-            }
-
-            gds_client_scores = {
-                me: []
-                for me in range(self.ME)
-            }
-
-            gds_client_pvalues = {
                 me: []
                 for me in range(self.ME)
             }
@@ -949,27 +878,10 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 # CD
                 # ========================================================
 
-                gds = float(
-                    non_iid.get(
-                        "gds",
-                        0.0
-                    )
-                )
-
-                gds = float(np.clip(gds, 0.0, 1.0))
-
-                gds_pvalue = float(
-                    non_iid.get(
-                        "gds_pvalue",
-                        1.0
-                    )
-                )
-                gds_pvalue = float(np.clip(gds_pvalue, 0.0, 1.0))
-
                 data_shift_score = float(
                     non_iid.get(
                         "data_shift_score",
-                        max(ls, gds)
+                        ls
                     )
                 )
                 data_shift_score = float(
@@ -985,12 +897,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 # ========================================================
 
                 num_participating_clients[me] += 1
-
-                gds_client_scores[me].append(gds)
-                gds_client_pvalues[me].append(gds_pvalue)
-
-                if gds_pvalue < 0.05:
-                    gds_client_ids[me].append(client_id)
 
                 # ========================================================
                 # Client metric history
@@ -1010,7 +916,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                         "il": None,
                         "similarity": None,
                         "ls": None,
-                        "gds": None
                     }
 
                 self.client_metrics[
@@ -1031,10 +936,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     client_id
                 ][me][alpha]["ls"] = ls
 
-                self.client_metrics[
-                    client_id
-                ][me][alpha]["gds"] = gds
-
                 # ========================================================
                 # Per-model lists
                 # ========================================================
@@ -1046,8 +947,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 ps_list[me].append(ps)
 
                 ls_list[me].append(ls)
-
-                gds_list[me].append(gds)
 
                 data_shift_score_list[me].append(
                     data_shift_score
@@ -1097,11 +996,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             )
 
             print(
-                "gds_list",
-                gds_list
-            )
-
-            print(
                 "num_samples_list",
                 num_samples_list
             )
@@ -1143,98 +1037,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     )
                 )
 
-                # ========================================================
-                # Aggregate CD
-                # ========================================================
-
-                self.gds[me] = (
-                    self._weighted_average(
-                        gds_list[me],
-                        num_samples_list[me]
-                    )
-                )
-
-                # ========================================================
-                # GENERAL DATA-SHIFT SCORE
-                #
-                # LS and CD remain available only as diagnostics.  The
-                # adaptation policy uses this single aggregated score.
-                # ========================================================
-
-                self.data_shift_score[me] = (
-                    self._weighted_average(
-                        data_shift_score_list[me],
-                        num_samples_list[me]
-                    )
-                )
-
-                self.data_shift_score_list[me].append(
-                    self.data_shift_score[me]
-                )
-
-                # Combine independent client-level p-values using Simes.
-                # The server receives only scalar evidence, never P(X|Y).
-                valid_pvalues = [
-                    p for p in gds_client_pvalues[me]
-                    if np.isfinite(p)
-                ]
-                if valid_pvalues:
-                    p_sorted = np.sort(np.asarray(valid_pvalues, dtype=float))
-                    m = float(len(p_sorted))
-                    self.gds_pvalue[me] = float(np.clip(
-                        np.min((m / np.arange(1.0, m + 1.0)) * p_sorted),
-                        0.0, 1.0))
-                else:
-                    self.gds_pvalue[me] = 1.0
-
-
-                # ========================================================
-                # Client-level CD statistics
-                # ========================================================
-
-                self.gds_clients[me] = len(
-                    gds_client_ids[me]
-                )
-
-                if num_participating_clients[me] > 0:
-
-                    self.gds_rate[me] = round(
-                        self.gds_clients[me]
-                        / num_participating_clients[me],
-                        3
-                    )
-
-                else:
-
-                    self.gds_rate[me] = 0.0
-
-                # ========================================================
-                # Maximum client-level CD score
-                # ========================================================
-
-                if len(gds_client_scores[me]) > 0:
-
-                    self.max_gds[me] = round(
-                        float(
-                            np.max(
-                                gds_client_scores[me]
-                            )
-                        ),
-                        3
-                    )
-
-                else:
-
-                    self.max_gds[me] = 0.0
-
-                # ========================================================
-                # Historical drift rate
-                # ========================================================
-
-                self.gds_rate_history[me].append(
-                    self.gds_rate[me]
-                )
-
                 self.similarity[me] = (
                     self._weighted_average(
                         similarity_list[me],
@@ -1270,9 +1072,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     self.ls[me]
                 )
 
-                self.gds_list[me].append(self.gds[me])
-                self.gds_pvalue_list[me].append(self.gds_pvalue[me])
-
                 self.heterogeneity_degree_list[
                     me
                 ].append(
@@ -1287,7 +1086,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     f"{self.similarity[me]} "
                     f"ps {self.ps[me]} "
                     f"ls {self.ls[me]} "
-                    f"gds {self.gds[me]} "
                     f"data_shift_score {self.data_shift_score[me]} "
                     f"heterogeneity_degree "
                     f"{self.heterogeneity_degree[me]}"
@@ -2193,14 +1991,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     "ls": self.ls[me],
 
                     # ----------------------------------------------------
-                    # Generic Data Shift
-                    # ----------------------------------------------------
-
-                    "gds": self.gds[me],
-
-                    "gds_pvalue": self.gds_pvalue[me],
-
-                    # ----------------------------------------------------
                     # Final general detector state
                     # ----------------------------------------------------
 
@@ -2220,7 +2010,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     f"{'DATA_SHIFT' if self.data_shift_detected[me] else 'NO_SHIFT'} "
                     f"score={self.data_shift_score[me]:.6f} "
                     f"LS={self.ls[me]:.6f} "
-                    f"GDS={self.gds[me]:.6f}"
                 )
 
                 for i in range(
@@ -2504,12 +2293,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
             metrics_aggregated[
                 me
-            ]["gds"] = (
-                self.gds[me]
-            )
-
-            metrics_aggregated[
-                me
             ]["ps"] = (
                 self.ps[me]
             )
@@ -2557,18 +2340,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
             metrics_aggregated[
                 me
-            ]["Drift clients"] = (
-                self.gds_clients[me]
-            )
-
-            metrics_aggregated[
-                me
-            ]["Drift rate"] = (
-                self.gds_rate[me]
-            )
-
-            metrics_aggregated[
-                me
             ]["Ground truth shift"] = (
                 self.shift_ground_truth_state[me][-1]
                 if len(
@@ -2585,13 +2356,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 f"score="
                 f"{self.data_shift_score[me]:.6f} | "
                 f"LS="
-                f"{self.ls[me]:.6f} | "
-                f"GDS="
-                f"{self.gds[me]:.6f} | "
-                f"Drift clients="
-                f"{self.gds_clients[me]} | "
-                f"Drift rate="
-                f"{self.gds_rate[me]}"
+                f"{self.ls[me]:.6f}"
             )
 
             # ============================================================
@@ -2785,8 +2550,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 "Ground Truth",
                 "Detection Event",
                 "Detector State",
-                "Drift Clients",
-                "Drift Rate",
             ],
             mode="w",
         )
@@ -2948,8 +2711,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     ground_truth,
                     self.detection_event[me],
                     detector_state,
-                    self.gds_clients[me],
-                    self.gds_rate[me],
                 ]]
 
                 self._write_rows(

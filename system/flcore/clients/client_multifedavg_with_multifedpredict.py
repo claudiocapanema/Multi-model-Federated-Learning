@@ -73,61 +73,6 @@ import torch
 import numpy as np
 from scipy.stats import ks_2samp
 
-
-def extract_from_loader(loader, key="image"):
-
-    X = []
-    y = []
-
-    for batch in loader:
-
-        x = batch[key].detach().cpu().numpy()
-        label = batch["label"].detach().cpu().numpy()
-
-        X.append(x.reshape(x.shape[0], -1))
-        y.append(label)
-
-    X = np.concatenate(X, axis=0)
-    y = np.concatenate(y, axis=0)
-
-    return X, y
-
-
-def detect_label_shift(y1, y2):
-    """
-    Detect label shift from the change in P(Y) between two local windows.
-
-    The returned statistic is the chi-square statistic from a 2 x C
-    contingency table. The p-value is used as statistical evidence; the
-    magnitude used by MultiFedPredict remains the Total Variation distance
-    computed from the class proportions.
-    """
-    y1 = np.asarray(y1).reshape(-1)
-    y2 = np.asarray(y2).reshape(-1)
-
-    classes = sorted(set(y1.tolist()) | set(y2.tolist()))
-    if len(classes) < 2 or len(y1) == 0 or len(y2) == 0:
-        return 0.0, 1.0
-
-    table = np.asarray([
-        [np.sum(y1 == c) for c in classes],
-        [np.sum(y2 == c) for c in classes],
-    ], dtype=np.int64)
-
-    if np.any(table.sum(axis=0) == 0):
-        table = table[:, table.sum(axis=0) > 0]
-
-    if table.shape[1] < 2:
-        return 0.0, 1.0
-
-    try:
-        stat, p, _, _ = chi2_contingency(table, correction=False)
-    except ValueError:
-        return 0.0, 1.0
-
-    return float(stat), float(p)
-
-
 def label_distribution_from_loader(loader, n_classes):
     """Return the local empirical P(Y) for one temporal data window."""
     counts = np.zeros(int(n_classes), dtype=np.float64)
@@ -148,146 +93,6 @@ def label_distribution_from_loader(loader, n_classes):
     if total == 0:
         return counts
     return counts / float(total)
-
-
-def _rbf_kernel_matrix(x, y, sigma):
-    """Compute an RBF kernel matrix using squared Euclidean distances."""
-    x = np.asarray(x, dtype=np.float32)
-    y = np.asarray(y, dtype=np.float32)
-    if x.ndim != 2 or y.ndim != 2 or x.shape[1] != y.shape[1]:
-        return np.empty((0, 0), dtype=np.float64)
-    x2 = np.sum(x * x, axis=1, keepdims=True)
-    y2 = np.sum(y * y, axis=1, keepdims=True).T
-    dist2 = np.maximum(x2 + y2 - 2.0 * np.dot(x, y.T), 0.0)
-    return np.exp(-dist2 / (2.0 * max(float(sigma) ** 2, 1e-12)))
-
-
-def _median_heuristic_sigma(x, y):
-    """Robust RBF bandwidth selected from pooled pairwise distances."""
-    from scipy.spatial.distance import pdist
-    pooled = np.concatenate([x, y], axis=0)
-    if len(pooled) < 2:
-        return 1.0
-    distances = pdist(pooled, metric="euclidean")
-    distances = distances[np.isfinite(distances) & (distances > 1e-12)]
-    if len(distances) == 0:
-        return 1.0
-    sigma = float(np.median(distances))
-    return max(sigma, 1e-6)
-
-
-def _mmd2_unbiased(x, y, sigma):
-    """Unbiased squared MMD with an RBF kernel."""
-    x = np.asarray(x, dtype=np.float32)
-    y = np.asarray(y, dtype=np.float32)
-    nx, ny = len(x), len(y)
-    if nx < 2 or ny < 2 or x.shape[1] != y.shape[1]:
-        return 0.0
-
-    kxx = _rbf_kernel_matrix(x, x, sigma)
-    kyy = _rbf_kernel_matrix(y, y, sigma)
-    kxy = _rbf_kernel_matrix(x, y, sigma)
-
-    np.fill_diagonal(kxx, 0.0)
-    np.fill_diagonal(kyy, 0.0)
-
-    term_xx = np.sum(kxx) / (nx * (nx - 1))
-    term_yy = np.sum(kyy) / (ny * (ny - 1))
-    term_xy = 2.0 * np.mean(kxy)
-    return float(max(term_xx + term_yy - term_xy, 0.0))
-
-
-def _mmd_effect_and_pvalue(xa, xb, random_seed=42, n_permutations=100):
-    """Generic distribution-shift evidence using RBF-MMD.
-
-    The effect is normalized to [0,1] and the p-value is obtained from a
-    permutation null distribution. No labels or shift type are required.
-    """
-    xa = np.asarray(xa, dtype=np.float32)
-    xb = np.asarray(xb, dtype=np.float32)
-    if xa.ndim != 2 or xb.ndim != 2 or len(xa) < 10 or len(xb) < 10:
-        return 0.0, 1.0
-    if xa.shape[1] != xb.shape[1]:
-        return 0.0, 1.0
-
-    sigma = _median_heuristic_sigma(xa, xb)
-    observed = _mmd2_unbiased(xa, xb, sigma)
-
-    # Convert MMD^2 to a bounded effect-size-like score.  Under an RBF
-    # kernel, MMD^2 is naturally bounded by a small multiple of one; this
-    # transformation preserves ordering while avoiding dataset-specific
-    # raw-distance scales.
-    effect = float(np.clip(np.sqrt(max(observed, 0.0)), 0.0, 1.0))
-
-    rng = np.random.RandomState(random_seed)
-    pooled = np.concatenate([xa, xb], axis=0)
-    n_a = len(xa)
-    observed_count = 0
-    n_total = len(pooled)
-
-    for _ in range(int(n_permutations)):
-        idx = rng.permutation(n_total)
-        perm_a = pooled[idx[:n_a]]
-        perm_b = pooled[idx[n_a:]]
-        stat = _mmd2_unbiased(perm_a, perm_b, sigma)
-        if stat >= observed - 1e-12:
-            observed_count += 1
-
-    p_value = float((observed_count + 1.0) / (int(n_permutations) + 1.0))
-    return effect, p_value
-
-
-def extract_features_from_loader(
-        loader,
-        key="image",
-        max_samples=512,
-        random_seed=42
-):
-    """Extract an unlabeled sample of X from a temporal local data window."""
-    if loader is None:
-        return np.empty((0, 0), dtype=np.float32)
-
-    features = []
-    total = 0
-    for batch in loader:
-        if not isinstance(batch, dict) or key not in batch:
-            continue
-        x = batch[key]
-        if not isinstance(x, torch.Tensor):
-            x = torch.as_tensor(x)
-        x = x.detach().cpu().numpy()
-        if x.ndim == 0:
-            continue
-        x = x.reshape(x.shape[0], -1).astype(np.float32, copy=False)
-        features.append(x)
-        total += len(x)
-
-    if not features:
-        return np.empty((0, 0), dtype=np.float32)
-
-    x = np.concatenate(features, axis=0)
-    if len(x) > int(max_samples):
-        rng = np.random.RandomState(random_seed)
-        idx = rng.choice(len(x), size=int(max_samples), replace=False)
-        x = x[idx]
-    return x
-
-
-def _compact_features(x, n_components=32, random_seed=42):
-    """Project high-dimensional inputs to a deterministic compact space."""
-    x = np.asarray(x, dtype=np.float32)
-    if x.ndim != 2 or len(x) == 0:
-        return x
-    d = x.shape[1]
-    if d <= int(n_components):
-        return x
-    rng = np.random.RandomState(random_seed)
-    projection = rng.normal(
-        0.0, 1.0, size=(d, int(n_components))
-    ).astype(np.float32)
-    projection /= np.sqrt(float(n_components))
-    return x @ projection
-
 
 def _make_sample_loader(loader, fraction=0.20, random_seed=42):
     """Create a deterministic random subset loader containing ``fraction``
@@ -323,313 +128,6 @@ def _make_sample_loader(loader, fraction=0.20, random_seed=42):
         drop_last=False,
         pin_memory=getattr(loader, "pin_memory", False),
     )
-
-
-def _performance_from_loader(model, loader, device, dataset_name, n_classes):
-    """Evaluate one model on a loader and return balanced accuracy."""
-    if loader is None or len(loader.dataset) == 0:
-        return 0.0, np.empty(0, dtype=np.int8), np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64)
-
-    key = {
-        "CIFAR10": "img",
-        "MNIST": "image",
-        "EMNIST": "image",
-        "GTSRB": "image",
-        "Gowalla": "sequence",
-        "WISDM-W": "sequence",
-        "ImageNet": "image",
-        "ImageNet10": "image",
-        "wikitext": "sequence",
-        "Foursquare": "sequence",
-    }[dataset_name]
-
-    model.eval()
-    model.to(device)
-    y_true = []
-    y_pred = []
-
-    with torch.no_grad():
-        for batch in loader:
-            x = batch[key].to(device)
-            labels = batch["label"].to(device)
-            outputs = model(x)
-            predictions = torch.argmax(outputs, dim=1)
-            y_true.append(labels.detach().cpu().numpy())
-            y_pred.append(predictions.detach().cpu().numpy())
-
-    y_true = np.concatenate(y_true).astype(np.int64)
-    y_pred = np.concatenate(y_pred).astype(np.int64)
-    score = float(metrics.balanced_accuracy_score(y_true, y_pred))
-    correct = (y_true == y_pred).astype(np.int8)
-    return score, correct, y_true, y_pred
-
-
-def _bootstrap_performance_drop_pvalue(
-        old_true,
-        old_pred,
-        current_true,
-        current_pred,
-        random_seed=42,
-        n_bootstrap=200
-):
-    """Estimate significance of a balanced-accuracy performance drop."""
-    old_true = np.asarray(old_true).reshape(-1)
-    old_pred = np.asarray(old_pred).reshape(-1)
-    current_true = np.asarray(current_true).reshape(-1)
-    current_pred = np.asarray(current_pred).reshape(-1)
-
-    if min(len(old_true), len(current_true)) < 10:
-        return 1.0
-
-    rng = np.random.RandomState(int(random_seed))
-    drops = np.empty(int(n_bootstrap), dtype=np.float64)
-
-    for i in range(int(n_bootstrap)):
-        old_idx = rng.randint(0, len(old_true), size=len(old_true))
-        current_idx = rng.randint(0, len(current_true), size=len(current_true))
-
-        old_score = metrics.balanced_accuracy_score(
-            old_true[old_idx], old_pred[old_idx]
-        )
-        current_score = metrics.balanced_accuracy_score(
-            current_true[current_idx], current_pred[current_idx]
-        )
-        drops[i] = old_score - current_score
-
-    # One-sided bootstrap evidence for a positive degradation.
-    return float(
-        (np.sum(drops <= 0.0) + 1.0) / (len(drops) + 1.0)
-    )
-
-# ============================================================
-# Adaptive GDS performance-drop threshold based on CURRENT DH
-# ============================================================
-# Observed DH range in the datasets: 27%--74%.
-# The threshold increases linearly from 20% to 50%.
-GDS_DH_MIN = 0.27
-GDS_DH_MAX = 0.74
-GDS_MIN_PERFORMANCE_DROP_MIN = 0.25
-GDS_MIN_PERFORMANCE_DROP_MAX = 0.35
-
-
-def get_adaptive_min_performance_drop(dh):
-    """Map the current local DH to the GDS relative-drop threshold."""
-    try:
-        dh = float(dh)
-        # Accept either [0, 1] values or percentage values such as 27--74.
-        if dh > 1.0:
-            dh /= 100.0
-
-        dh = float(np.clip(dh, GDS_DH_MIN, GDS_DH_MAX))
-        normalized_dh = (dh - GDS_DH_MIN) / (GDS_DH_MAX - GDS_DH_MIN)
-
-        threshold = (
-            GDS_MIN_PERFORMANCE_DROP_MIN
-            + normalized_dh
-            * (GDS_MIN_PERFORMANCE_DROP_MAX - GDS_MIN_PERFORMANCE_DROP_MIN)
-        )
-        return float(np.clip(
-            threshold,
-            GDS_MIN_PERFORMANCE_DROP_MIN,
-            GDS_MIN_PERFORMANCE_DROP_MAX
-        ))
-    except Exception:
-        return GDS_MIN_PERFORMANCE_DROP_MIN
-
-
-def detect_generic_data_shift(
-        model,
-        old_loader,
-        current_loader,
-        device,
-        dataset_name,
-        n_classes,
-        min_performance_drop=0.20,
-        alpha=0.05,
-        n_bootstrap=200,
-        random_seed=42
-):
-    """
-    Detect generic data shift from relative model-performance degradation.
-
-    The same combined model is evaluated on a sample of the previous
-    training window and a sample of the current training window.
-
-    A generic shift is reported only when:
-
-        1. The relative performance reduction is at least
-           ``min_performance_drop``; and
-
-        2. The performance degradation is statistically significant
-           according to the bootstrap p-value.
-
-    The relative performance reduction is defined as:
-
-        relative_drop =
-            max(old_score - current_score, 0) / old_score
-
-    Therefore, ``min_performance_drop=0.20`` means that the current
-    balanced accuracy must be at least 20% lower than the previous
-    balanced accuracy.
-
-    Example:
-
-        old_score = 0.90
-        current_score = 0.72
-
-        absolute_drop = 0.18
-        relative_drop = 0.18 / 0.90 = 0.20
-
-    In this case, the practical degradation threshold is satisfied.
-
-    The bootstrap is used only to determine whether the observed
-    performance degradation is statistically significant. It does
-    not determine the magnitude of the practical degradation.
-    """
-
-    try:
-        # ------------------------------------------------------------
-        # Evaluate the same combined model on the previous window
-        # and on the current window.
-        # ------------------------------------------------------------
-        old_score, _, old_true, old_pred = _performance_from_loader(
-            model,
-            old_loader,
-            device,
-            dataset_name,
-            n_classes
-        )
-
-        current_score, _, current_true, current_pred = (
-            _performance_from_loader(
-                model,
-                current_loader,
-                device,
-                dataset_name,
-                n_classes
-            )
-        )
-
-        # ------------------------------------------------------------
-        # Insufficient data for a reliable comparison.
-        # ------------------------------------------------------------
-        if len(old_true) < 10 or len(current_true) < 10:
-            return (
-                0.0,
-                1.0,
-                old_score,
-                current_score
-            )
-
-        # ------------------------------------------------------------
-        # Absolute performance degradation.
-        #
-        # This is retained for diagnostics and interpretation, but
-        # it is NOT the threshold used to determine the shift.
-        # ------------------------------------------------------------
-        absolute_drop = float(
-            max(old_score - current_score, 0.0)
-        )
-
-        # ------------------------------------------------------------
-        # Relative performance degradation.
-        #
-        # Example:
-        #
-        # old_score = 0.80
-        # current_score = 0.64
-        #
-        # relative_drop = (0.80 - 0.64) / 0.80
-        #                = 0.20
-        #
-        # Therefore, this represents a 20% reduction.
-        # ------------------------------------------------------------
-        if old_score > 1e-12:
-            relative_drop = float(
-                absolute_drop / old_score
-            )
-        else:
-            relative_drop = 0.0
-
-        # Numerical safety.
-        relative_drop = float(
-            np.clip(relative_drop, 0.0, 1.0)
-        )
-
-        # ------------------------------------------------------------
-        # Bootstrap statistical significance test.
-        #
-        # The bootstrap estimates whether the observed degradation
-        # can reasonably be explained by sampling variability.
-        #
-        # IMPORTANT:
-        # The bootstrap p-value is independent of the practical
-        # relative-drop threshold above.
-        # ------------------------------------------------------------
-        p_value = _bootstrap_performance_drop_pvalue(
-            old_true,
-            old_pred,
-            current_true,
-            current_pred,
-            random_seed=random_seed,
-            n_bootstrap=n_bootstrap
-        )
-
-        # ------------------------------------------------------------
-        # Generic data shift is detected only when BOTH conditions
-        # are satisfied:
-        #
-        #   1. Relative degradation >= threshold
-        #   2. Bootstrap p-value < alpha
-        #
-        # Thus, with min_performance_drop=0.20:
-        #
-        #       current_score <= 0.80 * old_score
-        #
-        # AND:
-        #
-        #       p_value < 0.05
-        # ------------------------------------------------------------
-        detected = (
-            relative_drop >= float(min_performance_drop)
-            and p_value < float(alpha)
-        )
-
-        # ------------------------------------------------------------
-        # Return the RELATIVE degradation as the GDS score.
-        #
-        # Previously this returned the absolute difference
-        # old_score - current_score. Now it returns:
-        #
-        #       (old_score - current_score) / old_score
-        #
-        # whenever the shift is detected.
-        # ------------------------------------------------------------
-        return (
-            relative_drop if detected else 0.0,
-            p_value,
-            old_score,
-            current_score
-        )
-
-    except Exception as e:
-        print("detect_generic_data_shift error")
-        print(
-            "Error on line {} {} {}".format(
-                sys.exc_info()[-1].tb_lineno,
-                type(e).__name__,
-                e
-            )
-        )
-
-        return (
-            0.0,
-            1.0,
-            0.0,
-            0.0
-        )
-
-
 
 class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
     def __init__(self, args, id, model, fold_id):
@@ -707,10 +205,6 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             self.data_shift_reference_window = [0] * self.ME
             self.data_shift_reference_label_distribution = [None] * self.ME
 
-            self.gds_score = [0.0] * self.ME
-            self.gds_pvalue = [1.0] * self.ME
-            self.gds_old_performance = [0.0] * self.ME
-            self.gds_current_performance = [0.0] * self.ME
 
         except Exception as e:
             print("__init__ error")
@@ -742,8 +236,31 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             # ------------------------------------------------------------
             set_weights(self.model[me], global_model)
 
+            # Save the previous local class-distribution vector before the
+            # temporal training window is updated. PS measures the change
+            # between consecutive windows.
+            p_old = None
+            if self.p_ME[me] is not None:
+                p_old = np.asarray(copy.deepcopy(self.p_ME[me]), dtype=float).flatten()
+
             if t > 1:
                 self.update_local_train_data(t, me)
+
+            p_current = None
+            if self.p_ME[me] is not None:
+                p_current = np.asarray(copy.deepcopy(self.p_ME[me]), dtype=float).flatten()
+
+            if (
+                    t > 1
+                    and p_old is not None
+                    and p_current is not None
+                    and p_old.shape == p_current.shape
+            ):
+                similarity = float(np.clip(cosine_similarity(p_current, p_old), 0.0, 1.0))
+                ps = float(np.clip(1.0 - similarity, 0.0, 1.0))
+            else:
+                similarity = 1.0
+                ps = 0.0
 
             current_loader = self.trainloader[me]
 
@@ -759,9 +276,6 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                     0.0,
                     1.0
                 )
-            )
-            adaptive_min_performance_drop = get_adaptive_min_performance_drop(
-                current_dh
             )
 
             # ------------------------------------------------------------
@@ -794,32 +308,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                     1.0
                 ))
 
-            # ------------------------------------------------------------
-            # Data-shift evidence is evaluated by the SERVER.
-            # The previous local GDS detector is intentionally not used
-            # for the final data-shift decision.
-            # The combined-model accuracy used by the server detector is
-            # computed later in evaluate(), after the combined model has
-            # been obtained and saved there, preserving the original
-            # MultiFedPredict flow.
-            # ------------------------------------------------------------
-            gds = 0.0
-            gds_pvalue = 1.0
-            old_performance = 0.0
-            current_performance = 0.0
 
-            self.gds_score[me] = gds
-            self.gds_pvalue[me] = gds_pvalue
-            self.gds_old_performance[me] = old_performance
-            self.gds_current_performance[me] = current_performance
-
-            # ------------------------------------------------------------
-            # Existing PS/similarity behavior is preserved.
-            # ------------------------------------------------------------
-            p_old = np.asarray(copy.deepcopy(self.p_ME[me]), dtype=float).flatten()
-            p_current = np.asarray(copy.deepcopy(self.p_ME[me]), dtype=float).flatten()
-            similarity = min(cosine_similarity(p_current, p_old), 1.0)
-            ps = 1.0 - similarity
 
             # Kept only for backward-compatible logging. The server
             # detector no longer uses this combined score.
@@ -870,12 +359,6 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 "similarity": similarity,
                 "ps": ps,
                 "ls": ls,
-                "gds": gds,
-                "gds_pvalue": gds_pvalue,
-                "gds_old_performance": old_performance,
-                "gds_current_performance": current_performance,
-                "gds_current_dh": current_dh,
-                "gds_min_performance_drop": adaptive_min_performance_drop,
                 "data_shift_score": data_shift_score
             }
 
@@ -953,12 +436,6 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 )
             )
 
-            gds = float(
-                metrics.get(
-                    "gds",
-                    0.0
-                )
-            )
 
             # Kept only for backward compatibility.
             ps = float(
@@ -977,16 +454,6 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 )
             )
 
-            # Generic-data-shift p-value is produced during fit() and may be
-            # useful for diagnostics only.  It MUST be read from the
-            # server metrics here; evaluate() has no local gds_pvalue
-            # variable.  This fixes the previous NameError.
-            gds_pvalue = float(
-                metrics.get(
-                    "gds_pvalue",
-                    1.0
-                )
-            )
 
             similarity_local = cosine_similarity(
                 self.p_ME[me],
@@ -1107,7 +574,6 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 f"il={il} "
                 f"dh={data_heterogeneity_degree} "
                 f"ls={ls} "
-                f"gds={gds} "
                 f"ps={ps} "
                 f"nt={nt} "
                 f"data_shift={'DATA_SHIFT' if data_shift_detected else 'NO_SHIFT'}"
