@@ -836,951 +836,365 @@ class MultiFedAvgClient:
         state[me] = progress
         return base, target, progress, changed, gradual
 
+    def _get_gradual_concept_drift_classes(self, me, progress):
+        """Return the globally affected class IDs for gradual concept drift.
+
+        ``progress`` is the temporal transition progress in [0, 1].  The
+        number of affected classes is computed from the GLOBAL class set, not
+        from each client's local class coverage.  Thus all clients observe the
+        same class-level drift schedule.
+        """
+        n_classes = int(self.n_classes[me])
+        progress = float(np.clip(progress, 0.0, 1.0))
+        if n_classes <= 0 or progress <= 0.0:
+            return set()
+        if progress >= 1.0:
+            n_affected = n_classes
+        else:
+            # Nearest integer gives the closest realizable global class
+            # fraction (e.g., 20% of 10 classes = 2 classes).
+            n_affected = int(np.floor(progress * n_classes + 0.5))
+        n_affected = max(0, min(n_classes, n_affected))
+        if n_affected == 0:
+            return set()
+
+        # Deterministic GLOBAL ordering: deliberately independent of client_id.
+        seed = 42 + int(me) * 1009 + int(self.fold_id) * 9176 + 1543
+        rng = np.random.RandomState(seed)
+        class_order = np.arange(n_classes, dtype=np.int64)
+        rng.shuffle(class_order)
+        return {int(c) for c in class_order[:n_affected]}
+
     def _apply_concept_drift_to_loader(
             self,
             loader,
             me,
-            concept_drift_window,
+            concept_drift_fraction,
             shuffle=False,
-            shift_context="concept_drift"
+            shift_context="concept_drift",
+            affected_classes=None
     ):
+        """Apply concept drift while preserving P(Y).
+
+        For gradual concept drift, ``affected_classes`` contains the GLOBAL
+        class IDs that have already transitioned to the new concept. Every
+        local sample belonging to an affected class is transformed completely;
+        unaffected classes remain unchanged. Labels are never modified, so P(Y)
+        is preserved.
+
+        ``concept_drift_fraction`` is retained for sudden/recurrent callers.
+        When ``affected_classes`` is provided, the fraction is ignored and the
+        transformation is performed at class level.
         """
-        Apply concept drift by changing P(X|Y) while preserving P(Y).
-
-        Conceptual operation:
-
-            BEFORE:
-                (X_i, Y_i)
-
-            AFTER:
-                (X'_i, Y_i)
-
-        where X'_i is an original sample X_j coming from a different
-        class than Y_i.
-
-        Therefore:
-
-            P_after(Y) = P_before(Y)
-
-        while:
-
-            P_after(X|Y) != P_before(X|Y)
-
-        The labels are NEVER modified and the individual input tensors
-        are NEVER transformed (no flip, noise, scaling, rotation, etc.).
-
-        Instead, inputs are reassigned between class positions.
-
-        The drift intensity is controlled by concept_drift_window:
-
-            window = 0 -> original loader
-            window > 0 -> progressively stronger reassignment
-
-        At the maximum intensity, the inputs are redistributed across
-        all class positions using a cyclic class permutation.
-
-        This implementation always starts from the original loader, so
-        recurrent transitions such as:
-
-            0 -> 1 -> 0 -> 1
-
-        do not accumulate transformations.
-        """
-
         try:
-
-            # ================================================================
-            # VALIDATION
-            # ================================================================
-
-            if loader is None:
+            if loader is None or concept_drift_fraction is None:
                 return loader
 
-            if concept_drift_window is None:
+            fraction = float(np.clip(concept_drift_fraction, 0.0, 1.0))
+            if affected_classes is None and fraction <= 0.0:
                 return loader
 
-            concept_drift_window = float(concept_drift_window)
-
-            # No drift
-            if concept_drift_window <= 0:
-                return loader
+            if affected_classes is not None:
+                affected_classes = {int(c) for c in affected_classes}
+                if not affected_classes:
+                    return loader
 
             dataset_name = self.args.dataset[me]
-
-            input_key = DATASET_INPUT_MAP.get(
-                dataset_name
-            )
-
+            input_key = DATASET_INPUT_MAP.get(dataset_name)
             if input_key is None:
-                raise ValueError(
-                    f"Unknown input key for dataset "
-                    f"{dataset_name}"
-                )
-
-            # ================================================================
-            # EXTRACT COMPLETE SAMPLES
-            # ================================================================
+                raise ValueError(f"Unknown input key for dataset {dataset_name}")
 
             samples = []
-
             for batch in loader:
-
                 if not isinstance(batch, dict):
-                    raise TypeError(
-                        "Expected DataLoader batches to be dictionaries."
-                    )
-
+                    raise TypeError("Expected DataLoader batches to be dictionaries.")
                 if "label" not in batch:
-                    raise KeyError(
-                        f"'label' not found in batch for "
-                        f"dataset={dataset_name}"
-                    )
-
+                    raise KeyError(f"'label' not found in batch for dataset={dataset_name}")
                 if input_key not in batch:
-                    raise KeyError(
-                        f"Input key '{input_key}' not found in batch "
-                        f"for dataset={dataset_name}"
-                    )
+                    raise KeyError(f"Input key '{input_key}' not found in batch for dataset={dataset_name}")
 
                 batch_size = batch["label"].shape[0]
-
                 for i in range(batch_size):
-
                     sample = {}
-
                     for key, value in batch.items():
-
                         if isinstance(value, torch.Tensor):
-
-                            sample[key] = (
-                                value[i]
-                                .detach()
-                                .cpu()
-                                .clone()
-                            )
-
-                        elif hasattr(
-                                value,
-                                "__getitem__"
-                        ):
-
+                            sample[key] = value[i].detach().cpu().clone()
+                        elif hasattr(value, "__getitem__"):
                             try:
-                                sample[key] = copy.deepcopy(
-                                    value[i]
-                                )
+                                sample[key] = copy.deepcopy(value[i])
                             except Exception:
-                                sample[key] = copy.deepcopy(
-                                    value
-                                )
-
+                                sample[key] = copy.deepcopy(value)
                         else:
-
-                            sample[key] = copy.deepcopy(
-                                value
-                            )
-
+                            sample[key] = copy.deepcopy(value)
                     samples.append(sample)
 
-            if len(samples) == 0:
+            if not samples:
                 return loader
 
-            # ================================================================
-            # ORIGINAL LABELS
-            # ================================================================
+            labels = np.asarray([
+                int(sample["label"].item())
+                if isinstance(sample["label"], torch.Tensor)
+                else int(sample["label"])
+                for sample in samples
+            ], dtype=np.int64)
 
-            labels = np.asarray(
-                [
-                    int(
-                        sample["label"].item()
-                        if isinstance(
-                            sample["label"],
-                            torch.Tensor
-                        )
-                        else sample["label"]
-                    )
-                    for sample in samples
-                ],
-                dtype=np.int64
-            )
-
-            # ================================================================
-            # VALIDATE LABELS
-            # ================================================================
-
-            n_classes = int(
-                self.n_classes[me]
-            )
-
-            invalid_labels = sorted(
-                set(
-                    int(label)
-                    for label in labels
-                    if (
-                            label < 0
-                            or label >= n_classes
-                    )
-                )
-            )
-
+            n_classes = int(self.n_classes[me])
+            invalid_labels = sorted(set(
+                int(label) for label in labels
+                if label < 0 or label >= n_classes
+            ))
             if invalid_labels:
                 raise ValueError(
-                    f"Invalid labels during concept drift: "
-                    f"client={self.client_id}, "
-                    f"model={me}, "
-                    f"dataset={dataset_name}, "
-                    f"n_classes={n_classes}, "
+                    f"Invalid labels during concept drift: client={self.client_id}, "
+                    f"model={me}, dataset={dataset_name}, n_classes={n_classes}, "
                     f"invalid={invalid_labels}"
                 )
 
-            # ================================================================
-            # CLASS INDICES
-            # ================================================================
-
-            class_indices = {}
-
-            for class_id in range(n_classes):
-                indices = np.where(
-                    labels == class_id
-                )[0]
-
-                class_indices[class_id] = (
-                    indices.tolist()
-                )
-
-            present_classes = [
-                class_id
+            class_indices = {
+                class_id: np.where(labels == class_id)[0].tolist()
                 for class_id in range(n_classes)
-                if len(class_indices[class_id]) > 0
-            ]
-
-            # A concept drift based on class reassignment requires
-            # at least two classes.
+            }
+            present_classes = [c for c in range(n_classes) if class_indices[c]]
             if len(present_classes) < 2:
-                print(
-                    f"[CONCEPT DRIFT] "
-                    f"client={self.client_id} "
-                    f"model={me} "
-                    f"dataset={dataset_name} "
-                    f"window={concept_drift_window} "
-                    f"skipped: only one class present"
-                )
-
                 return loader
 
-            # ================================================================
-            # DETERMINISTIC RANDOM GENERATOR
-            # ================================================================
-
+            # Stable randomness: the same class-level transformation is used
+            # across clients and across rounds.  This is important for gradual
+            # drift: a class that has transitioned must stay transitioned, while
+            # newly affected classes are added to the global set.
             seed = (
-                    42
-                    + int(self.client_id) * 100003
-                    + int(me) * 1009
-                    + int(concept_drift_window) * 65537
+                42
+                + int(me) * 1009
+                + int(self.fold_id) * 9176
+                + 7919
             )
-
             rng = np.random.RandomState(seed)
 
-            # ================================================================
-            # GRADUAL CONCEPT DRIFT: WINDOW = NUMBER OF AFFECTED CLASSES
-            #
-            # The gradual transition is defined over classes, not by
-            # continuously changing the strength of the transformation.
-            # For k affected classes, ALL samples whose label belongs to one
-            # of those k classes are exposed to the new concept.
-            #
-            # The selected classes are cumulative: the set for window=k is
-            # always a subset of the set for window=k+1.  This is essential
-            # for a true gradual transition from a few affected classes to
-            # all classes.
-            # ================================================================
+            if affected_classes is not None:
+                # ---------------------------------------------------------
+                # GLOBAL CLASS-LEVEL GRADUAL CONCEPT DRIFT
+                # ---------------------------------------------------------
+                # All samples of every affected class are transformed.
+                # The same global class IDs are therefore used by every client;
+                # clients simply ignore classes that are absent locally.
+                target_by_class = {
+                    c: list(class_indices[c])
+                    for c in present_classes
+                    if c in affected_classes
+                }
+                if not target_by_class:
+                    return loader
 
-            n_drift_classes = int(np.clip(
-                round(concept_drift_window),
-                0,
-                len(present_classes)
-            ))
+                source_classes = present_classes.copy()
+                rng.shuffle(source_classes)
 
-            if n_drift_classes == 0:
-                return loader
+                # Each affected target class receives X from another class.
+                # A cyclic permutation guarantees source_class != target_class
+                # whenever at least two local classes are present. Sampling with
+                # replacement is allowed because class sizes can differ.
+                if len(source_classes) < 2:
+                    return loader
 
-            # Use a seed independent of the current window so that the
-            # permutation of classes is stable across the transition.
-            class_seed = (
-                42
-                + int(self.client_id) * 100003
-                + int(me) * 1009
-            )
-            class_rng = np.random.RandomState(class_seed)
-            ordered_classes = present_classes.copy()
-            class_rng.shuffle(ordered_classes)
-            drift_classes = set(ordered_classes[:n_drift_classes])
+                source_for_target = {
+                    source_classes[i]: source_classes[(i + 1) % len(source_classes)]
+                    for i in range(len(source_classes))
+                }
 
-            # ================================================================
-            # CREATE OUTPUT DATASET
-            #
-            # Labels remain EXACTLY in their original positions.
-            # ================================================================
-
-            shifted_samples = [
-                copy.deepcopy(sample)
-                for sample in samples
-            ]
-
-            # ================================================================
-            # BUILD CROSS-CLASS CANDIDATE POOLS
-            #
-            # For every target class Y=c, candidates come from samples
-            # whose ORIGINAL label is different from c.
-            #
-            # This guarantees that reassigned X comes from another class.
-            # ================================================================
-
-            candidate_indices = {}
-
-            for target_class in present_classes:
-
-                candidates = []
-
-                for source_class in present_classes:
-
-                    if source_class == target_class:
+                assignments = []
+                for target_class, target_indices in target_by_class.items():
+                    source_class = source_for_target[target_class]
+                    source_indices = np.asarray(class_indices[source_class], dtype=np.int64)
+                    if len(source_indices) == 0:
                         continue
-
-                    candidates.extend(
-                        class_indices[source_class]
+                    sampled_sources = rng.choice(
+                        source_indices, size=len(target_indices), replace=True
                     )
-
-                if len(candidates) == 0:
-                    raise RuntimeError(
-                        f"No cross-class samples available for "
-                        f"class={target_class}"
+                    assignments.extend(
+                        (int(target_idx), int(source_idx), target_class, source_class)
+                        for target_idx, source_idx in zip(target_indices, sampled_sources)
                     )
+            else:
+                # ---------------------------------------------------------
+                # EXISTING SUDDEN/RECURRENT SAMPLE-LEVEL BEHAVIOR
+                # ---------------------------------------------------------
+                selected_by_class = {}
+                selected_targets = []
+                for class_id in present_classes:
+                    indices = np.asarray(class_indices[class_id], dtype=np.int64)
+                    n_selected = int(round(fraction * len(indices)))
+                    if fraction > 0.0 and n_selected == 0 and len(indices) > 0:
+                        n_selected = 1
+                    n_selected = min(n_selected, len(indices))
+                    if n_selected > 0:
+                        chosen = rng.choice(indices, size=n_selected, replace=False)
+                        chosen = np.asarray(chosen, dtype=np.int64)
+                        selected_by_class[class_id] = chosen.tolist()
+                        selected_targets.extend((int(idx), class_id) for idx in chosen)
+                    else:
+                        selected_by_class[class_id] = []
 
-                candidate_indices[target_class] = (
-                    np.asarray(
-                        candidates,
-                        dtype=np.int64
-                    )
-                )
+                if not selected_targets:
+                    return loader
 
-            # ================================================================
-            # SELECT TARGET POSITIONS
-            #
-            # The number of selected positions is proportional to the
-            # original number of samples in each class.
-            #
-            # Importantly, we never change the label at those positions.
-            # ================================================================
+                source_by_class = {
+                    class_id: selected_by_class[class_id].copy()
+                    for class_id in present_classes
+                }
+                for class_id in present_classes:
+                    rng.shuffle(source_by_class[class_id])
 
-            target_positions = {}
+                class_order = present_classes.copy()
+                rng.shuffle(class_order)
+                if len(class_order) > 1:
+                    target_to_source_class = {
+                        class_order[i]: class_order[(i + 1) % len(class_order)]
+                        for i in range(len(class_order))
+                    }
+                else:
+                    return loader
 
-            total_shifted = 0
+                available_sources = {
+                    c: list(source_by_class[c]) for c in present_classes
+                }
+                for c in present_classes:
+                    rng.shuffle(available_sources[c])
 
-            for target_class in present_classes:
+                assignments = []
+                selected_targets_by_class = {
+                    c: list(selected_by_class[c]) for c in present_classes
+                }
+                for c in present_classes:
+                    rng.shuffle(selected_targets_by_class[c])
 
-                original_positions = np.asarray(
-                    class_indices[target_class],
-                    dtype=np.int64
-                )
+                pending = []
+                for target_class in present_classes:
+                    source_class = target_to_source_class[target_class]
+                    targets = selected_targets_by_class[target_class]
+                    sources = available_sources[source_class]
+                    n = min(len(targets), len(sources))
+                    for target_idx, source_idx in zip(targets[:n], sources[:n]):
+                        assignments.append((target_idx, source_idx, target_class, source_class))
+                    del targets[:n]
+                    del sources[:n]
+                    pending.extend((target_idx, target_class) for target_idx in targets)
 
-                # In gradual concept drift, a class is either affected or
-                # unaffected. Once a class enters the drift window, all of
-                # its samples participate in the new concept.
-                if target_class not in drift_classes:
-                    target_positions[target_class] = np.asarray([], dtype=np.int64)
-                    continue
-
-                selected = original_positions
-
-                target_positions[target_class] = (
-                    np.asarray(
-                        selected,
-                        dtype=np.int64
-                    )
-                )
-
-                total_shifted += len(selected)
-
-            # ================================================================
-            # ASSIGN SOURCE SAMPLES
-            #
-            # We create one global pool of source samples.
-            #
-            # A source sample can only be used once.
-            #
-            # This makes the operation a true redistribution/permutation
-            # rather than repeatedly copying the same sample.
-            # ================================================================
-
-            selected_targets = []
-
-            for target_class in present_classes:
-
-                for idx in target_positions[
-                    target_class
-                ]:
-                    selected_targets.append(
-                        (
-                            int(idx),
-                            target_class
-                        )
-                    )
-
-            # ---------------------------------------------------------------
-            # Shuffle the target positions.
-            # ---------------------------------------------------------------
-
-            rng.shuffle(
-                selected_targets
-            )
-
-            # ---------------------------------------------------------------
-            # Source candidates.
-            #
-            # Every source is initially available.
-            # ---------------------------------------------------------------
-
-            available_sources = [
-                int(idx)
-                for idx in range(
-                    len(samples)
-                )
-            ]
-
-            rng.shuffle(
-                available_sources
-            )
-
-            # ================================================================
-            # FIND A VALID CROSS-CLASS SOURCE
-            # ================================================================
-
-            assignments = []
-
-            used_sources = set()
-
-            for target_idx, target_class in selected_targets:
-
-                source_idx = None
-
-                # Randomly search for a source from another class.
-                candidate_order = (
-                    available_sources.copy()
-                )
-
-                rng.shuffle(
-                    candidate_order
-                )
-
-                for candidate in candidate_order:
-
-                    if candidate in used_sources:
-                        continue
-
-                    source_class = int(
-                        labels[candidate]
-                    )
-
-                    if source_class != target_class:
-                        source_idx = candidate
-                        break
-
-                # -----------------------------------------------------------
-                # If no valid source is available, skip this position.
-                # This can happen with highly imbalanced local datasets.
-                # -----------------------------------------------------------
-
-                if source_idx is None:
-                    continue
-
-                assignments.append(
-                    (
-                        target_idx,
-                        source_idx,
-                        target_class,
-                        int(labels[source_idx])
-                    )
-                )
-
-                used_sources.add(
-                    source_idx
-                )
-
-            # ================================================================
-            # APPLY REASSIGNMENT
-            #
-            # CRITICAL:
-            #
-            # target_idx keeps its original label.
-            #
-            # Only X is replaced.
-            #
-            # Example:
-            #
-            # original:
-            #
-            #   X_a -> Y=0
-            #   X_b -> Y=1
-            #
-            # after:
-            #
-            #   X_b -> Y=0
-            #   X_a -> Y=1
-            #
-            # Y itself never changes.
-            # ================================================================
-
-            for (
-                    target_idx,
-                    source_idx,
-                    target_class,
-                    source_class
-            ) in assignments:
-                shifted_samples[
-                    target_idx
-                ][input_key] = copy.deepcopy(
-                    samples[
-                        source_idx
-                    ][input_key]
-                )
-
-            # ================================================================
-            # VERIFY LABELS
-            # ================================================================
-
-            shifted_labels = np.asarray(
-                [
-                    int(
-                        sample["label"].item()
-                        if isinstance(
-                            sample["label"],
-                            torch.Tensor
-                        )
-                        else sample["label"]
-                    )
-                    for sample in shifted_samples
-                ],
-                dtype=np.int64
-            )
-
-            # ---------------------------------------------------------------
-            # Labels must be identical element-by-element.
-            # ---------------------------------------------------------------
-
-            if not np.array_equal(
-                    labels,
-                    shifted_labels
-            ):
-                raise RuntimeError(
-                    "Concept drift changed labels. "
-                    "This violates P(Y) preservation."
-                )
-
-            # ================================================================
-            # VERIFY P(Y)
-            # ================================================================
-
-            original_classes, original_counts = (
-                np.unique(
-                    labels,
-                    return_counts=True
-                )
-            )
-
-            shifted_classes, shifted_counts = (
-                np.unique(
-                    shifted_labels,
-                    return_counts=True
-                )
-            )
-
-            if not np.array_equal(
-                    original_classes,
-                    shifted_classes
-            ):
-                raise RuntimeError(
-                    "Class support changed after concept drift."
-                )
-
-            if not np.array_equal(
-                    original_counts,
-                    shifted_counts
-            ):
-                raise RuntimeError(
-                    "P(Y) changed after concept drift."
-                )
-
-            # ================================================================
-            # VERIFY THAT EVERY REASSIGNED X CAME FROM ANOTHER CLASS
-            # ================================================================
-
-            valid_cross_class_assignments = 0
-
-            for (
-                    target_idx,
-                    source_idx,
-                    target_class,
-                    source_class
-            ) in assignments:
-
-                if target_class == source_class:
-                    raise RuntimeError(
-                        "Invalid concept drift assignment: "
-                        "source and target belong to the same class."
-                    )
-
-                valid_cross_class_assignments += 1
-
-            # ================================================================
-            # CREATE DATASET
-            # ================================================================
-
-            class ConceptDriftDataset(
-                torch.utils.data.Dataset
-            ):
-
-                def __init__(
-                        self,
-                        data
-                ):
-                    self.data = data
-
-                def __len__(self):
-                    return len(
-                        self.data
-                    )
-
-                def __getitem__(
-                        self,
-                        index
-                ):
-                    return self.data[
-                        index
+                used_sources = {source_idx for _, source_idx, _, _ in assignments}
+                for target_idx, target_class in pending:
+                    candidates = [
+                        idx for idx in range(len(samples))
+                        if idx not in used_sources and int(labels[idx]) != target_class
                     ]
+                    if not candidates:
+                        continue
+                    source_idx = int(candidates[rng.randint(len(candidates))])
+                    source_class = int(labels[source_idx])
+                    assignments.append((target_idx, source_idx, target_class, source_class))
+                    used_sources.add(source_idx)
 
-            shifted_dataset = (
-                ConceptDriftDataset(
-                    shifted_samples
+            shifted_samples = [copy.deepcopy(sample) for sample in samples]
+            for target_idx, source_idx, _, _ in assignments:
+                shifted_samples[target_idx][input_key] = copy.deepcopy(
+                    samples[source_idx][input_key]
                 )
+
+            shifted_labels = np.asarray([
+                int(sample["label"].item())
+                if isinstance(sample["label"], torch.Tensor)
+                else int(sample["label"])
+                for sample in shifted_samples
+            ], dtype=np.int64)
+
+            if not np.array_equal(labels, shifted_labels):
+                raise RuntimeError("Concept drift changed labels. This violates P(Y) preservation.")
+
+            original_classes, original_counts = np.unique(labels, return_counts=True)
+            shifted_classes, shifted_counts = np.unique(shifted_labels, return_counts=True)
+            if not np.array_equal(original_classes, shifted_classes) or not np.array_equal(original_counts, shifted_counts):
+                raise RuntimeError("Concept drift changed class frequencies. P(Y) was not preserved.")
+
+            changed_x = 0
+            total_abs_change = 0.0
+            total_elements = 0
+            for original_sample, shifted_sample in zip(samples, shifted_samples):
+                original_x = original_sample[input_key]
+                shifted_x = shifted_sample[input_key]
+                if isinstance(original_x, torch.Tensor) and isinstance(shifted_x, torch.Tensor):
+                    if not torch.equal(original_x, shifted_x):
+                        changed_x += 1
+                    if original_x.shape == shifted_x.shape:
+                        diff = torch.abs(
+                            original_x.detach().cpu().float() - shifted_x.detach().cpu().float()
+                        )
+                        total_abs_change += float(diff.sum().item())
+                        total_elements += int(diff.numel())
+
+            conditional_mean_changes = []
+            classes_with_conditional_change = 0
+            for class_id in present_classes:
+                idxs = np.where(labels == class_id)[0]
+                original_tensors = [samples[i][input_key] for i in idxs]
+                shifted_tensors = [shifted_samples[i][input_key] for i in idxs]
+                if all(isinstance(x, torch.Tensor) for x in original_tensors + shifted_tensors):
+                    original_stack = torch.stack([x.detach().cpu().float() for x in original_tensors])
+                    shifted_stack = torch.stack([x.detach().cpu().float() for x in shifted_tensors])
+                    change = float(torch.abs(original_stack.mean(0) - shifted_stack.mean(0)).mean().item())
+                    conditional_mean_changes.append(change)
+                    if change > 1e-12:
+                        classes_with_conditional_change += 1
+
+            mean_conditional_change = float(np.mean(conditional_mean_changes)) if conditional_mean_changes else 0.0
+            changed_fraction = len(assignments) / max(len(samples), 1)
+            empirical_x_changed_fraction = changed_x / max(len(samples), 1)
+            mean_abs_x_change = total_abs_change / max(total_elements, 1)
+            conditional_change_fraction = classes_with_conditional_change / max(len(present_classes), 1)
+            concept_drift_confirmed = bool(
+                assignments and changed_x > 0 and
+                np.array_equal(labels, shifted_labels) and
+                np.array_equal(original_counts, shifted_counts) and
+                mean_conditional_change > 1e-12
             )
 
-            # ================================================================
-            # PRESERVE DATALOADER CONFIGURATION
-            # ================================================================
+            print(
+                f"[CONCEPT DRIFT VERIFY] shift_type={shift_context} "
+                f"client={self.client_id} model={me} dataset={dataset_name} "
+                f"fraction={fraction:.4f} X_changed={changed_x}/{len(samples)} "
+                f"X_changed_fraction={empirical_x_changed_fraction:.4f} "
+                f"mean_abs_X_change={mean_abs_x_change:.8f} "
+                f"P(X|Y)_mean_change={mean_conditional_change:.8f} "
+                f"P(X|Y)_change_fraction={conditional_change_fraction:.4f} "
+                f"concept_drift_confirmed={concept_drift_confirmed}"
+            )
 
+            class ConceptDriftDataset(torch.utils.data.Dataset):
+                def __init__(self, data):
+                    self.data = data
+                def __len__(self):
+                    return len(self.data)
+                def __getitem__(self, index):
+                    return self.data[index]
+
+            shifted_dataset = ConceptDriftDataset(shifted_samples)
             loader_kwargs = {
                 "batch_size": loader.batch_size,
                 "shuffle": shuffle,
                 "num_workers": loader.num_workers,
                 "drop_last": loader.drop_last,
-                "pin_memory": loader.pin_memory
+                "pin_memory": loader.pin_memory,
             }
+            if getattr(loader, "collate_fn", None) is not None:
+                loader_kwargs["collate_fn"] = loader.collate_fn
+            if getattr(loader, "persistent_workers", False) and loader.num_workers > 0:
+                loader_kwargs["persistent_workers"] = True
+            if getattr(loader, "prefetch_factor", None) is not None and loader.num_workers > 0:
+                loader_kwargs["prefetch_factor"] = loader.prefetch_factor
 
-            if hasattr(
-                    loader,
-                    "collate_fn"
-            ):
-
-                if loader.collate_fn is not None:
-                    loader_kwargs[
-                        "collate_fn"
-                    ] = loader.collate_fn
-
-            # Preserve persistent_workers only when valid.
-            if hasattr(
-                    loader,
-                    "persistent_workers"
-            ):
-
-                if (
-                        loader.persistent_workers
-                        and loader.num_workers > 0
-                ):
-                    loader_kwargs[
-                        "persistent_workers"
-                    ] = True
-
-            # Preserve prefetch_factor only when valid.
-            if (
-                    hasattr(
-                        loader,
-                        "prefetch_factor"
-                    )
-                    and loader.num_workers > 0
-                    and loader.prefetch_factor is not None
-            ):
-                loader_kwargs[
-                    "prefetch_factor"
-                ] = loader.prefetch_factor
-
-            shifted_loader = (
-                torch.utils.data.DataLoader(
-                    shifted_dataset,
-                    **loader_kwargs
-                )
-            )
-
-            # ================================================================
-            # FINAL DIAGNOSTICS
-            #
-            # These diagnostics are intentionally based on the ACTUAL
-            # samples before and after the transformation.  They therefore
-            # provide evidence that concept drift really occurred, instead
-            # of only confirming that concept_drift_window was enabled.
-            #
-            # A genuine concept drift here must satisfy:
-            #
-            #   1) Y is unchanged -> P(Y) is preserved;
-            #   2) X changes for a non-zero fraction of samples;
-            #   3) changed X comes from another original class;
-            #   4) P(X|Y) changes.
-            #
-            # For (4), we compare the mean input representation for each
-            # class before and after the reassignment.  This is a diagnostic
-            # only; it does not affect training.
-            # ================================================================
-
-            changed_fraction = (
-                    valid_cross_class_assignments
-                    / max(
-                len(samples),
-                1
-            )
-            )
-
-            # ---------------------------------------------------------------
-            # Empirical X-change verification
-            # ---------------------------------------------------------------
-            changed_x = 0
-            total_x = len(samples)
-            total_abs_change = 0.0
-            total_elements = 0
-
-            try:
-                for original_sample, shifted_sample in zip(
-                        samples,
-                        shifted_samples
-                ):
-                    original_x = original_sample[input_key]
-                    shifted_x = shifted_sample[input_key]
-
-                    if (
-                            isinstance(original_x, torch.Tensor)
-                            and isinstance(shifted_x, torch.Tensor)
-                    ):
-                        if not torch.equal(
-                                original_x,
-                                shifted_x
-                        ):
-                            changed_x += 1
-
-                        original_float = (
-                            original_x.detach()
-                            .cpu()
-                            .float()
-                        )
-                        shifted_float = (
-                            shifted_x.detach()
-                            .cpu()
-                            .float()
-                        )
-
-                        if original_float.shape == shifted_float.shape:
-                            diff = torch.abs(
-                                original_float - shifted_float
-                            )
-                            total_abs_change += float(
-                                diff.sum().item()
-                            )
-                            total_elements += int(
-                                diff.numel()
-                            )
-
-            except Exception as diagnostic_error:
-                print(
-                    f"[CONCEPT DRIFT VERIFY] "
-                    f"client={self.client_id} "
-                    f"model={me} "
-                    f"X_comparison_error="
-                    f"{type(diagnostic_error).__name__}: "
-                    f"{diagnostic_error}"
-                )
-
-            empirical_x_changed_fraction = (
-                changed_x / max(total_x, 1)
-            )
-
-            mean_abs_x_change = (
-                total_abs_change / max(total_elements, 1)
-            )
-
-            # ---------------------------------------------------------------
-            # Empirical P(X|Y) verification
-            #
-            # For each class Y=c, compare the average input representation
-            # before and after the shift.  A positive difference means the
-            # conditional input distribution associated with that label
-            # changed.
-            # ---------------------------------------------------------------
-            conditional_mean_changes = []
-            classes_with_conditional_change = 0
-
-            try:
-                for class_id in present_classes:
-
-                    class_samples = [
-                        i for i, label in enumerate(labels)
-                        if int(label) == int(class_id)
-                    ]
-
-                    if len(class_samples) == 0:
-                        continue
-
-                    original_tensors = [
-                        samples[i][input_key]
-                        for i in class_samples
-                        if isinstance(
-                            samples[i][input_key],
-                            torch.Tensor
-                        )
-                    ]
-
-                    shifted_tensors = [
-                        shifted_samples[i][input_key]
-                        for i in class_samples
-                        if isinstance(
-                            shifted_samples[i][input_key],
-                            torch.Tensor
-                        )
-                    ]
-
-                    if (
-                            len(original_tensors) == len(class_samples)
-                            and len(shifted_tensors) == len(class_samples)
-                    ):
-                        original_stack = torch.stack(
-                            [
-                                x.detach().cpu().float()
-                                for x in original_tensors
-                            ],
-                            dim=0
-                        )
-
-                        shifted_stack = torch.stack(
-                            [
-                                x.detach().cpu().float()
-                                for x in shifted_tensors
-                            ],
-                            dim=0
-                        )
-
-                        original_mean = (
-                            original_stack.mean(dim=0)
-                        )
-                        shifted_mean = (
-                            shifted_stack.mean(dim=0)
-                        )
-
-                        conditional_mean_change = float(
-                            torch.abs(
-                                original_mean - shifted_mean
-                            ).mean().item()
-                        )
-
-                        conditional_mean_changes.append(
-                            conditional_mean_change
-                        )
-
-                        if conditional_mean_change > 1e-12:
-                            classes_with_conditional_change += 1
-
-            except Exception as diagnostic_error:
-                print(
-                    f"[CONCEPT DRIFT VERIFY] "
-                    f"client={self.client_id} "
-                    f"model={me} "
-                    f"P(X|Y)_comparison_error="
-                    f"{type(diagnostic_error).__name__}: "
-                    f"{diagnostic_error}"
-                )
-
-            mean_conditional_change = (
-                float(np.mean(conditional_mean_changes))
-                if conditional_mean_changes
-                else 0.0
-            )
-
-            conditional_change_fraction = (
-                classes_with_conditional_change
-                / max(len(present_classes), 1)
-            )
-
-            # ---------------------------------------------------------------
-            # Final logical verdict.
-            #
-            # We require all observable properties of the implemented
-            # concept-drift mechanism to hold.  The P(X|Y) diagnostic is
-            # based on the empirical class-conditional input means.
-            # ---------------------------------------------------------------
-            concept_drift_confirmed = bool(
-                valid_cross_class_assignments > 0
-                and changed_x > 0
-                and np.array_equal(labels, shifted_labels)
-                and np.array_equal(original_counts, shifted_counts)
-                and mean_conditional_change > 1e-12
-            )
-
-            print(
-                f"[CONCEPT DRIFT] "
-                f"client={self.client_id} "
-                f"model={me} "
-                f"dataset={dataset_name} "
-                f"window={concept_drift_window} "
-                f"affected_classes={len(drift_classes)} "
-                f"samples={len(samples)} "
-                f"reassigned={valid_cross_class_assignments} "
-                f"fraction={changed_fraction:.3f} "
-                f"P(Y)_preserved=True "
-                f"labels_unchanged=True "
-                f"cross_class_reassignment=True"
-            )
-
-            print(
-                f"[CONCEPT DRIFT VERIFY] "
-                f"shift_type={shift_context} "
-                f"client={self.client_id} "
-                f"model={me} "
-                f"dataset={dataset_name} "
-                f"window={concept_drift_window} "
-                f"X_changed={changed_x}/{total_x} "
-                f"X_changed_fraction={empirical_x_changed_fraction:.3f} "
-                f"mean_abs_X_change={mean_abs_x_change:.8f} "
-                f"P(X|Y)_mean_change={mean_conditional_change:.8f} "
-                f"classes_with_P(X|Y)_change="
-                f"{classes_with_conditional_change}/"
-                f"{len(present_classes)} "
-                f"P(X|Y)_change_fraction="
-                f"{conditional_change_fraction:.3f} "
-                f"concept_drift_confirmed="
-                f"{concept_drift_confirmed}"
-            )
-
-            return shifted_loader
+            return torch.utils.data.DataLoader(shifted_dataset, **loader_kwargs)
 
         except Exception as e:
-
-            print(
-                "_apply_concept_drift_to_loader error"
-            )
-
-            print(
-                "Error on line {} {} {}".format(
-                    sys.exc_info()[-1].tb_lineno,
-                    type(e).__name__,
-                    e
-                )
-            )
-
+            print("_apply_concept_drift_to_loader error")
+            print("Error on line {} {} {}".format(
+                sys.exc_info()[-1].tb_lineno, type(e).__name__, e
+            ))
             return loader
 
     def update_local_train_data(
@@ -2117,14 +1531,26 @@ class MultiFedAvgClient:
                             fold_id=self.fold_id,
                             partition_seed=self.partition_seed_train[me] if t == 1 else partition_seed,
                         )
-                        self.trainloader[me] = (
-                            self._apply_concept_drift_to_loader(
+                        if "gradual" in self.experiment_id:
+                            affected_classes = self._get_gradual_concept_drift_classes(
+                                me, concept_drift_window
+                            )
+                            self.trainloader[me] = self._apply_concept_drift_to_loader(
                                 self.trainloader[me],
                                 me,
                                 concept_drift_window,
-                                shuffle=True
+                                shuffle=True,
+                                affected_classes=affected_classes
                             )
-                        )
+                        else:
+                            self.trainloader[me] = (
+                                self._apply_concept_drift_to_loader(
+                                    self.trainloader[me],
+                                    me,
+                                    concept_drift_window,
+                                    shuffle=True
+                                )
+                            )
 
                     (self.p_ME[me], self.fc_ME[me], self.il_ME[me]) = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id, self.n_classes, me=me)
 
@@ -2409,14 +1835,26 @@ class MultiFedAvgClient:
 
                 else:
 
-                    self.valloader[me] = (
-                        self._apply_concept_drift_to_loader(
+                    if "gradual" in self.experiment_id:
+                        affected_classes = self._get_gradual_concept_drift_classes(
+                            me, concept_drift_window
+                        )
+                        self.valloader[me] = self._apply_concept_drift_to_loader(
                             original_valloader,
                             me,
                             concept_drift_window,
-                            shuffle=False
+                            shuffle=False,
+                            affected_classes=affected_classes
                         )
-                    )
+                    else:
+                        self.valloader[me] = (
+                            self._apply_concept_drift_to_loader(
+                                original_valloader,
+                                me,
+                                concept_drift_window,
+                                shuffle=False
+                            )
+                        )
 
                 return (
                     self.p_ME,
@@ -2525,20 +1963,24 @@ class MultiFedAvgClient:
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def _check_concept_drift(self, server_round, me, train):
-        """Return the number of classes currently affected by concept drift.
+        """Return the current concept-drift intensity in [0, 1].
 
-        Sudden drift activates the new concept for all classes at the change
-        point.  Gradual drift increases the concept-drift window from zero
-        affected classes to all classes over ``transition_window`` rounds.
-        The window therefore represents *how many classes are affected*, not
-        the strength of a transformation.
+        For gradual concept drift, transition_window is the number of
+        federated rounds used for the transition.  The returned value is the
+        fraction of local samples that receive the new concept.
+
+        Thus, with W=5, the transition is 0.0, 0.2, 0.4, 0.6, 0.8, 1.0.
+        W=0 is an explicit alias for sudden drift: intensity becomes 1.0 at
+        the change point.
+
+        Sudden/recurrent concept-drift configurations keep their previous
+        behavior: an active marker produces intensity 1.0 and an inactive
+        marker produces 0.0.
         """
         try:
             if (self.data_shift_config == {} or
-                    self.data_shift_config[me]["type"] not in (
-                        "concept_drift", "combined_shift"
-                    )):
-                return 0, False
+                    self.data_shift_config[me]["type"] not in ("concept_drift", "combined_shift")):
+                return 0.0, False
 
             reference = (
                 self.concept_drift_window_train[me]
@@ -2546,55 +1988,34 @@ class MultiFedAvgClient:
             )
             config = self.data_shift_config[me]
             gradual = "gradual" in self.experiment_id
-
-            # Number of classes cannot be inferred from the config's
-            # ``new_concept_drift_window`` because the old config used 1 as
-            # an on/off marker.  For sudden/recurrent activation, the actual
-            # window is therefore all classes.  For gradual drift, the window
-            # grows from 0 to the number of local classes.
-            n_classes = int(self.n_classes[me])
-            current_window = 0
+            current_intensity = 0.0
 
             for i, start_round in enumerate(config.get("data_shift_rounds", [])):
                 if server_round < start_round:
                     break
 
                 if gradual:
-                    # transition_window=0 is an explicit alias for sudden:
-                    # affect all classes immediately at the change point.
-                    w = int(config.get(
-                        "transition_window",
-                        self.label_shift_transition_window
-                    ))
+                    w = int(config.get("transition_window", self.label_shift_transition_window))
                     if w <= 0:
-                        current_window = n_classes
+                        current_intensity = 1.0
                     else:
-                        progress = float(np.clip(
-                            (server_round - start_round) / float(w),
-                            0.0,
-                            1.0
+                        current_intensity = float(np.clip(
+                            (server_round - start_round) / float(w), 0.0, 1.0
                         ))
-                        # At the end of the transition every class is affected.
-                        current_window = int(np.ceil(progress * n_classes))
                 else:
-                    # Existing sudden/recurrent configs use the window value
-                    # as an activation marker. Once active, affect all classes.
-                    marker = int(config.get(
-                        "new_concept_drift_window", [1]
-                    )[i])
-                    current_window = n_classes if marker > 0 else 0
+                    marker_list = config.get("new_concept_drift_window", [1])
+                    marker = int(marker_list[i]) if i < len(marker_list) else 1
+                    current_intensity = 1.0 if marker > 0 else 0.0
 
-            changed = int(current_window) != int(reference)
-            return int(current_window), changed
+            changed = abs(float(current_intensity) - float(reference)) > 1e-12
+            return float(current_intensity), changed
 
         except Exception as e:
             print(f"_check_concept_drift error {self.data_shift_config}")
             print("Error on line {} {} {}".format(
-                sys.exc_info()[-1].tb_lineno,
-                type(e).__name__,
-                e
+                sys.exc_info()[-1].tb_lineno, type(e).__name__, e
             ))
-            return 0, False
+            return 0.0, False
 
     def _get_models_size(self):
         try:

@@ -1174,7 +1174,7 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 self.data_shift_reference_trainloader[me] = _make_sample_loader(
                     self.trainloader[me],
                     fraction=self.train_test_fraction,
-                    random_seed=(42 + self.client_id + 1000 * me + t)
+                    random_seed=(42 + self.client_id + 1000 * me)
                 )
                 self.data_shift_reference_window[me] = int(t)
                 self.data_shift_reference_label_distribution[me] = (

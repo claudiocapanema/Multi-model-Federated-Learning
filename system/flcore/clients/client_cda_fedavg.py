@@ -380,9 +380,7 @@ class ClientCDAFedAvg(MultiFedAvgClient):
                 client_id=self.client_id,
                 t=t,
                 dataset_name=self.args.dataset[me],
-                n_classes=self.n_classes[me],
-                concept_drift_window=
-                self.concept_drift_window_train[me]
+                n_classes=self.n_classes[me]
             )
 
             self.cda_training_round[me] += 1

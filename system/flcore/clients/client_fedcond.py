@@ -301,8 +301,7 @@ class ClientFedConD(MultiFedAvgClient):
             self.client_id,
             t,
             self.args.dataset[me],
-            self.n_classes[me],
-            self.concept_drift_window_train[me]
+            self.n_classes[me]
         )
 
         current_acc = float(
@@ -388,9 +387,6 @@ class ClientFedConD(MultiFedAvgClient):
             t=t,
             dataset_name=self.args.dataset[me],
             n_classes=self.n_classes[me],
-            concept_drift_window=(
-                self.concept_drift_window_train[me]
-            ),
             global_params=global_params_torch,
             mu=self.lambda_fedcond[me]
         )

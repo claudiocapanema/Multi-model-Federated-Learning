@@ -377,7 +377,7 @@ if __name__ == "__main__":
         "--cd", type=str, default="false"
     )
     parser.add_argument(
-        "--label_shift_transition_window", type=int, default=1, help="Number of rounds used for gradual data-shift transition (label, concept, or combined)"
+        "--label_shift_transition_window", type=int, default=0, help="Number of rounds used for gradual data-shift transition (label, concept, or combined)"
     )
     parser.add_argument(
         "--fraction_fit", type=float, default=0.3

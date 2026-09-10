@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import scipy.stats as st
 import os
+import re
 
 import copy
 
@@ -18,7 +19,8 @@ def read_data(
     solution_names=None,
     experiment_id=None,
     alpha_value=None,
-    dataset_shift_rounds=None
+    dataset_shift_rounds=None,
+    transition_window=None
 ):
     """
     Lê os CSVs específicos de cada dataset e solução.
@@ -30,6 +32,7 @@ def read_data(
         Solution
         Dataset
         Shift Round
+        Transition Window
     """
 
     df_list = []
@@ -106,6 +109,10 @@ def read_data(
                 df["Shift Round"] = dataset_shift_rounds[
                     dataset_name
                 ]
+
+                # Gradual shifts have an explicit transition window in
+                # the result-directory path. Sudden shifts use None.
+                df["Transition Window"] = transition_window
 
                 # Verificação por arquivo: um CSV completo deve conter
                 # exatamente 5 folds distintos.
@@ -1740,46 +1747,29 @@ def table_detection_quality_by_shift_type(
     max_detection_delay=None,
 ):
     """
-    Gera uma única tabela LaTeX consolidada para Concept Drift e
-    Label Shift.
+    Gera a tabela consolidada de qualidade da detecção.
 
-    Unidade experimental
-    --------------------
-    Cada combinação
+    Para gradual shifts, ``Transition Window`` é um parâmetro experimental
+    explícito e é extraído do diretório de resultados:
 
-        Solution × Dataset × Experiment × Fold ID
+        transition_window_2
+        transition_window_5
+        ...
 
-    é tratada como uma unidade experimental independente.
+    Portanto, gradual/window=2 e gradual/window=5 são tratados como
+    configurações experimentais distintas e nunca são agregados juntos.
 
-    Primeiro são calculadas as métricas para cada unidade experimental.
-    Somente depois é feita a agregação:
+    A unidade experimental é:
 
-        Shift Type × Solution
+        Solution × Dataset × Experiment × Fold ID × Shift Type
+        × Temporal Shift Type × Transition Window
 
-    sobre todos os datasets, experimentos e folds.
-
-    Métricas
-    --------
-    Detection Rate (DR)                 : higher is better
-    Episode F1                          : higher is better
-    Mean Time to Detection (MTD)       : lower is better; computed
-                                          only over detected shifts
-    Missed Detection Rate (MDR)         : lower is better
-    False Alarm Rate (FAR)              : lower is better
-
-    O resultado é apresentado como:
-
-        mean ± 95% CI
-
-    O melhor resultado de cada métrica dentro de cada tipo de shift
-    é destacado em negrito.
+    As métricas são calculadas primeiro por unidade experimental e só depois
+    agregadas. Os melhores resultados são determinados separadamente dentro
+    de cada combinação Shift × Temporal Shift Type × Transition Window.
     """
-
     if df_final is None or df_final.empty:
-        print(
-            "\nWARNING: empty dataframe passed "
-            "to table_detection_quality_by_shift_type."
-        )
+        print("\nWARNING: empty dataframe passed to table_detection_quality_by_shift_type.")
         return
 
     if metrics is None:
@@ -1792,169 +1782,121 @@ def table_detection_quality_by_shift_type(
         ]
 
     if higher_is_better_metrics is None:
-        higher_is_better_metrics = {
-            "Detection Rate",
-            "Episode F1",
-        }
+        higher_is_better_metrics = {"Detection Rate", "Episode F1"}
 
     df_eval = df_final.copy()
 
-    # ============================================================
-    # NORMALIZE SHIFT TYPE
-    # ============================================================
-    #
-    # Prefer Experiment ID as the authoritative source whenever it
-    # is available. This is especially important for Combined Shift:
-    # a row originating from combined_shift#... must never be silently
-    # classified as Concept/Label/N/A because of a stale Shift Type
-    # value.
-    # ============================================================
-
+    # ------------------------------------------------------------
+    # Shift family
+    # ------------------------------------------------------------
     if "Experiment ID" in df_eval.columns:
-        experiment_ids_for_type = (
-            df_eval["Experiment ID"]
-            .astype(str)
-            .str.strip()
-        )
-
+        exp = df_eval["Experiment ID"].astype(str).str.strip()
         df_eval["Shift Type"] = np.select(
             [
-                experiment_ids_for_type.str.startswith("concept_drift#"),
-                experiment_ids_for_type.str.startswith("label_shift#"),
-                experiment_ids_for_type.str.startswith("combined_shift#"),
+                exp.str.startswith("concept_drift#"),
+                exp.str.startswith("label_shift#"),
+                exp.str.startswith("combined_shift#"),
             ],
-            [
-                "Concept drift",
-                "Label shift",
-                "Combined shift",
-            ],
+            ["Concept drift", "Label shift", "Combined shift"],
             default=df_eval["Shift Type"] if "Shift Type" in df_eval.columns else "N/A",
         )
 
-    if "Shift Type" in df_eval.columns:
-        df_eval["Shift Type"] = (
-            df_eval["Shift Type"]
-            .apply(format_shift_type)
-        )
-    else:
-        raise KeyError(
-            "The dataframe must contain 'Shift Type' or 'Experiment ID'."
-        )
+    if "Shift Type" not in df_eval.columns:
+        raise KeyError("The dataframe must contain 'Shift Type' or 'Experiment ID'.")
 
-    print("\n" + "=" * 100)
-    print("DEBUG - SHIFT TYPES BEFORE TABLE FILTER")
-    print("=" * 100)
-    print(df_eval["Shift Type"].value_counts(dropna=False))
+    df_eval["Shift Type"] = df_eval["Shift Type"].apply(format_shift_type)
 
-    if "Experiment ID" in df_eval.columns:
-        print("\nDEBUG - EXPERIMENTS BY SHIFT TYPE")
-        print(
-            df_eval.groupby(
-                ["Shift Type", "Experiment ID"]
-            ).size()
-        )
-
-    valid_shift_types = [
-        "Concept drift",
-        "Label shift",
-        "Combined shift",
-    ]
-
-    df_eval = df_eval[
-        df_eval["Shift Type"].isin(valid_shift_types)
-    ].copy()
-
-    if df_eval.empty:
-        print(
-            "\nWARNING: no valid shift types found."
-        )
-        return
-
-    # ============================================================
-    # NORMALIZE EXPERIMENT IDENTIFIER
-    # ============================================================
-    #
-    # O dataframe precisa possuir o experimento que originou cada
-    # CSV. Em versões anteriores isso pode estar em Experiment ID,
-    # experiment_id ou Experiment.
-    # ============================================================
-
-    experiment_column = None
-
-    for candidate in [
-        "Experiment ID",
-        "experiment_id",
-        "Experiment",
-    ]:
-        if candidate in df_eval.columns:
-            experiment_column = candidate
-            break
-
+    # ------------------------------------------------------------
+    # Experiment identifier and temporal type
+    # ------------------------------------------------------------
+    experiment_column = next(
+        (c for c in ["Experiment ID", "experiment_id", "Experiment"] if c in df_eval.columns),
+        None,
+    )
     if experiment_column is None:
         raise KeyError(
             "The dataframe must contain an experiment identifier "
-            "('Experiment ID', 'experiment_id' or 'Experiment') "
-            "to calculate metrics per experiment."
+            "('Experiment ID', 'experiment_id' or 'Experiment')."
         )
 
-    df_eval["_Experiment"] = (
-        df_eval[experiment_column]
-        .astype(str)
+    df_eval["_Experiment"] = df_eval[experiment_column].astype(str).str.strip()
+    exp_lower = df_eval[experiment_column].astype(str).str.strip().str.lower()
+    df_eval["Temporal Shift Type"] = np.select(
+        [exp_lower.str.endswith("_sudden"), exp_lower.str.endswith("_gradual")],
+        ["sudden", "gradual"],
+        default="N/A",
     )
 
-    # ============================================================
-    # BUILD ONE OBSERVATION PER EXPERIMENTAL UNIT
-    #
-    # Solution × Dataset × Experiment × Fold ID
-    # ============================================================
+    # ------------------------------------------------------------
+    # Transition window
+    # ------------------------------------------------------------
+    # The value is supplied by read_data from the directory path. Do not
+    # infer it from Experiment ID because the ID intentionally does not
+    # contain transition_window_N.
+    if "Transition Window" not in df_eval.columns:
+        df_eval["Transition Window"] = np.nan
 
-    required_columns = [
-        "Solution",
-        "Dataset",
-        "_Experiment",
-        "Fold ID",
-    ]
+    def normalize_transition_window(value):
+        if pd.isna(value):
+            return np.nan
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return np.nan
 
-    missing_columns = [
-        col
-        for col in required_columns
-        if col not in df_eval.columns
-    ]
+    df_eval["Transition Window"] = df_eval["Transition Window"].apply(
+        normalize_transition_window
+    )
 
-    if missing_columns:
-        raise KeyError(
-            "Missing columns required for experimental-unit "
-            f"aggregation: {missing_columns}"
-        )
+    print("\n" + "=" * 100)
+    print("DEBUG - SHIFT / TEMPORAL TYPE / TRANSITION WINDOW")
+    print("=" * 100)
+    print(
+        df_eval[
+            ["Shift Type", "Temporal Shift Type", "Transition Window"]
+        ].value_counts(dropna=False)
+    )
 
-    experimental_rows = []
+    valid_shift_types = ["Concept drift", "Label shift", "Combined shift"]
+    valid_temporal_types = ["sudden", "gradual"]
 
+    df_eval = df_eval[
+        df_eval["Shift Type"].isin(valid_shift_types)
+        & df_eval["Temporal Shift Type"].isin(valid_temporal_types)
+    ].copy()
+
+    if df_eval.empty:
+        print("\nWARNING: no valid shift/temporal types found.")
+        return
+
+    # ------------------------------------------------------------
+    # Experimental units
+    # ------------------------------------------------------------
     group_columns = [
         "Solution",
         "Dataset",
         "_Experiment",
         "Fold ID",
         "Shift Type",
+        "Temporal Shift Type",
+        "Transition Window",
     ]
 
-    for group_key, df_unit in df_eval.groupby(
-        group_columns,
-        dropna=False
-    ):
-
+    experimental_rows = []
+    for group_key, df_unit in df_eval.groupby(group_columns, dropna=False):
         (
             solution,
             dataset,
             experiment,
             fold_id,
             shift_type,
+            temporal_shift_type,
+            transition_window,
         ) = group_key
 
-        metric_values = (
-            _calculate_experiment_detection_metrics(
-                df_unit,
-                max_detection_delay=max_detection_delay,
-            )
+        metric_values = _calculate_experiment_detection_metrics(
+            df_unit,
+            max_detection_delay=max_detection_delay,
         )
 
         row = {
@@ -1963,71 +1905,54 @@ def table_detection_quality_by_shift_type(
             "Experiment": experiment,
             "Fold ID": fold_id,
             "Shift Type": shift_type,
+            "Temporal Shift Type": temporal_shift_type,
+            "Transition Window": transition_window,
         }
-
         row.update(metric_values)
-
         experimental_rows.append(row)
 
-    df_experimental = pd.DataFrame(
-        experimental_rows
-    )
-
+    df_experimental = pd.DataFrame(experimental_rows)
     if df_experimental.empty:
-        print(
-            "\nWARNING: no experimental units were created."
-        )
+        print("\nWARNING: no experimental units were created.")
         return
 
+    # ------------------------------------------------------------
+    # Aggregation helper
+    # ------------------------------------------------------------
+    valid_transition_windows = sorted(
+        df_experimental.loc[
+            df_experimental["Temporal Shift Type"] == "gradual",
+            "Transition Window",
+        ].dropna().astype(int).unique().tolist()
+    )
+
     print("\n" + "=" * 100)
-    print("DEBUG - EXPERIMENTAL UNITS BY SHIFT TYPE")
+    print("DEBUG - EXPERIMENTAL UNITS BY SHIFT / TEMPORAL TYPE / WINDOW")
     print("=" * 100)
     print(
-        df_experimental["Shift Type"]
-        .value_counts(dropna=False)
-    )
-    print("\nDEBUG - EXPERIMENTAL UNITS BY SHIFT TYPE / SOLUTION")
-    print(
         df_experimental.groupby(
-            ["Shift Type", "Solution"]
+            ["Shift Type", "Temporal Shift Type", "Transition Window"],
+            dropna=False,
         ).size()
     )
 
-    # ============================================================
-    # AGGREGATE ONLY AFTER EXPERIMENTAL UNITS EXIST
-    # ============================================================
-
-    rows_raw = {
-        shift_type: {}
-        for shift_type in valid_shift_types
-    }
-
-    for shift_type in valid_shift_types:
-
-        df_shift = df_experimental[
-            df_experimental["Shift Type"] == shift_type
-        ].copy()
-
+    # Keep the same aggregation principle as before, but add transition
+    # window as an explicit grouping dimension.
+    aggregated = {}
+    for (shift_type, temporal_type, window), df_group in df_experimental.groupby(
+        ["Shift Type", "Temporal Shift Type", "Transition Window"],
+        dropna=False,
+    ):
+        aggregated[(shift_type, temporal_type, window)] = {}
         for solution in solutions:
-
-            df_solution = df_shift[
-                df_shift["Solution"] == solution
-            ].copy()
-
+            df_solution = df_group[df_group["Solution"] == solution]
             if df_solution.empty:
                 continue
-
-            rows_raw[
-                shift_type
-            ][solution] = {}
-
+            aggregated[(shift_type, temporal_type, window)][solution] = {}
             for metric in metrics:
-
                 values = pd.to_numeric(
-                    df_solution[metric],
-                    errors="coerce"
+                    df_solution[metric], errors="coerce"
                 ).dropna()
-
                 mean_value, ci_value = mean_ci(
                     values,
                     ci=ci,
@@ -2035,251 +1960,151 @@ def table_detection_quality_by_shift_type(
                         "Detection Rate",
                         "Episode F1",
                         "Missed Detection Rate",
-                    }
+                    },
                 )
-
-                rows_raw[
-                    shift_type
-                ][solution][metric] = {
+                aggregated[(shift_type, temporal_type, window)][solution][metric] = {
                     "mean": mean_value,
                     "ci": ci_value,
                     "n": len(values),
                 }
 
-    # ============================================================
-    # BUILD CONSOLIDATED TABLE
-    # ============================================================
-
-    print("\n" + "=" * 100)
-    print("DEBUG - ROWS AVAILABLE FOR FINAL LATEX TABLE")
-    print("=" * 100)
-    for _shift_type in valid_shift_types:
-        _solutions_present = list(rows_raw[_shift_type].keys())
-        print(
-            f"{_shift_type}: "
-            f"{len(_solutions_present)} solution(s) -> "
-            f"{_solutions_present}"
-        )
-
-    table_rows = []
-
-    shift_type_labels = {
+    # ------------------------------------------------------------
+    # Build LaTeX rows
+    # ------------------------------------------------------------
+    shift_labels = {
         "Concept drift": "Concept Drift",
         "Label shift": "Label Shift",
         "Combined shift": "Combined Shift",
     }
+    temporal_labels = {"sudden": "Sudden", "gradual": "Gradual"}
 
+    table_rows = []
     for shift_type in valid_shift_types:
-
-        if not rows_raw[shift_type]:
+        keys = [
+            key for key in aggregated
+            if key[0] == shift_type
+        ]
+        if not keys:
             continue
 
-        # --------------------------------------------------------
-        # Determine best solution independently for every metric.
-        # --------------------------------------------------------
+        # Stable ordering: sudden first, then gradual by transition window.
+        keys.sort(key=lambda k: (0 if k[1] == "sudden" else 1, -1 if k[2] is None else k[2]))
+        shift_row_count = sum(len(aggregated[k]) for k in keys)
+        shift_first = True
 
-        best_by_metric = {}
-
-        for metric in metrics:
-
-            valid_solutions = [
-                solution
-                for solution in solutions
-                if solution in rows_raw[shift_type]
-                and not pd.isna(
-                    rows_raw[
-                        shift_type
-                    ][solution][metric]["mean"]
-                )
-            ]
-
-            if not valid_solutions:
+        for key in keys:
+            _, temporal_type, transition_window = key
+            temporal_rows = aggregated[key]
+            solutions_present = [s for s in solutions if s in temporal_rows]
+            if not solutions_present:
                 continue
 
-            if metric in higher_is_better_metrics:
-                best_solution = max(
-                    valid_solutions,
-                    key=lambda solution:
-                        rows_raw[
-                            shift_type
-                        ][solution][metric]["mean"]
-                )
-            else:
-                best_solution = min(
-                    valid_solutions,
-                    key=lambda solution:
-                        rows_raw[
-                            shift_type
-                        ][solution][metric]["mean"]
-                )
-
-            best_by_metric[metric] = best_solution
-
-        # --------------------------------------------------------
-        # One row per solution.
-        # --------------------------------------------------------
-
-        valid_solutions_for_shift = [
-            solution
-            for solution in solutions
-            if solution in rows_raw[shift_type]
-        ]
-
-        first_row = True
-
-        for solution in valid_solutions_for_shift:
-
-            row = {}
-
-            if first_row:
-                row["Shift Type"] = (
-                    "\\multirow{"
-                    f"{len(valid_solutions_for_shift)}"
-                    "}{*}{"
-                    + shift_type_labels[shift_type]
-                    + "}"
-                )
-                first_row = False
-            else:
-                row["Shift Type"] = ""
-
-            # ----------------------------------------------------
-            # Solution name
-            # ----------------------------------------------------
-
-            solution_display = str(solution)
-
-            # Escape underscores in plain-text solution names.
-            # This is required because escape=False is used by pandas
-            # when generating the LaTeX table.
-            if solution_display == "MFP_v2_dh":
-                solution_display = (
-                    "$\\textit{MFP}_{\\textit{DDH}}$"
-                )
-            elif solution_display == "MFP_v2_iti":
-                solution_display = (
-                    "$\\textit{MFP}_{\\textit{ITI}}$"
-                )
-            elif solution_display == "MFP_v2":
-                solution_display = "MFP"
-            elif solution_display == "MultiFedAvg+MFP_v2":
-                solution_display = "MultiFedAvg+MFP"
-            else:
-                solution_display = solution_display.replace("_", r"\_")
-
-            row["Solution"] = solution_display
-
-            # ----------------------------------------------------
-            # Metrics
-            # ----------------------------------------------------
-
+            # Best solution is determined only inside this exact
+            # Shift × Temporal Shift Type × Transition Window group.
+            best_by_metric = {}
             for metric in metrics:
-
-                result = rows_raw[
-                    shift_type
-                ][solution].get(metric)
-
-                if result is None:
-                    row[metric] = "--"
+                candidates = [
+                    sol for sol in solutions_present
+                    if not pd.isna(temporal_rows[sol][metric]["mean"])
+                ]
+                if not candidates:
                     continue
-
-                mean_value = result["mean"]
-                ci_value = result["ci"]
-
-                if pd.isna(mean_value):
-                    row[metric] = "--"
-                    continue
-
-                if pd.isna(ci_value):
-                    text = f"{mean_value:.2f}"
+                if metric in higher_is_better_metrics:
+                    best_by_metric[metric] = max(
+                        candidates,
+                        key=lambda sol: temporal_rows[sol][metric]["mean"],
+                    )
                 else:
+                    best_by_metric[metric] = min(
+                        candidates,
+                        key=lambda sol: temporal_rows[sol][metric]["mean"],
+                    )
+
+            temporal_first = True
+            for solution in solutions_present:
+                row = {}
+                if shift_first:
+                    row["Shift"] = (
+                        f"\\multirow{{{shift_row_count}}}{{*}}{{{shift_labels[shift_type]}}}"
+                    )
+                    shift_first = False
+                else:
+                    row["Shift"] = ""
+
+                if temporal_first:
+                    row["Shift Type"] = (
+                        f"\\multirow{{{len(solutions_present)}}}{{*}}{{{temporal_labels[temporal_type]}}}"
+                    )
+                    temporal_first = False
+                else:
+                    row["Shift Type"] = ""
+
+                # Sudden shifts do not have a transition window.
+                # Because pandas represents missing numeric values as NaN,
+                # explicitly handle both None and NaN here.
+                if transition_window is None or pd.isna(transition_window):
+                    row["Transition Window"] = "N/A"
+                else:
+                    row["Transition Window"] = str(int(float(transition_window)))
+
+                solution_display = str(solution)
+                if solution_display == "MFP_v2_dh":
+                    solution_display = "$\\textit{MFP}_{\\textit{DDH}}$"
+                elif solution_display == "MFP_v2_iti":
+                    solution_display = "$\\textit{MFP}_{\\textit{ITI}}$"
+                elif solution_display == "MFP_v2":
+                    solution_display = "MFP"
+                elif solution_display == "MultiFedAvg+MFP_v2":
+                    solution_display = "MultiFedAvg+MFP"
+                else:
+                    solution_display = solution_display.replace("_", r"\_")
+                row["Solution"] = solution_display
+
+                for metric in metrics:
+                    result = temporal_rows[solution].get(metric)
+                    if result is None or pd.isna(result["mean"]):
+                        row[metric] = "--"
+                        continue
+
+                    mean_value = result["mean"]
+                    ci_value = result["ci"]
                     text = (
                         f"{mean_value:.2f}"
-                        f" $\\pm$ "
-                        f"{ci_value:.2f}"
+                        if pd.isna(ci_value)
+                        else f"{mean_value:.2f} $\\pm$ {ci_value:.2f}"
                     )
 
-                # ------------------------------------------------
-                # Bold best result.
-                #
-                # A solution is bold if its mean is inside the
-                # 95% CI of the best solution, preserving the
-                # previous presentation convention.
-                # ------------------------------------------------
+                    best_solution = best_by_metric.get(metric)
+                    is_bold = False
+                    if best_solution is not None:
+                        best = temporal_rows[best_solution][metric]
+                        if not pd.isna(best["mean"]):
+                            if pd.isna(best["ci"]):
+                                is_bold = np.isclose(
+                                    mean_value, best["mean"], rtol=1e-12, atol=1e-12
+                                )
+                            else:
+                                is_bold = (
+                                    best["mean"] - best["ci"]
+                                    <= mean_value
+                                    <= best["mean"] + best["ci"]
+                                )
+                    if is_bold:
+                        text = f"\\textbf{{{text}}}"
+                    row[metric] = text
 
-                best_solution = best_by_metric.get(metric)
+                    if metric == "Average Detection Delay":
+                        row["MTD n"] = str(result["n"])
 
-                is_bold = False
-
-                if best_solution is not None:
-
-                    best_result = rows_raw[
-                        shift_type
-                    ][best_solution][metric]
-
-                    best_mean = best_result["mean"]
-                    best_ci = best_result["ci"]
-
-                    if not pd.isna(best_mean):
-
-                        if pd.isna(best_ci):
-                            is_bold = np.isclose(
-                                mean_value,
-                                best_mean,
-                                rtol=1e-12,
-                                atol=1e-12,
-                            )
-                        else:
-                            best_lower = (
-                                best_mean - best_ci
-                            )
-                            best_upper = (
-                                best_mean + best_ci
-                            )
-
-                            is_bold = (
-                                best_lower
-                                <= mean_value
-                                <= best_upper
-                            )
-
-                if is_bold:
-                    text = (
-                        "\\textbf{"
-                        + text
-                        + "}"
-                    )
-
-                row[metric] = text
-
-                # MTD is computed only over experimental units in which
-                # the shift was successfully detected within the valid
-                # detection window. Report its effective sample size.
-                if metric == "Average Detection Delay":
-                    row["MTD n"] = str(result["n"])
-
-            table_rows.append(row)
-
-    # ============================================================
-    # DATAFRAME FOR LATEX
-    # ============================================================
+                table_rows.append(row)
 
     df_table = pd.DataFrame(
         table_rows,
-        columns=[
-            "Shift Type",
-            "Solution",
-        ] + metrics
+        columns=["Shift", "Shift Type", "Transition Window", "Solution"] + metrics + ["MTD n"],
     )
-
-    # ============================================================
-    # COLUMN NAMES FOR PAPER
-    # ============================================================
 
     df_table = df_table.rename(
         columns={
-            "Shift Type": "Shift Type",
-            "Solution": "Solution",
             "Detection Rate": "DR $\\uparrow$",
             "Episode F1": "Episode F1 $\\uparrow$",
             "Average Detection Delay": "MTD $\\downarrow$",
@@ -2289,97 +2114,26 @@ def table_detection_quality_by_shift_type(
         }
     )
 
-    # ============================================================
-    # LATEX
-    # ============================================================
-
-    filename = os.path.join(
-        write_path,
-        "overall_detection_quality.tex"
-    )
-
+    filename = os.path.join(write_path, "overall_detection_quality.tex")
     latex = df_table.to_latex(
         index=False,
         escape=False,
         caption=(
-            "Performance of data-shift detection methods. "
-            "Detection Rate (DR) is the proportion of shifts detected "
-            "within the allowed detection window; Episode F1 is the "
-            "episode-level F1 score balancing correct detections and "
-            "false alarms; Mean Time to Detection (MTD) is the mean "
-            "number of rounds from the shift to the first valid detection; "
-            "Missed Detection Rate (MDR) is the proportion of shifts not "
-            "detected within the allowed window; and False Alarm Rate "
-            "(FAR) is the proportion of stable pre-shift rounds that "
-            "produce false alarms. Each metric is reported per solution "
-            "across all executed experiments with five folds and as "
-            "mean $\\pm$ 95\\% confidence interval."
+            "Performance of data-shift detection methods. Results are "
+            "separated by shift family (Concept Drift, Label Shift, and "
+            "Combined Shift), temporal shift type (Sudden or Gradual), "
+            "and, for gradual shifts, the transition window. Each metric "
+            "is first computed per Solution $\\times$ Dataset $\\times$ "
+            "Experiment $\\times$ Fold ID and then aggregated. The best "
+            "result for each metric is determined independently within "
+            "each Shift $\\times$ Shift Type $\\times$ Transition Window "
+            "group. Results are reported as mean $\\pm$ 95\\% confidence interval."
         ),
         label="tab:overall_detection_quality",
-        column_format="llcccccc",
+        column_format="llllcccccc",
     )
-
-    # ------------------------------------------------------------
-    # Use the two-column table environment so the table can span
-    # the full page width in a two-column document.
-    # ------------------------------------------------------------
     latex = latex.replace("\\begin{table}", "\\begin{table*}", 1)
     latex = latex.replace("\\end{table}", "\\end{table*}", 1)
-
-    # ------------------------------------------------------------
-    # Make the table occupy the full text width.
-    # ------------------------------------------------------------
-    latex = latex.replace(
-        "\\begin{tabular}{llcccccc}",
-        "\\resizebox{\\textwidth}{!}{%\n"
-        "\\begin{tabular}{llccccc}",
-        1,
-    )
-
-    # Close the resizebox after the tabular environment.
-    latex = latex.replace(
-        "\\end{tabular}",
-        "\\end{tabular}%\n"
-        "}",
-        1,
-    )
-
-    # ------------------------------------------------------------
-    # Insert the separator directly into the generated LaTeX.
-    # It must be a LaTeX row command, not a DataFrame cell.
-    # ------------------------------------------------------------
-
-    lines = latex.splitlines()
-    cleaned_lines = []
-    first_shift_group = True
-
-    for line in lines:
-        is_shift_group = (
-            r"\multirow{" in line
-            and any(
-                marker in line
-                for marker in (
-                    "}{*}{Concept Drift}",
-                    "}{*}{Label Shift}",
-                    "}{*}{Combined Shift}",
-                )
-            )
-        )
-
-        if is_shift_group and not first_shift_group:
-            cleaned_lines.append(r"\midrule")
-
-        if is_shift_group:
-            first_shift_group = False
-
-        cleaned_lines.append(line)
-
-    latex = "\n".join(cleaned_lines)
-
-    # ============================================================
-    # ADD REQUIRED MULTIROW PACKAGE
-    # ============================================================
-
     latex = (
         "% Requires: \\usepackage{booktabs}\n"
         "% Requires: \\usepackage{multirow}\n"
@@ -2387,54 +2141,23 @@ def table_detection_quality_by_shift_type(
         + latex
     )
 
-    # ============================================================
-    # WRITE FILE
-    # ============================================================
-
-    with open(
-        filename,
-        "w",
-        encoding="utf-8"
-    ) as f:
+    Path(write_path).mkdir(parents=True, exist_ok=True)
+    with open(filename, "w", encoding="utf-8") as f:
         f.write(latex)
-
-    # ============================================================
-    # PRINT STATISTICS FOR VALIDATION
-    # ============================================================
 
     print("\n" + "=" * 100)
     print("DETECTION TABLE - EXPERIMENTAL UNITS")
     print("=" * 100)
-
-    print(
-        "\nEach metric was first calculated for:"
-        "\n  Solution × Dataset × Experiment × Fold ID"
-    )
-
-    print(
-        "\nNumber of experimental units by shift type:"
-    )
-
+    print("\nEach metric was first calculated for:")
+    print("  Solution × Dataset × Experiment × Fold ID × Shift Type × Temporal Shift Type × Transition Window")
+    print("\nNumber of experimental units by shift / temporal type / window:")
     print(
         df_experimental.groupby(
-            "Shift Type"
+            ["Shift Type", "Temporal Shift Type", "Transition Window"],
+            dropna=False,
         ).size()
     )
-
-    print(
-        "\nNumber of units by shift type and solution:"
-    )
-
-    print(
-        df_experimental.groupby(
-            ["Shift Type", "Solution"]
-        ).size()
-    )
-
-    print(
-        f"\nLaTeX table written to:\n{filename}"
-    )
-
+    print(f"\nLaTeX table written to:\n{filename}")
     print("=" * 100)
 
     return df_experimental, df_table
@@ -2445,14 +2168,17 @@ def extract_alpha_from_experiment(experiment_id):
 
     Concept Drift:
         concept_drift#0.1_sudden
+        concept_drift#0.1_gradual
         -> 0.1
 
     Label Shift:
         label_shift#0.1-1.0_sudden
+        label_shift#0.1-1.0_gradual
         -> (0.1, 1.0)
 
     Combined Shift:
         combined_shift#0.1-1.0_sudden
+        combined_shift#0.1-1.0_gradual
         -> (0.1, 1.0)
 
         The result directory uses:
@@ -2472,10 +2198,24 @@ def extract_alpha_from_experiment(experiment_id):
         1
     )
 
-    config = config.split(
-        "_sudden",
-        1
-    )[0]
+    # Remove the temporal suffix from both sudden and gradual
+    # experiment identifiers.
+    #
+    # Supported:
+    #   concept_drift#0.1_sudden
+    #   concept_drift#0.1_gradual
+    #   label_shift#0.1-1.0_sudden
+    #   label_shift#0.1-1.0_gradual
+    #   combined_shift#0.1-1.0_sudden
+    #   combined_shift#0.1-1.0_gradual
+    #
+    # The temporal suffix must not be part of the alpha value.
+    config = re.sub(
+        r"_(?:sudden|gradual)$",
+        "",
+        config,
+        flags=re.IGNORECASE,
+    )
 
     # ============================================================
     # CONCEPT DRIFT
@@ -2706,11 +2446,15 @@ if __name__ == "__main__":
     concept_experiments = [
         "concept_drift#0.1_sudden",
         "concept_drift#1.0_sudden",
-        "concept_drift#10.0_sudden"
+        "concept_drift#10.0_sudden",
+        "concept_drift#0.1_gradual",
+        "concept_drift#1.0_gradual",
+        "concept_drift#10.0_gradual"
     ]
 
     label_experiments = [
         "label_shift#0.1-1.0_sudden",
+        "label_shift#0.1-1.0_gradual",
         # "label_shift#0.1-10.0_sudden",
         # "label_shift#1.0-0.1_sudden",
         # "label_shift#1.0-10.0_sudden",
@@ -2729,13 +2473,29 @@ if __name__ == "__main__":
             + combined_experiments
     )
 
+    # Gradual shifts have an explicit transition-window directory level.
+    # Read every configured gradual window independently.
+    GRADUAL_TRANSITION_WINDOWS = [5, 10]
+
+    experiment_configurations = []
+    for _experiment_id in experiment_ids:
+        if _experiment_id.lower().endswith("_gradual"):
+            for _transition_window in GRADUAL_TRANSITION_WINDOWS:
+                experiment_configurations.append(
+                    (_experiment_id, _transition_window)
+                )
+        else:
+            experiment_configurations.append(
+                (_experiment_id, None)
+            )
+
     df_all = None
 
     # ============================================================
     # LEITURA DOS RESULTADOS
     # ============================================================
 
-    for experiment_id in experiment_ids:
+    for experiment_id, transition_window in experiment_configurations:
 
         # ============================================================
         # EXTRAIR CONFIGURAÇÃO DE ALPHA
@@ -2830,21 +2590,31 @@ if __name__ == "__main__":
 
             # A diretoria continua sendo construída com a LISTA
             # completa de datasets, exatamente como no código original.
-            read_path = (
+            base_read_path = (
                 "../system/results/"
                 "experiment_id_{}/"
                 "clients_{}/"
                 "alpha_{}/"
-                "{}/"
-                "{}/"
-                "fc_{}/"
-                "rounds_{}/"
-                "epochs_{}/"
-                "{}/"
             ).format(
                 experiment_id,
                 total_clients,
                 alphas,
+            )
+
+            if transition_window is not None:
+                base_read_path += (
+                    f"transition_window_{transition_window}/"
+                )
+
+            read_path = (
+                base_read_path
+                + "{}/"
+                + "{}/"
+                + "fc_{}/"
+                + "rounds_{}/"
+                + "epochs_{}/"
+                + "{}/"
+            ).format(
                 dataset,
                 model_name,
                 fraction_fit,
@@ -2876,8 +2646,10 @@ if __name__ == "__main__":
         print("DEBUG - DIRETÓRIO DE LEITURA")
         print("=" * 80)
 
-        print(f"Experiment ID : {experiment_id}")
-        print(f"Alphas        : {alphas}")
+        print(f"Experiment ID     : {experiment_id}")
+        print(f"Shift mode        : {'Gradual' if transition_window is not None else 'Sudden'}")
+        print(f"Transition Window : {transition_window if transition_window is not None else 'N/A'}")
+        print(f"Alphas            : {alphas}")
         print(f"Read path     : {read_path}")
         print(f"Detection file: {detection_file}")
 
@@ -2923,7 +2695,8 @@ if __name__ == "__main__":
             read_solutions,
             experiment_id=experiment_id,
             alpha_value=alpha_value,
-            dataset_shift_rounds=dataset_shift_rounds
+            dataset_shift_rounds=dataset_shift_rounds,
+            transition_window=transition_window
         )
 
         # Preserve the experiment identifier in the final dataframe.

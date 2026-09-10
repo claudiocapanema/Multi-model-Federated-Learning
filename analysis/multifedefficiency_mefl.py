@@ -155,15 +155,16 @@ if __name__ == "__main__":
     # experiment_id = "concept_drift#1_recurrent"
     # experiment_id = "concept_drift#2_recurrent"
     # experiment_id = "concept_drift#2_sudden"
+    experiment_id = "combined_shift#0.1-1.0_sudden"
     # experiment_id = ""
     total_clients = 40
     # total_clients = 100
     # total_clients = 60
     # total_clients = 100
     # alphas = [10.0, 10.0]
-    # alphas = [0.1, 0.1, 0.1]
+    alphas = [0.1, 0.1, 0.1]
     # alphas = [1.0, 1.0, 1.0]
-    alphas = [10.0, 10.0, 10.0]
+    # alphas = [10.0, 10.0, 10.0]
 
     # alphas = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
 

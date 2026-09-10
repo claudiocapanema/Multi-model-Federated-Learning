@@ -117,7 +117,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             self.lw_by_round = {me: {} for me in range(self.ME)}
 
             self.combined_accuracy_history_window = 10
-            self.combined_accuracy_drop_threshold = 0.20
+            self.combined_accuracy_drop_threshold = 0.15
 
             self.max_number_of_rounds_data_drift_adaptation = (
                     len(self.clients)
@@ -1377,14 +1377,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 f"df: {self.df}"
             )
 
-            self._save_shift_detection_metrics(
-                server_round
-            )
-
-            self._save_shift_detection_curve(
-                server_round
-            )
-
             return (
                 parameters_aggregated_mefl,
                 metrics_aggregated_mefl
@@ -1549,6 +1541,100 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             print("binomial error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
+    def _detect_data_shift_after_evaluation(self, server_round, model=None):
+        """Detect data shift using the evaluation completed in server_round.
+
+        Detection is performed only after aggregate_evaluate() has appended
+        the current round observation to the corresponding history.  This
+        prevents select_clients(t) from treating the previous round as if it
+        were the current round.
+        """
+        try:
+            ls_threshold = float(self.data_shift_threshold)
+            acc_drop_threshold = float(self.combined_accuracy_drop_threshold)
+            history_window = int(self.combined_accuracy_history_window)
+
+            models = range(self.ME) if model is None else [int(model)]
+            for me in models:
+                ls_history = self.ls_list[me]
+                current_ls = (
+                    float(np.clip(ls_history[-1], 0.0, 1.0))
+                    if ls_history else 0.0
+                )
+                previous_ls_history = ls_history[:-1]
+                ls_significant = current_ls >= ls_threshold
+
+                history = self.combined_train_accuracy_history[me]
+                current_accuracy = (
+                    float(np.clip(history[-1], 0.0, 1.0))
+                    if history else float(np.clip(self.combined_train_accuracy[me], 0.0, 1.0))
+                )
+                previous_history = history[:-1]
+
+                accuracy_history_ready = len(previous_history) >= history_window
+                if accuracy_history_ready:
+                    reference = float(np.mean(previous_history[-history_window:]))
+                    relative_drop = (
+                        max(0.0, (reference - current_accuracy) / reference)
+                        if reference > 1e-12 else 0.0
+                    )
+                    accuracy_drop_significant = relative_drop >= acc_drop_threshold
+                else:
+                    reference = 0.0
+                    relative_drop = 0.0
+                    accuracy_drop_significant = False
+
+                self.combined_accuracy_reference[me] = reference
+                self.combined_accuracy_drop[me] = relative_drop
+                self.combined_accuracy_drop_significant[me] = accuracy_drop_significant
+
+                label_shift_history_ready = len(previous_ls_history) >= history_window
+
+                if self.shift_type == "LABEL_SHIFT":
+                    shift_detection_ready = label_shift_history_ready
+                    detected = bool(shift_detection_ready and ls_significant)
+                else:
+                    shift_detection_ready = accuracy_history_ready
+                    detected = bool(
+                        shift_detection_ready
+                        and (ls_significant or accuracy_drop_significant)
+                    )
+
+                self.data_shift_detected[me] = detected
+                self.data_shift_score[me] = max(current_ls, relative_drop)
+
+                if self.data_shift_score_list[me]:
+                    self.data_shift_score_list[me][-1] = self.data_shift_score[me]
+
+                print(
+                    f"[DATA SHIFT DETECTOR] round={server_round} model={me} "
+                    f"evidence_round={server_round} "
+                    f"shift_type={self.shift_type} "
+                    f"LS={current_ls:.6f} LS_threshold={ls_threshold:.6f} "
+                    f"LS_significant={ls_significant} "
+                    f"combined_train_accuracy={current_accuracy:.6f} "
+                    f"accuracy_reference={reference:.6f} "
+                    f"relative_accuracy_drop={relative_drop:.6f} "
+                    f"drop_threshold={acc_drop_threshold:.6f} "
+                    f"accuracy_drop_significant={accuracy_drop_significant} "
+                    f"ls_history_size={len(ls_history)} "
+                    f"label_shift_history_ready={label_shift_history_ready} "
+                    f"accuracy_history_size={len(history)} "
+                    f"accuracy_history_ready={accuracy_history_ready} "
+                    f"state={'DATA_SHIFT' if detected else 'NO_SHIFT'}"
+                )
+
+        except Exception as e:
+            print("_detect_data_shift_after_evaluation error")
+            print("Error on line {} {} {}".format(
+                sys.exc_info()[-1].tb_lineno, type(e).__name__, e
+            ))
+
+    def _commit_detector_state(self):
+        """Commit the detector state after the round's client selection."""
+        for me in range(self.ME):
+            self.previous_detector_state[me] = bool(self.data_shift_detected[me])
+
     def select_clients(self, t):
 
         try:
@@ -1579,101 +1665,16 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             # ============================================================
             # SERVER-SIDE DATA-SHIFT DETECTION
             #
-            # DATA_SHIFT = significant aggregated LS OR significant
-            # drop in aggregated combined-model training accuracy.
+            # Detection is completed in aggregate_evaluate(), after the
+            # current round's evaluation has been aggregated.  Therefore,
+            # select_clients(t) only consumes the detector state produced
+            # by round t-1.  This keeps the evidence round and the recorded
+            # detection round aligned.
             # ============================================================
-            shift_detected = [False] * self.ME
-            ls_threshold = float(self.data_shift_threshold)
-            acc_drop_threshold = float(self.combined_accuracy_drop_threshold)
-            history_window = int(self.combined_accuracy_history_window)
-
-            for me in range(self.ME):
-                current_ls = float(np.clip(self.ls[me], 0.0, 1.0))
-                ls_significant = current_ls >= ls_threshold
-
-                # The LS history is available for every shift type, including
-                # LABEL_SHIFT experiments where the combined-model training
-                # test is intentionally disabled on the client.
-                ls_history = self.ls_list[me]
-                previous_ls_history = ls_history[:-1]
-
-                history = self.combined_train_accuracy_history[me]
-
-                # The most recent history entry is the current round.
-                # The reference must contain only PREVIOUS rounds.
-                previous_history = history[:-1]
-
-                # After a confirmed shift, the accuracy history is reset and
-                # must be warmed up with a complete post-shift window before
-                # the detector is allowed to use accuracy evidence again.
-                # Because the current round is already in `history`, we need
-                # history_window PREVIOUS post-shift observations, i.e.
-                # len(history) >= history_window + 1.
-                accuracy_history_ready = len(previous_history) >= history_window
-
-                if accuracy_history_ready:
-                    reference = float(np.mean(previous_history[-history_window:]))
-                    current_accuracy = float(np.clip(self.combined_train_accuracy[me], 0.0, 1.0))
-                    relative_drop = (
-                        max(0.0, (reference - current_accuracy) / reference)
-                        if reference > 1e-12 else 0.0
-                    )
-                    accuracy_drop_significant = relative_drop >= acc_drop_threshold
-                else:
-                    reference = 0.0
-                    relative_drop = 0.0
-                    accuracy_drop_significant = False
-
-                self.combined_accuracy_reference[me] = reference
-                self.combined_accuracy_drop[me] = relative_drop
-                self.combined_accuracy_drop_significant[me] = accuracy_drop_significant
-
-                # LABEL_SHIFT must not depend on combined-model accuracy.
-                # The combined training test is intentionally disabled for
-                # label-shift experiments, so using its history here would
-                # make LS detection impossible.  The LS history itself is
-                # used as the warm-up window after each confirmed shift.
-                label_shift_history_ready = (
-                    len(previous_ls_history) >= history_window
-                )
-
-                if self.shift_type == "LABEL_SHIFT":
-                    shift_detection_ready = label_shift_history_ready
-                    shift_detected[me] = bool(
-                        shift_detection_ready and ls_significant
-                    )
-                else:
-                    # Concept/combined shift continues to use the combined
-                    # training-accuracy evidence and its post-reset warm-up.
-                    shift_detection_ready = accuracy_history_ready
-                    shift_detected[me] = bool(
-                        shift_detection_ready and
-                        (ls_significant or accuracy_drop_significant)
-                    )
-                self.data_shift_detected[me] = shift_detected[me]
-                self.data_shift_score[me] = max(current_ls, relative_drop)
-                # aggregate_fit() already created the entry for this round;
-                # update it with the accuracy evidence instead of appending
-                # a duplicate round.
-                if self.data_shift_score_list[me]:
-                    self.data_shift_score_list[me][-1] = self.data_shift_score[me]
-
-                print(
-                    f"[DATA SHIFT DETECTOR] round={t} model={me} "
-                    f"shift_type={self.shift_type} "
-                    f"LS={current_ls:.6f} LS_threshold={ls_threshold:.6f} "
-                    f"LS_significant={ls_significant} "
-                    f"combined_train_accuracy={self.combined_train_accuracy[me]:.6f} "
-                    f"accuracy_reference={reference:.6f} "
-                    f"relative_accuracy_drop={relative_drop:.6f} "
-                    f"drop_threshold={acc_drop_threshold:.6f} "
-                    f"accuracy_drop_significant={accuracy_drop_significant} "
-                    f"ls_history_size={len(ls_history)} "
-                    f"label_shift_history_ready={label_shift_history_ready} "
-                    f"accuracy_history_size={len(history)} "
-                    f"accuracy_history_ready={accuracy_history_ready} "
-                    f"state={'DATA_SHIFT' if shift_detected[me] else 'NO_SHIFT'}"
-                )
+            shift_detected = [
+                bool(self.data_shift_detected[me])
+                for me in range(self.ME)
+            ]
 
             # ============================================================
             # Determine whether a NEW adaptation must be started
@@ -1849,9 +1850,11 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 self.data_drift_model
             ]
             ):
-                return super().select_clients(
+                selected = super().select_clients(
                     t
                 )
+                self._commit_detector_state()
+                return selected
 
             # ============================================================
             # Active adaptation
@@ -2120,10 +2123,13 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     f"no_clients_available"
                 )
 
-                return super().select_clients(
+                selected = super().select_clients(
                     t
                 )
+                self._commit_detector_state()
+                return selected
 
+            self._commit_detector_state()
             return sc
 
         except Exception as e:
@@ -2390,6 +2396,11 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     self.combined_train_accuracy[me] = float(np.clip(combined_acc, 0.0, 1.0))
                     self.combined_train_accuracy_history[me].append(self.combined_train_accuracy[me])
 
+                # The current round is now fully evaluated.  Perform data-shift
+                # detection here so the evidence, detector state, and metrics
+                # all refer to the same server round.
+                self._detect_data_shift_after_evaluation(server_round, model=me)
+
                 metrics_aggregated_mefl[me] = {
                     "combined_train_accuracy": self.combined_train_accuracy[me] if combined_acc is not None else None,
                     "train_accuracy": train_acc,
@@ -2416,6 +2427,11 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     f"aggregated={self.combined_train_accuracy[me]:.6f} "
                     f"history_size={len(self.combined_train_accuracy_history[me])}"
                 )
+
+            # Detection metrics are written only after the current round's
+            # evaluation has produced the detector state.
+            self._save_shift_detection_metrics(server_round)
+            self._save_shift_detection_curve(server_round)
 
             return loss_aggregated_mefl, metrics_aggregated_mefl
         except Exception as e:
@@ -2857,10 +2873,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 self.shift_ground_truth_state[me].append(ground_truth)
                 self.shift_ground_truth_event[me].append(ground_truth_event)
                 self.shift_detected[me].append(predicted)
-                self.previous_detector_state[me] = bool(
-                    self.data_shift_detected[me]
-                )
-
                 row = [[
                     self.detector,
                     self.dataset[me],
