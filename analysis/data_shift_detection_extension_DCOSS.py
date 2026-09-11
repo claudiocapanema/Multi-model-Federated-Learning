@@ -235,12 +235,135 @@ def format_shift_configuration(shift_type, experiment_id):
 
     return config.replace("_", r"\_")
 
+def _get_shift_detection_bounds(
+    row,
+    max_detection_delay=None,
+    use_transition_window_for_gradual=True,
+):
+    """
+    Determina os limites da janela válida de detecção.
+
+    Sudden:
+        O shift ocorre instantaneamente em ``Shift Round``.
+        A janela válida é:
+            [Shift Round, Shift Round + max_detection_delay]
+
+    Gradual (``use_transition_window_for_gradual=True``):
+        O shift ocorre durante ``Transition Window`` rodadas, iniciando em
+        ``Shift Round``. Portanto, se o shift começa em t_s e possui janela
+        W, o último round da transição é:
+
+            t_e = t_s + W - 1
+
+        A janela válida de detecção é:
+
+            [t_s, t_e + max_detection_delay]
+
+    Gradual avaliado como sudden (``use_transition_window_for_gradual=False``):
+        ``Transition Window`` é ignorada para a validade da detecção e a
+        janela é:
+
+            [t_s, t_s + max_detection_delay]
+
+    Esta separação é importante: ``Transition Window`` representa a duração
+    do fenômeno, enquanto ``max_detection_delay`` representa a tolerância
+    para o detector reagir após o término do fenômeno.
+
+    Returns
+    -------
+    tuple(float, float or None)
+        Início e fim da janela válida de detecção.
+    """
+
+    shift_round = row.get("Shift Round", np.nan)
+
+    if pd.isna(shift_round):
+        return np.nan, None
+
+    shift_round = float(shift_round)
+
+    temporal_shift_type = str(
+        row.get("Temporal Shift Type", "")
+    ).strip().lower()
+
+    transition_window = row.get(
+        "Transition Window",
+        np.nan
+    )
+
+    # ------------------------------------------------------------
+    # END OF THE GROUND-TRUTH SHIFT
+    # ------------------------------------------------------------
+
+    if (
+        temporal_shift_type == "gradual"
+        and use_transition_window_for_gradual
+        and not pd.isna(transition_window)
+    ):
+        try:
+            transition_window = int(
+                float(transition_window)
+            )
+        except (TypeError, ValueError):
+            transition_window = None
+
+        if transition_window is not None and transition_window > 0:
+            shift_end = (
+                shift_round
+                + transition_window
+                - 1
+            )
+        else:
+            # Defensive fallback: if the temporal type is gradual but
+            # the transition window is unavailable/invalid, preserve the
+            # instantaneous interpretation rather than inventing a window.
+            shift_end = shift_round
+    else:
+        # Sudden shifts are instantaneous.
+        shift_end = shift_round
+
+    # ------------------------------------------------------------
+    # END OF THE VALID DETECTION WINDOW
+    # ------------------------------------------------------------
+
+    if max_detection_delay is None:
+        detection_window_end = None
+    else:
+        detection_window_end = (
+            shift_end
+            + float(max_detection_delay)
+        )
+
+    return shift_round, detection_window_end
+
+
 def _get_valid_detection_rounds(
     row,
-    max_detection_delay=None
+    max_detection_delay=None,
+    use_transition_window_for_gradual=True,
 ):
     """
     Retorna os alarmes considerados válidos para o shift.
+
+    A definição é baseada no episódio ground-truth:
+
+    * Sudden: o episódio contém apenas ``Shift Round``.
+    * Gradual: o episódio contém
+      ``Shift Round`` até ``Shift Round + Transition Window - 1``.
+
+    Uma detecção em qualquer ponto do episódio é válida. Após o fim do
+    episódio, a mesma margem ``max_detection_delay`` é aplicada tanto a
+    sudden quanto a gradual.
+
+    Assim, para um gradual que começa em 30 com Transition Window = 5,
+    o episódio é [30, 34]. Com max_detection_delay = 10, a janela válida
+    de detecção é [30, 44].
+
+    ``Transition Window`` e ``max_detection_delay`` têm papéis distintos:
+
+    * Transition Window = duração do fenômeno de shift;
+    * max_detection_delay = tolerância para o detector reagir após o
+      término do fenômeno.
 
     Parameters
     ----------
@@ -248,10 +371,10 @@ def _get_valid_detection_rounds(
         Unidade experimental.
 
     max_detection_delay : int or None
-        Janela máxima aceitável de detecção após o shift.
+        Janela máxima aceitável de detecção após o término do shift.
 
         None:
-            qualquer detecção após o shift e antes do fim
+            qualquer detecção após o início do shift e antes do fim
             da avaliação é considerada válida.
 
     Returns
@@ -260,7 +383,11 @@ def _get_valid_detection_rounds(
         Rodadas de detecção válidas.
     """
 
-    shift_round = row["Shift Round"]
+    shift_round, detection_window_end = _get_shift_detection_bounds(
+        row,
+        max_detection_delay=max_detection_delay,
+        use_transition_window_for_gradual=use_transition_window_for_gradual,
+    )
 
     if pd.isna(shift_round):
         return []
@@ -292,15 +419,14 @@ def _get_valid_detection_rounds(
         if detection_round < shift_round:
             continue
 
-        # Optional maximum detection window.
-        if max_detection_delay is not None:
-
-            if (
-                detection_round
-                > shift_round
-                + max_detection_delay
-            ):
-                continue
+        # If a maximum detection delay is configured, the deadline is
+        # measured from the END of the ground-truth episode. This makes
+        # the post-transition behavior identical for sudden and gradual.
+        if (
+            detection_window_end is not None
+            and detection_round > detection_window_end
+        ):
+            continue
 
         valid.append(detection_round)
 
@@ -629,7 +755,8 @@ def calculate_alarm_rate(df):
 def calculate_detection_metric_values(
     df,
     metric,
-    max_detection_delay=None
+    max_detection_delay=None,
+    use_transition_window_for_gradual=True,
 ):
     """
     Retorna uma observação da métrica por unidade experimental.
@@ -718,9 +845,8 @@ def calculate_detection_metric_values(
         valid_detections = (
             _get_valid_detection_rounds(
                 row,
-                max_detection_delay=(
-                    max_detection_delay
-                )
+                max_detection_delay=max_detection_delay,
+                use_transition_window_for_gradual=use_transition_window_for_gradual,
             )
         )
 
@@ -825,8 +951,11 @@ def calculate_detection_metric_values(
                     max_detection_delay is not None
                     and detection_round
                     > (
-                        shift_round
-                        + max_detection_delay
+                        _get_shift_detection_bounds(
+                            row,
+                            max_detection_delay=max_detection_delay,
+                            use_transition_window_for_gradual=use_transition_window_for_gradual,
+                        )[1]
                     )
                 ):
                     fp += 1
@@ -1461,12 +1590,14 @@ def calculate_detection_metric(
     df,
     metric,
     ci=0.95,
-    max_detection_delay=None
+    max_detection_delay=None,
+    use_transition_window_for_gradual=True,
 ):
     values = calculate_detection_metric_values(
         df,
         metric,
-        max_detection_delay=max_detection_delay
+        max_detection_delay=max_detection_delay,
+        use_transition_window_for_gradual=use_transition_window_for_gradual,
     )
 
     bounded = metric in {
@@ -1521,7 +1652,8 @@ def _extract_detection_rounds_from_unit(df_experiment):
 
 def _calculate_experiment_detection_metrics(
     df_experiment,
-    max_detection_delay=None
+    max_detection_delay=None,
+    use_transition_window_for_gradual=True,
 ):
     """
     Calcula as métricas para UMA unidade experimental:
@@ -1584,19 +1716,30 @@ def _calculate_experiment_detection_metrics(
         df_experiment
     )
 
-    valid_detections = [
-        detection_round
-        for detection_round in detection_rounds
-        if detection_round >= shift_round
-        and (
-            max_detection_delay is None
-            or detection_round
-            <= shift_round + max_detection_delay
-        )
-    ]
+    # Validity is defined from the ground-truth episode:
+    #   sudden  -> [Shift Round, Shift Round]
+    #   gradual -> [Shift Round,
+    #               Shift Round + Transition Window - 1]
+    #
+    # The same max_detection_delay is then applied AFTER the end of
+    # that episode for both sudden and gradual.
+    detection_row = row.copy()
+    detection_row["Temporal Shift Type"] = (
+        df_experiment["Temporal Shift Type"].iloc[0]
+        if "Temporal Shift Type" in df_experiment.columns
+        else ""
+    )
+    detection_row["Transition Window"] = (
+        df_experiment["Transition Window"].iloc[0]
+        if "Transition Window" in df_experiment.columns
+        else np.nan
+    )
+    detection_row["Detection Rounds"] = detection_rounds
 
-    valid_detections = sorted(
-        set(valid_detections)
+    valid_detections = _get_valid_detection_rounds(
+        detection_row,
+        max_detection_delay=max_detection_delay,
+        use_transition_window_for_gradual=use_transition_window_for_gradual,
     )
 
     # ============================================================
@@ -1656,10 +1799,19 @@ def _calculate_experiment_detection_metrics(
         # Alarm after the allowed detection window.
         # It is an FP for Episode F1, but NOT for FAR because FAR
         # measures false alarms during the stable pre-shift regime.
+        # Alarm after the valid detection window.
+        # The deadline is measured from the END of the ground-truth
+        # episode, so gradual and sudden use the same post-transition
+        # detection tolerance.
+        _, detection_window_end = _get_shift_detection_bounds(
+            detection_row,
+            max_detection_delay=max_detection_delay,
+            use_transition_window_for_gradual=use_transition_window_for_gradual,
+        )
+
         if (
-            max_detection_delay is not None
-            and detection_round
-            > shift_round + max_detection_delay
+            detection_window_end is not None
+            and detection_round > detection_window_end
         ):
             false_alarms.append(
                 detection_round
@@ -1745,12 +1897,28 @@ def table_detection_quality_by_shift_type(
     higher_is_better_metrics=None,
     ci=0.95,
     max_detection_delay=None,
+    use_transition_window_for_gradual=True,
 ):
     """
     Gera a tabela consolidada de qualidade da detecção.
 
     Para gradual shifts, ``Transition Window`` é um parâmetro experimental
-    explícito e é extraído do diretório de resultados:
+    explícito e é extraído do diretório de resultados.
+
+    A avaliação trata o shift como um episódio ground-truth:
+        * sudden: [Shift Round, Shift Round]
+        * gradual: [Shift Round,
+                    Shift Round + Transition Window - 1]
+
+    A margem ``max_detection_delay`` é aplicada após o fim do episódio
+    quando ``use_transition_window_for_gradual=True``.
+
+    Quando ``use_transition_window_for_gradual=False``, gradual é avaliado
+    exatamente como sudden para as métricas: ``Transition Window`` não é
+    usada para decidir se uma detecção ocorreu dentro da janela válida.
+    Nesse modo, a janela válida é ``[Shift Round,
+    Shift Round + max_detection_delay]``. A ``Transition Window`` continua
+    sendo preservada apenas como dimensão experimental da tabela.
 
         transition_window_2
         transition_window_5
@@ -1897,6 +2065,34 @@ def table_detection_quality_by_shift_type(
         metric_values = _calculate_experiment_detection_metrics(
             df_unit,
             max_detection_delay=max_detection_delay,
+            use_transition_window_for_gradual=use_transition_window_for_gradual,
+        )
+
+        # Debug: show the effective ground-truth episode and the final
+        # valid detection deadline for this experimental configuration.
+        debug_row = df_unit.iloc[0].copy()
+        debug_start, debug_end = _get_shift_detection_bounds(
+            debug_row,
+            max_detection_delay=max_detection_delay,
+            use_transition_window_for_gradual=use_transition_window_for_gradual,
+        )
+        debug_window = debug_row.get("Transition Window", np.nan)
+        debug_temporal = debug_row.get("Temporal Shift Type", "N/A")
+
+        if max_detection_delay is None:
+            debug_deadline = "unlimited"
+        else:
+            debug_deadline = (
+                f"{debug_end:g}"
+                if debug_end is not None
+                else "unlimited"
+            )
+
+        print(
+            f"DEBUG - {temporal_shift_type} | "
+            f"Shift start={debug_start:g} | "
+            f"Transition Window={debug_window} | "
+            f"valid detection through={debug_deadline}"
         )
 
         row = {
@@ -1976,145 +2172,334 @@ def table_detection_quality_by_shift_type(
         "Label shift": "Label Shift",
         "Combined shift": "Combined Shift",
     }
-    temporal_labels = {"sudden": "Sudden", "gradual": "Gradual"}
+
+    temporal_labels = {
+        "sudden": "Sudden",
+        "gradual": "Gradual",
+    }
 
     table_rows = []
+
     for shift_type in valid_shift_types:
+
         keys = [
-            key for key in aggregated
+            key
+            for key in aggregated
             if key[0] == shift_type
         ]
+
         if not keys:
             continue
 
-        # Stable ordering: sudden first, then gradual by transition window.
-        keys.sort(key=lambda k: (0 if k[1] == "sudden" else 1, -1 if k[2] is None else k[2]))
-        shift_row_count = sum(len(aggregated[k]) for k in keys)
+        # Stable ordering:
+        #   1. Sudden
+        #   2. Gradual, ordered by transition window
+        keys.sort(
+            key=lambda k: (
+                0 if k[1] == "sudden" else 1,
+                -1 if k[2] is None else k[2],
+            )
+        )
+
+        # Number of rows occupied by the complete shift family.
+        shift_row_count = sum(
+            len(aggregated[k])
+            for k in keys
+        )
+
         shift_first = True
 
+        # --------------------------------------------------------
+        # IMPORTANT:
+        # Gradual spans ALL transition-window groups belonging
+        # to the same shift family.
+        # --------------------------------------------------------
+        temporal_row_counts = {}
+
+        for temporal_type in ["sudden", "gradual"]:
+
+            temporal_keys = [
+                k
+                for k in keys
+                if k[1] == temporal_type
+            ]
+
+            temporal_row_counts[temporal_type] = sum(
+                len(aggregated[k])
+                for k in temporal_keys
+            )
+
+        temporal_first = {
+            "sudden": True,
+            "gradual": True,
+        }
+
+        # --------------------------------------------------------
+        # Generate table rows
+        # --------------------------------------------------------
         for key in keys:
+
             _, temporal_type, transition_window = key
             temporal_rows = aggregated[key]
-            solutions_present = [s for s in solutions if s in temporal_rows]
+
+            solutions_present = [
+                s
+                for s in solutions
+                if s in temporal_rows
+            ]
+
             if not solutions_present:
                 continue
 
-            # Best solution is determined only inside this exact
-            # Shift × Temporal Shift Type × Transition Window group.
+            # ----------------------------------------------------
+            # Best solution is determined independently for each
+            # Shift × Temporal Type × Transition Window group.
+            # ----------------------------------------------------
             best_by_metric = {}
+
             for metric in metrics:
+
                 candidates = [
-                    sol for sol in solutions_present
-                    if not pd.isna(temporal_rows[sol][metric]["mean"])
+                    sol
+                    for sol in solutions_present
+                    if not pd.isna(
+                        temporal_rows[sol][metric]["mean"]
+                    )
                 ]
+
                 if not candidates:
                     continue
+
                 if metric in higher_is_better_metrics:
+
                     best_by_metric[metric] = max(
                         candidates,
-                        key=lambda sol: temporal_rows[sol][metric]["mean"],
+                        key=lambda sol:
+                        temporal_rows[sol][metric]["mean"],
                     )
+
                 else:
+
                     best_by_metric[metric] = min(
                         candidates,
-                        key=lambda sol: temporal_rows[sol][metric]["mean"],
+                        key=lambda sol:
+                        temporal_rows[sol][metric]["mean"],
                     )
 
-            temporal_first = True
+            # ----------------------------------------------------
+            # One row per solution
+            # ----------------------------------------------------
             for solution in solutions_present:
+
                 row = {}
+
+                # ==================================================
+                # SHIFT
+                # ==================================================
                 if shift_first:
+
                     row["Shift"] = (
-                        f"\\multirow{{{shift_row_count}}}{{*}}{{{shift_labels[shift_type]}}}"
+                        f"\\multirow{{{shift_row_count}}}"
+                        f"{{*}}{{{shift_labels[shift_type]}}}"
                     )
+
                     shift_first = False
+
                 else:
+
                     row["Shift"] = ""
 
-                if temporal_first:
-                    row["Shift Type"] = (
-                        f"\\multirow{{{len(solutions_present)}}}{{*}}{{{temporal_labels[temporal_type]}}}"
+                # ==================================================
+                # SHIFT TYPE
+                #
+                # Gradual is ONE multirow covering all transition
+                # windows of the gradual condition.
+                # ==================================================
+                if temporal_first[temporal_type]:
+
+                    temporal_row_count = (
+                        temporal_row_counts[temporal_type]
                     )
-                    temporal_first = False
+
+                    row["Shift Type"] = (
+                        f"\\multirow{{{temporal_row_count}}}"
+                        f"{{*}}{{{temporal_labels[temporal_type]}}}"
+                    )
+
+                    temporal_first[temporal_type] = False
+
                 else:
+
                     row["Shift Type"] = ""
 
-                # Sudden shifts do not have a transition window.
-                # Because pandas represents missing numeric values as NaN,
-                # explicitly handle both None and NaN here.
-                if transition_window is None or pd.isna(transition_window):
-                    row["Transition Window"] = "N/A"
-                else:
-                    row["Transition Window"] = str(int(float(transition_window)))
+                # ==================================================
+                # TRANSITION WINDOW
+                # ==================================================
+                if (
+                    transition_window is None
+                    or pd.isna(transition_window)
+                ):
 
-                solution_display = str(solution)
-                if solution_display == "MFP_v2_dh":
-                    solution_display = "$\\textit{MFP}_{\\textit{DDH}}$"
-                elif solution_display == "MFP_v2_iti":
-                    solution_display = "$\\textit{MFP}_{\\textit{ITI}}$"
-                elif solution_display == "MFP_v2":
-                    solution_display = "MFP"
-                elif solution_display == "MultiFedAvg+MFP_v2":
-                    solution_display = "MultiFedAvg+MFP"
+                    row["Transition Window"] = "N/A"
+
                 else:
-                    solution_display = solution_display.replace("_", r"\_")
+
+                    row["Transition Window"] = (
+                        str(int(float(transition_window)))
+                    )
+
+                # ==================================================
+                # SOLUTION
+                # ==================================================
+                solution_display = str(solution)
+
+                if solution_display == "MFP_v2_dh":
+
+                    solution_display = (
+                        "$\\textit{MFP}_{\\textit{DDH}}$"
+                    )
+
+                elif solution_display == "MFP_v2_iti":
+
+                    solution_display = (
+                        "$\\textit{MFP}_{\\textit{ITI}}$"
+                    )
+
+                elif solution_display == "MFP_v2":
+
+                    solution_display = "MFP"
+
+                elif solution_display == "MultiFedAvg+MFP_v2":
+
+                    solution_display = "MultiFedAvg+MFP"
+
+                else:
+
+                    solution_display = solution_display.replace(
+                        "_",
+                        r"\_",
+                    )
+
                 row["Solution"] = solution_display
 
+                # ==================================================
+                # METRICS
+                # ==================================================
                 for metric in metrics:
+
                     result = temporal_rows[solution].get(metric)
-                    if result is None or pd.isna(result["mean"]):
+
+                    if (
+                        result is None
+                        or pd.isna(result["mean"])
+                    ):
+
                         row[metric] = "--"
                         continue
 
                     mean_value = result["mean"]
                     ci_value = result["ci"]
+
                     text = (
                         f"{mean_value:.2f}"
                         if pd.isna(ci_value)
-                        else f"{mean_value:.2f} $\\pm$ {ci_value:.2f}"
+                        else (
+                            f"{mean_value:.2f} "
+                            f"$\\pm$ {ci_value:.2f}"
+                        )
                     )
 
                     best_solution = best_by_metric.get(metric)
+
                     is_bold = False
+
                     if best_solution is not None:
-                        best = temporal_rows[best_solution][metric]
+
+                        best = temporal_rows[
+                            best_solution
+                        ][metric]
+
                         if not pd.isna(best["mean"]):
+
                             if pd.isna(best["ci"]):
+
                                 is_bold = np.isclose(
-                                    mean_value, best["mean"], rtol=1e-12, atol=1e-12
+                                    mean_value,
+                                    best["mean"],
+                                    rtol=1e-12,
+                                    atol=1e-12,
                                 )
+
                             else:
+
                                 is_bold = (
                                     best["mean"] - best["ci"]
                                     <= mean_value
                                     <= best["mean"] + best["ci"]
                                 )
+
                     if is_bold:
+
                         text = f"\\textbf{{{text}}}"
+
                     row[metric] = text
 
                     if metric == "Average Detection Delay":
+
                         row["MTD n"] = str(result["n"])
 
                 table_rows.append(row)
 
+    # ------------------------------------------------------------
+    # DataFrame
+    # ------------------------------------------------------------
     df_table = pd.DataFrame(
         table_rows,
-        columns=["Shift", "Shift Type", "Transition Window", "Solution"] + metrics + ["MTD n"],
+        columns=[
+            "Shift",
+            "Shift Type",
+            "Transition Window",
+            "Solution",
+        ] + metrics + ["MTD n"],
     )
 
     df_table = df_table.rename(
         columns={
-            "Detection Rate": "DR $\\uparrow$",
-            "Episode F1": "Episode F1 $\\uparrow$",
-            "Average Detection Delay": "MTD $\\downarrow$",
-            "MTD n": "$n_{\\mathrm{MTD}}$",
-            "Missed Detection Rate": "MDR $\\downarrow$",
-            "False Alarm Rate": "FAR $\\downarrow$",
+            "Detection Rate":
+                "DR $\\uparrow$",
+
+            "Episode F1":
+                "Episode F1 $\\uparrow$",
+
+            "Average Detection Delay":
+                "MTD $\\downarrow$",
+
+            "MTD n":
+                "$n_{\\mathrm{MTD}}$",
+
+            "Missed Detection Rate":
+                "MDR $\\downarrow$",
+
+            "False Alarm Rate":
+                "FAR $\\downarrow$",
         }
     )
 
-    filename = os.path.join(write_path, "overall_detection_quality.tex")
+    filename = os.path.join(
+        write_path,
+        "overall_detection_quality.tex"
+    )
+
+    # ------------------------------------------------------------
+    # LaTeX table
+    #
+    # Transition Window:
+    #   - fixed width = 2 cm
+    #   - horizontally centered
+    #
+    # The complete tabular is wrapped in resizebox so that the
+    # table fits the page width.
+    # ------------------------------------------------------------
     latex = df_table.to_latex(
         index=False,
         escape=False,
@@ -2122,27 +2507,169 @@ def table_detection_quality_by_shift_type(
             "Performance of data-shift detection methods. Results are "
             "separated by shift family (Concept Drift, Label Shift, and "
             "Combined Shift), temporal shift type (Sudden or Gradual), "
-            "and, for gradual shifts, the transition window. Each metric "
-            "is first computed per Solution $\\times$ Dataset $\\times$ "
-            "Experiment $\\times$ Fold ID and then aggregated. The best "
-            "result for each metric is determined independently within "
-            "each Shift $\\times$ Shift Type $\\times$ Transition Window "
-            "group. Results are reported as mean $\\pm$ 95\\% confidence interval."
+            "and, for gradual shifts, the transition window. A gradual "
+            "shift is evaluated as an episode from Shift Round through "
+            "Shift Round + Transition Window - 1; the same maximum detection "
+            "delay is then applied after the episode ends for both sudden "
+            "and gradual shifts. Each metric is first computed per "
+            "Solution $\\times$ Dataset $\\times$ Experiment $\\times$ "
+            "Fold ID and then aggregated. The best result for each metric "
+            "is determined independently within each Shift $\\times$ "
+            "Shift Type $\\times$ Transition Window group. Results are "
+            "reported as mean $\\pm$ 95\\% confidence interval."
         ),
         label="tab:overall_detection_quality",
-        column_format="llllcccccc",
+        column_format=(
+            "ll"
+            ">{\\centering\\arraybackslash}p{2cm}"
+            "l"
+            "ccccc"
+            "c"
+        ),
     )
-    latex = latex.replace("\\begin{table}", "\\begin{table*}", 1)
-    latex = latex.replace("\\end{table}", "\\end{table*}", 1)
+
+    # ------------------------------------------------------------
+    # Visual separators between shift families and temporal types
+    # ------------------------------------------------------------
+    # The first row of each shift family contains its \multirow label.
+    # We insert:
+    #   - \midrule before each new shift family;
+    #   - \cline{2-10} between Sudden and Gradual inside
+    #     the same shift family.
+    #
+    # This keeps the hierarchy visually clear:
+    #
+    #   Concept Drift
+    #       Sudden
+    #       Gradual
+    #           window = 2
+    #           window = 5
+    #   --------------------------------
+    #   Label Shift
+    #       Sudden
+    #       Gradual
+    #   --------------------------------
+    #   Combined Shift
+    #       Sudden
+    #       Gradual
+    # ------------------------------------------------------------
+
+    lines = latex.splitlines()
+    processed_lines = []
+    previous_shift = None
+    previous_temporal = None
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Detect the first row of each shift family.
+        current_shift = None
+        if "\\multirow" in line:
+            if "Concept Drift" in line:
+                current_shift = "Concept Drift"
+            elif "Label Shift" in line:
+                current_shift = "Label Shift"
+            elif "Combined Shift" in line:
+                current_shift = "Combined Shift"
+
+        # Detect the first row of each temporal type.
+        current_temporal = None
+        if "\\multirow" in line:
+            if "{*}{Sudden}" in line:
+                current_temporal = "Sudden"
+            elif "{*}{Gradual}" in line:
+                current_temporal = "Gradual"
+
+        # Keep the active shift family across all rows.
+        # The Shift cell is a multirow, so it only appears on the
+        # first row of the family. On subsequent rows current_shift
+        # is therefore inferred from previous_shift.
+        active_shift = (
+            current_shift
+            if current_shift is not None
+            else previous_shift
+        )
+
+        # Separator between different shift families.
+        if (
+            current_shift is not None
+            and previous_shift is not None
+            and current_shift != previous_shift
+        ):
+            processed_lines.append("\\midrule")
+
+        # Separator between Sudden and Gradual within the same shift.
+        # Since Shift is a multirow, use the active shift rather than
+        # requiring a Shift value on the Gradual row itself.
+        if (
+            current_temporal == "Gradual"
+            and previous_temporal == "Sudden"
+            and active_shift == previous_shift
+        ):
+            # Columns 2--10 correspond to Shift Type through the metrics.
+            processed_lines.append("\\cline{2-10}")
+
+        processed_lines.append(line)
+
+        if current_shift is not None:
+            previous_shift = current_shift
+        if current_temporal is not None:
+            previous_temporal = current_temporal
+
+    latex = "\n".join(processed_lines) + "\n"
+
+    # ------------------------------------------------------------
+    # Convert table to table*
+    # ------------------------------------------------------------
+    latex = latex.replace(
+        "\\begin{table}",
+        "\\begin{table*}",
+        1,
+    )
+
+    latex = latex.replace(
+        "\\end{table}",
+        "\\end{table*}",
+        1,
+    )
+
+    # ------------------------------------------------------------
+    # Make the complete table fit the page width.
+    # ------------------------------------------------------------
+    latex = latex.replace(
+        "\\begin{tabular}",
+        "\\resizebox{\\textwidth}{!}{%\n\\begin{tabular}",
+        1,
+    )
+
+    latex = latex.replace(
+        "\\end{tabular}",
+        "\\end{tabular}%\n}",
+        1,
+    )
+
+    # ------------------------------------------------------------
+    # Required LaTeX packages
+    # ------------------------------------------------------------
     latex = (
         "% Requires: \\usepackage{booktabs}\n"
         "% Requires: \\usepackage{multirow}\n"
         "% Requires: \\usepackage{graphicx}\n"
+        "% Requires: \\usepackage{array}\n"
         + latex
     )
 
-    Path(write_path).mkdir(parents=True, exist_ok=True)
-    with open(filename, "w", encoding="utf-8") as f:
+    Path(write_path).mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    with open(
+        filename,
+        "w",
+        encoding="utf-8",
+    ) as f:
+
         f.write(latex)
 
     print("\n" + "=" * 100)
@@ -2424,15 +2951,41 @@ if __name__ == "__main__":
     # ============================================================
     # JANELA MÁXIMA DE DETECÇÃO
     # ============================================================
-    # Número máximo de rodadas após a ocorrência do ground-truth
-    # data shift em que uma detecção será considerada válida.
+    # Tolerância máxima de detecção APÓS O FIM do episódio ground-truth.
     #
-    # Exemplo: com shift na rodada 70 e valor 10, são válidas
-    # detecções nas rodadas 70 até 80 (inclusive).
+    # Sudden:
+    #   shift em t=70, valor 10 -> detecções válidas de 70 até 80.
     #
-    # Use None para considerar qualquer detecção após o shift
+    # Gradual:
+    #   shift começa em t=70, Transition Window=5 -> episódio 70..74.
+    #   Com valor 10 -> detecções válidas de 70 até 84.
+    #
+    # Assim, Transition Window representa a duração do fenômeno,
+    # enquanto MAX_DETECTION_DELAY representa a tolerância do detector
+    # após o término do fenômeno. A regra pós-transição é a mesma para
+    # sudden e gradual.
+    #
+    # Use None para considerar qualquer detecção após o início do shift
     # como válida.
     MAX_DETECTION_DELAY = 10
+
+    # ============================================================
+    # COMO A TRANSITION WINDOW É USADA NAS MÉTRICAS
+    # ============================================================
+    # True  -> comportamento episódico para gradual:
+    #          a detecção é válida desde Shift Round até
+    #          Shift Round + Transition Window - 1, mais
+    #          MAX_DETECTION_DELAY após o fim do episódio.
+    #
+    # False -> gradual é avaliado como sudden para as métricas:
+    #          a detecção é válida desde Shift Round até
+    #          Shift Round + MAX_DETECTION_DELAY.
+    #
+    # IMPORTANTE: isso NÃO remove a Transition Window da tabela.
+    # Ela continua sendo mantida como configuração experimental
+    # e as janelas 5, 10 etc. continuam sendo grupos separados.
+    USE_TRANSITION_WINDOW_FOR_GRADUAL_METRICS = False
+
     train_test = "test"
 
     solutions = [
@@ -2463,8 +3016,8 @@ if __name__ == "__main__":
     ]
 
     combined_experiments = [
-        "combined_shift#0.1-1.0_sudden",
-        "combined_shift#0.1-10.0_sudden"
+        # "combined_shift#0.1-1.0_sudden",
+        # "combined_shift#0.1-10.0_sudden"
     ]
 
     experiment_ids = (
@@ -2867,9 +3420,13 @@ if __name__ == "__main__":
     print("=" * 100 + "\n")
 
     print(
-        f"\nJanela máxima de detecção: {MAX_DETECTION_DELAY} rodada(s) após o shift"
+        f"\nTolerância máxima de detecção: {MAX_DETECTION_DELAY} rodada(s) após o fim do episódio"
         if MAX_DETECTION_DELAY is not None
-        else "\nJanela máxima de detecção: ilimitada"
+        else "\nTolerância máxima de detecção: ilimitada"
+    )
+    print(
+        "Gradual usa Transition Window nas métricas: "
+        f"{USE_TRANSITION_WINDOW_FOR_GRADUAL_METRICS}"
     )
 
     # ============================================================
@@ -2885,5 +3442,8 @@ if __name__ == "__main__":
             higher_is_better_metrics=higher_is_better_metrics,
             ci=0.95,
             max_detection_delay=MAX_DETECTION_DELAY,
+            use_transition_window_for_gradual=(
+                USE_TRANSITION_WINDOW_FOR_GRADUAL_METRICS
+            ),
         )
     )
