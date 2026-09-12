@@ -26,7 +26,7 @@ COMMANDS_DIR = Path(
 # Exemplo no TXT:
 #     --strategy='MultiFedAvg+MFP_v2'
 #
-STRATEGY = "FedConD"
+STRATEGY = "CDA-FedAvg"
 
 
 # Tipos de drift que devem ser executados.
@@ -39,7 +39,7 @@ STRATEGY = "FedConD"
 #
 DRIFT_TYPES = [
     "sudden",
-    "gradual",
+    # "gradual",
 ]
 
 
@@ -53,7 +53,7 @@ DRIFT_TYPES = [
 #
 SHIFT_TYPES = [
     "concept",
-    "label",
+    # "label",
 ]
 
 

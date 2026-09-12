@@ -236,7 +236,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             # Unified operational detector threshold. LS and CD are
             # complementary evidence only; the operational state is
             # exclusively DATA_SHIFT or NO_SHIFT.
-            self.data_shift_threshold = 0.10
+            self.data_shift_threshold = 0.2
 
             # ============================================================
             # DATA-SHIFT ADAPTATION

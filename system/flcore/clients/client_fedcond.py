@@ -65,8 +65,8 @@ class ClientFedConD(MultiFedAvgClient):
         # and significance level 0.05.
         # =========================================================
 
-        self.history_window = 5
-        self.significance_level = 0.05
+        self.history_window = 10
+        self.significance_level = 0.1
 
     def detect_drift(
             self,

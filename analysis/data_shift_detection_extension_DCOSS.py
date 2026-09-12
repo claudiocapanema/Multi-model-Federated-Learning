@@ -2834,7 +2834,315 @@ def table_detection_quality_by_shift_type(
     print(f"\nLaTeX table written to:\n{filename}")
     print("=" * 100)
 
-    return df_experimental, df_table
+    print("=" * 100)
+
+    # ============================================================
+    # SECOND TABLE: OVERALL AVERAGE ACROSS ALL SHIFTS
+    # ============================================================
+    #
+    # The original table above is intentionally preserved unchanged.
+    # This second table aggregates ALL experimental units for each
+    # solution, regardless of:
+    #   - shift family;
+    #   - sudden/gradual temporal type;
+    #   - transition window;
+    #   - dataset;
+    #   - experiment/configuration;
+    #   - fold.
+    #
+    # The aggregation is performed on the already computed
+    # Solution x Dataset x Experiment x Fold x Shift unit values.
+    # Therefore, each experimental unit contributes equally.
+    # ============================================================
+
+    overall_rows = []
+
+    for solution in solutions:
+
+        df_solution = df_experimental[
+            df_experimental["Solution"] == solution
+        ]
+
+        if df_solution.empty:
+            continue
+
+        row = {
+            "Solution": solution,
+        }
+
+        for metric in metrics:
+
+            values = pd.to_numeric(
+                df_solution[metric],
+                errors="coerce"
+            ).dropna()
+
+            mean_value, ci_value = mean_ci(
+                values,
+                ci=ci,
+                bounded=metric in {
+                    "Detection Rate",
+                    "Episode F1",
+                    "Missed Detection Rate",
+                    "False Alarm Rate",
+                },
+            )
+
+            row[metric] = {
+                "mean": mean_value,
+                "ci": ci_value,
+                "n": len(values),
+            }
+
+        overall_rows.append(row)
+
+    # ------------------------------------------------------------
+    # Determine the best solution for each metric globally.
+    # ------------------------------------------------------------
+
+    overall_best_by_metric = {}
+
+    for metric in metrics:
+
+        candidates = []
+
+        for row in overall_rows:
+
+            result = row.get(metric)
+
+            if (
+                result is None
+                or pd.isna(result["mean"])
+            ):
+                continue
+
+            candidates.append(
+                (
+                    row["Solution"],
+                    result["mean"],
+                )
+            )
+
+        if not candidates:
+            continue
+
+        if metric in higher_is_better_metrics:
+            overall_best_by_metric[metric] = max(
+                candidates,
+                key=lambda x: x[1]
+            )[0]
+        else:
+            overall_best_by_metric[metric] = min(
+                candidates,
+                key=lambda x: x[1]
+            )[0]
+
+    # ------------------------------------------------------------
+    # Build the second table.
+    # ------------------------------------------------------------
+
+    overall_table_rows = []
+
+    for row_data in overall_rows:
+
+        solution = row_data["Solution"]
+
+        solution_display = str(solution)
+
+        if solution_display == "MFP_v2_dh":
+            solution_display = (
+                "$\\textit{MFP}_{\\textit{DDH}}$"
+            )
+
+        elif solution_display == "MFP_v2_iti":
+            solution_display = (
+                "$\\textit{MFP}_{\\textit{ITI}}$"
+            )
+
+        elif solution_display == "MFP_v2":
+            solution_display = "MFP"
+
+        elif solution_display == "MultiFedAvg+MFP_v2":
+            solution_display = "MultiFedAvg+MFP"
+
+        else:
+            solution_display = solution_display.replace(
+                "_",
+                r"\_",
+            )
+
+        output_row = {
+            "Solution": solution_display,
+        }
+
+        for metric in metrics:
+
+            result = row_data.get(metric)
+
+            if (
+                result is None
+                or pd.isna(result["mean"])
+            ):
+                output_row[metric] = "--"
+                continue
+
+            mean_value = result["mean"]
+            ci_value = result["ci"]
+
+            text = (
+                f"{mean_value:.2f}"
+                if pd.isna(ci_value)
+                else (
+                    f"{mean_value:.2f} "
+                    f"$\\pm$ {ci_value:.2f}"
+                )
+            )
+
+            best_solution = overall_best_by_metric.get(metric)
+            is_bold = False
+
+            if best_solution == solution:
+
+                best_result = next(
+                    (
+                        r[metric]
+                        for r in overall_rows
+                        if r["Solution"] == best_solution
+                    ),
+                    None,
+                )
+
+                if (
+                    best_result is not None
+                    and not pd.isna(best_result["mean"])
+                ):
+
+                    if pd.isna(best_result["ci"]):
+                        is_bold = np.isclose(
+                            mean_value,
+                            best_result["mean"],
+                            rtol=1e-12,
+                            atol=1e-12,
+                        )
+
+                    else:
+                        is_bold = (
+                            best_result["mean"]
+                            - best_result["ci"]
+                            <= mean_value
+                            <=
+                            best_result["mean"]
+                            + best_result["ci"]
+                        )
+
+            if is_bold:
+                text = f"\\textbf{{{text}}}"
+
+            output_row[metric] = text
+
+        overall_table_rows.append(output_row)
+
+    df_overall_table = pd.DataFrame(
+        overall_table_rows,
+        columns=["Solution"] + metrics,
+    )
+
+    df_overall_table = df_overall_table.rename(
+        columns={
+            "Detection Rate":
+                "DR $\\uparrow$",
+
+            "Episode F1":
+                "Episode F1 $\\uparrow$",
+
+            "Average Detection Delay":
+                "MTD $\\downarrow$",
+
+            "Missed Detection Rate":
+                "MDR $\\downarrow$",
+
+            "False Alarm Rate":
+                "FAR $\\downarrow$",
+        }
+    )
+
+    overall_filename = os.path.join(
+        write_path,
+        "overall_detection_quality_average.tex"
+    )
+
+    overall_latex = df_overall_table.to_latex(
+        index=False,
+        escape=False,
+        caption=(
+            "Average performance of data-shift detection methods "
+            "across all evaluated shifts. Results are aggregated for "
+            "each solution over all shift families, temporal shift "
+            "types, transition windows, datasets, experiment "
+            "configurations, and folds. Each experimental unit "
+            "contributes equally. Results are reported as mean "
+            "$\\pm$ 95\\% confidence interval."
+        ),
+        label="tab:overall_detection_quality_average",
+        column_format=(
+            "l"
+            + "c" * len(metrics)
+        ),
+    )
+
+    overall_latex = overall_latex.replace(
+        "\\begin{table}",
+        "\\begin{table*}",
+        1,
+    )
+
+    overall_latex = overall_latex.replace(
+        "\\end{table}",
+        "\\end{table*}",
+        1,
+    )
+
+    overall_latex = overall_latex.replace(
+        "\\begin{tabular}",
+        "\\resizebox{\\textwidth}{!}{%\n\\begin{tabular}",
+        1,
+    )
+
+    overall_latex = overall_latex.replace(
+        "\\end{tabular}",
+        "\\end{tabular}%\n}",
+        1,
+    )
+
+    overall_latex = (
+        "% Requires: \\usepackage{booktabs}\n"
+        "% Requires: \\usepackage{graphicx}\n"
+        + overall_latex
+    )
+
+    with open(
+        overall_filename,
+        "w",
+        encoding="utf-8"
+    ) as f:
+        f.write(overall_latex)
+
+    print("\n" + "=" * 100)
+    print("DETECTION TABLE - AVERAGE ACROSS ALL SHIFTS")
+    print("=" * 100)
+    print(
+        "\nEach solution is averaged across ALL experimental units:"
+    )
+    print(
+        "  Solution × Dataset × Experiment × Fold ID × Shift Type "
+        "× Temporal Shift Type × Transition Window"
+    )
+    print(
+        f"\nLaTeX table written to:\n{overall_filename}"
+    )
+    print("=" * 100)
+
+    return df_experimental, df_table, df_overall_table
 
 def extract_alpha_from_experiment(experiment_id):
     """
@@ -3771,7 +4079,7 @@ if __name__ == "__main__":
     # TABELA CONSOLIDADA DE QUALIDADE DA DETECÇÃO
     # ============================================================
 
-    df_experimental, df_detection_table = (
+    df_experimental, df_detection_table, df_overall_detection_table = (
         table_detection_quality_by_shift_type(
             df_final=df_all,
             write_path=write_path,
