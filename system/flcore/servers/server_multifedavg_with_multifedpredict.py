@@ -66,10 +66,30 @@ def weighted_average_fit(metrics):
         examples = [num_examples for num_examples, _ in metrics]
 
         # Aggregate and return custom metric (weighted average)
-        return {"Accuracy": sum(accuracies) / sum(examples),
-                "Balanced accuracy": sum(balanced_accuracies) / sum(examples),
-                "Loss": sum(loss) / sum(examples), "Round (t)": metrics[0][1]["Round (t)"],
-                "Model size": metrics[0][1]["Model size"]}
+        aggregated = {"Accuracy": sum(accuracies) / sum(examples),
+                      "Balanced accuracy": sum(balanced_accuracies) / sum(examples),
+                      "Loss": sum(loss) / sum(examples),
+                      "Round (t)": metrics[0][1]["Round (t)"],
+                      "Model size": metrics[0][1]["Model size"]}
+
+        # combined_train_accuracy is generated during client.fit(), so it
+        # must be aggregated together with the other fit-time evidence.
+        combined_values = [
+            num_examples * float(m["combined_train_accuracy"])
+            for num_examples, m in metrics
+            if m.get("combined_train_accuracy") is not None
+        ]
+        combined_examples = [
+            num_examples
+            for num_examples, m in metrics
+            if m.get("combined_train_accuracy") is not None
+        ]
+        if combined_examples and sum(combined_examples) > 0:
+            aggregated["combined_train_accuracy"] = (
+                sum(combined_values) / sum(combined_examples)
+            )
+
+        return aggregated
     except Exception as e:
         print("weighted_average_fit error")
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
@@ -212,9 +232,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                                        0.0
                                    ] * self.ME
 
-            self.data_shift_score_list = {
-                me: [] for me in range(self.ME)
-            }
 
             # Unified operational detector threshold. LS and CD are
             # complementary evidence only; the operational state is
@@ -291,10 +308,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 for me in range(self.ME)
             }
 
-            self.data_shift_score_list = {
-                me: []
-                for me in range(self.ME)
-            }
 
             self.combined_train_accuracy = {me: 0.0 for me in range(self.ME)}
             self.combined_train_accuracy_history = {me: [] for me in range(self.ME)}
@@ -786,10 +799,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 for me in range(self.ME)
             }
 
-            data_shift_score_list = {
-                me: []
-                for me in range(self.ME)
-            }
 
             num_participating_clients = {
                 me: 0
@@ -874,23 +883,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     )
                 )
 
-                # ========================================================
-                # CD
-                # ========================================================
-
-                data_shift_score = float(
-                    non_iid.get(
-                        "data_shift_score",
-                        ls
-                    )
-                )
-                data_shift_score = float(
-                    np.clip(
-                        data_shift_score,
-                        0.0,
-                        1.0
-                    )
-                )
 
                 # ========================================================
                 # Client-level generic-data-shift evidence
@@ -948,9 +940,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
 
                 ls_list[me].append(ls)
 
-                data_shift_score_list[me].append(
-                    data_shift_score
-                )
 
                 similarity_list[
                     me
@@ -1072,6 +1061,20 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     self.ls[me]
                 )
 
+                # combined_train_accuracy is returned by client.fit().
+                # Keep the same weighted aggregation semantics used for
+                # the ordinary training accuracy.
+                combined_train_accuracy = metrics_aggregated_mefl[me].get(
+                    "combined_train_accuracy"
+                )
+                if combined_train_accuracy is not None:
+                    self.combined_train_accuracy[me] = float(
+                        np.clip(combined_train_accuracy, 0.0, 1.0)
+                    )
+                    self.combined_train_accuracy_history[me].append(
+                        self.combined_train_accuracy[me]
+                    )
+
                 self.heterogeneity_degree_list[
                     me
                 ].append(
@@ -1089,6 +1092,18 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     f"data_shift_score {self.data_shift_score[me]} "
                     f"heterogeneity_degree "
                     f"{self.heterogeneity_degree[me]}"
+                )
+
+            # ============================================================
+            # DATA-SHIFT DETECTION
+            # ============================================================
+            # IMPORTANT: this must run AFTER the loop above has stored the
+            # current round's LS and combined_train_accuracy histories.
+            # Detection is therefore entirely fit-time. aggregate_evaluate()
+            # is not involved in detecting data shift.
+            for me in trained_models:
+                self._detect_data_shift_after_fit(
+                    server_round, model=me
                 )
 
             # ============================================================
@@ -1339,13 +1354,13 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             print("binomial error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def _detect_data_shift_after_evaluation(self, server_round, model=None):
-        """Detect data shift using the evaluation completed in server_round.
+    def _detect_data_shift_after_fit(self, server_round, model=None):
+        """Detect data shift from fit-time evidence of ``server_round``.
 
-        Detection is performed only after aggregate_evaluate() has appended
-        the current round observation to the corresponding history.  This
-        prevents select_clients(t) from treating the previous round as if it
-        were the current round.
+        The detector runs at the end of ``aggregate_fit()``, after the
+        current round's LS and combined-train-accuracy values have been
+        aggregated and appended to their histories.  No validation/test
+        metrics are required for shift detection.
         """
         try:
             ls_threshold = float(self.data_shift_threshold)
@@ -1401,8 +1416,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 self.data_shift_detected[me] = detected
                 self.data_shift_score[me] = max(current_ls, relative_drop)
 
-                if self.data_shift_score_list[me]:
-                    self.data_shift_score_list[me][-1] = self.data_shift_score[me]
 
                 print(
                     f"[DATA SHIFT DETECTOR] round={server_round} model={me} "
@@ -1423,7 +1436,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 )
 
         except Exception as e:
-            print("_detect_data_shift_after_evaluation error")
+            print("_detect_data_shift_after_fit error")
             print("Error on line {} {} {}".format(
                 sys.exc_info()[-1].tb_lineno, type(e).__name__, e
             ))
@@ -1463,11 +1476,10 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             # ============================================================
             # SERVER-SIDE DATA-SHIFT DETECTION
             #
-            # Detection is completed in aggregate_evaluate(), after the
-            # current round's evaluation has been aggregated.  Therefore,
-            # select_clients(t) only consumes the detector state produced
-            # by round t-1.  This keeps the evidence round and the recorded
-            # detection round aligned.
+            # Detection is completed in aggregate_fit(), after the current
+            # round's fit-time evidence has been aggregated. Therefore,
+            # select_clients(t) consumes the detector state produced by the
+            # preceding round.
             # ============================================================
             shift_detected = [
                 bool(self.data_shift_detected[me])
@@ -2162,7 +2174,6 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                         return None
                     return float(np.average(values, weights=weights))
 
-                combined_acc = weighted_metric("combined_train_accuracy")
                 train_acc = weighted_metric("train_accuracy")
 
                 # gw/lw are produced by client.evaluate().
@@ -2181,17 +2192,8 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 self.gw_by_round[me][server_round] = list(self.gw[me])
                 self.lw_by_round[me][server_round] = list(self.lw[me])
 
-                if combined_acc is not None:
-                    self.combined_train_accuracy[me] = float(np.clip(combined_acc, 0.0, 1.0))
-                    self.combined_train_accuracy_history[me].append(self.combined_train_accuracy[me])
-
-                # The current round is now fully evaluated.  Perform data-shift
-                # detection here so the evidence, detector state, and metrics
-                # all refer to the same server round.
-                self._detect_data_shift_after_evaluation(server_round, model=me)
-
                 metrics_aggregated_mefl[me] = {
-                    "combined_train_accuracy": self.combined_train_accuracy[me] if combined_acc is not None else None,
+                    "combined_train_accuracy": self.combined_train_accuracy[me] if self.combined_train_accuracy_history[me] else None,
                     "train_accuracy": train_acc,
                     "Round (t)": server_round,
                 }
@@ -2203,19 +2205,12 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     if custom:
                         metrics_aggregated_mefl[me].update(custom)
 
-                if combined_acc is not None:
-                    metrics_aggregated_mefl[me]["combined_train_accuracy"] = self.combined_train_accuracy[me]
                 if train_acc is not None:
                     metrics_aggregated_mefl[me]["train_accuracy"] = train_acc
 
                 self.add_metrics(server_round, metrics_aggregated_mefl, me)
                 self._save_results(server_round, me)
 
-                print(
-                    f"[COMBINED TRAIN ACC] round={server_round} model={me} "
-                    f"aggregated={self.combined_train_accuracy[me]:.6f} "
-                    f"history_size={len(self.combined_train_accuracy_history[me])}"
-                )
 
             # Detection metrics are written only after the current round's
             # evaluation has produced the detector state.

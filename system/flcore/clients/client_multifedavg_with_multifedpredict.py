@@ -309,11 +309,6 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
                 ))
 
 
-
-            # Kept only for backward-compatible logging. The server
-            # detector no longer uses this combined score.
-            data_shift_score = float(np.clip(ls, 0.0, 1.0))
-
             # ------------------------------------------------------------
             # NOW start the original local-training flow.
             # ------------------------------------------------------------
@@ -352,19 +347,93 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             self.train_losses[me].append(results["train_loss"])
             self.train_accuracies[me].append(results["train_accuracy"])
 
+            # ============================================================
+            # Combined-model training accuracy (FIT-TIME EVIDENCE)
+            # ============================================================
+            # This metric is intentionally computed during fit() and
+            # returned to the server together with LS.  It is evaluated on
+            # the current training window, never on the validation/test set.
+            combined_train_accuracy = None
+
+            experiment_id = str(
+                getattr(self.args, "experiment_id", "")
+            ).lower()
+            combined_model_test_enabled = (
+                "concept_drift" in experiment_id
+                or "combined_shift" in experiment_id
+            )
+
+            if (
+                    combined_model_test_enabled
+                    and self.trainloader[me] is not None
+                    and len(self.trainloader[me].dataset) > 0
+            ):
+                # At fit time the server has not yet detected the current
+                # round's shift.  Therefore FedPredict uses the detector
+                # state from the previous round, which is the information
+                # available to the client before aggregate_fit().
+                previous_data_shift = bool(
+                    self.data_shift_round[me] != -1
+                    and self.data_shift_round[me] < t
+                )
+
+                previous_shift_similarity = 1.0
+                previous_nt = t - self.lt[me]
+
+                combined_model, _, _ = fedpredict_client_torch(
+                    local_model=self.model[me],
+                    global_model=global_model,
+                    t=t,
+                    T=self.T,
+                    nt=previous_nt,
+                    s=round(previous_shift_similarity, 2),
+                    lt=self.lt[me],
+                    data_shift_round=self.data_shift_round[me],
+                    dh={
+                        "global": current_dh,
+                        "reference": [0.31, 0.32, 0.39][me]
+                    },
+                    data_shift_type=(
+                        "DATA_SHIFT"
+                        if previous_data_shift
+                        else "NO_SHIFT"
+                    ),
+                    device=self.device,
+                    global_model_original_shape=self.model_shape_mefl[me],
+                    return_gw_lw=True
+                )
+
+                _, combined_train_metrics = test(
+                    combined_model,
+                    self.trainloader[me],
+                    self.device,
+                    self.client_id,
+                    t,
+                    self.args.dataset[me],
+                    self.n_classes[me],
+                )
+                combined_train_accuracy = float(
+                    np.clip(
+                        combined_train_metrics["Accuracy"],
+                        0.0,
+                        1.0
+                    )
+                )
+
             metrics = results
             metrics["non_iid"] = {
                 "fc": self.fc_ME[me],
                 "il": self.il_ME[me],
                 "similarity": similarity,
                 "ps": ps,
-                "ls": ls,
-                "data_shift_score": data_shift_score
+                "ls": ls
             }
+            metrics["combined_train_accuracy"] = combined_train_accuracy
 
             print(
                 f"[CLIENT SHIFT EVIDENCE] round={t} client={self.client_id} model={me} "
-                f"LS={ls:.6f} train_accuracy={results['train_accuracy']:.6f}"
+                f"LS={ls:.6f} train_accuracy={results['train_accuracy']:.6f} "
+                f"combined_train_accuracy={combined_train_accuracy}"
             )
 
             return get_weights(self.model[me]), len(self.trainloader[me].dataset), metrics
@@ -586,53 +655,6 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
             # =========================================================
             self.combined_model[me] = copy.deepcopy(combined_model).cpu()
 
-            # =========================================================
-            # Combined-model training accuracy
-            # =========================================================
-            # Only clients that actually trained model ``me`` in this
-            # round contribute this value to the server-side history.
-            # The combined model is deliberately obtained exactly as in
-            # the original implementation above and is evaluated here,
-            # inside evaluate().
-            combined_train_accuracy = None
-
-            # The combined-model training test is only needed for
-            # experiments where concept drift / combined shift is
-            # explicitly being simulated.  For all other experiment
-            # types (e.g. label shift or no shift), do not evaluate the
-            # combined model on the local training data.
-            experiment_id = str(
-                getattr(self.args, "experiment_id", "")
-            ).lower()
-
-            combined_model_test_enabled = (
-                "concept_drift" in experiment_id
-                or "combined_shift" in experiment_id
-            )
-
-            if (
-                    combined_model_test_enabled
-                    and self.lt[me] == t
-                    and self.trainloader[me] is not None
-                    and len(self.trainloader[me].dataset) > 0
-            ):
-                _, combined_train_metrics = test(
-                    combined_model,
-                    self.trainloader[me],
-                    self.device,
-                    self.client_id,
-                    t,
-                    self.args.dataset[me],
-                    self.n_classes[me],
-                )
-                combined_train_accuracy = float(
-                    np.clip(
-                        combined_train_metrics["Accuracy"],
-                        0.0,
-                        1.0
-                    )
-                )
-
             # Keep only 20% of the training dataset for the next generic
             # performance-based data-shift test.  The full previous
             # training dataset is never retained.
@@ -682,7 +704,6 @@ class ClientMultiFedAvgWithMultiFedPredict(MultiFedAvgClient):
 
             test_metrics["gw"] = float(gw)
             test_metrics["lw"] = float(lw)
-            test_metrics["combined_train_accuracy"] = combined_train_accuracy
 
             tuple_me = (
                 loss,

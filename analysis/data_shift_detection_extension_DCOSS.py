@@ -10,9 +10,16 @@ import copy
 from base_plots import bar_plot, line_plot, ecdf_plot
 import matplotlib.pyplot as plt
 
-# Registro dos arquivos CSV para verificar, ao final da execução,
-# quais não possuem exatamente 5 folds distintos.
-FOLD_VALIDATION = []
+# Registro de TODOS os arquivos/configurações esperados para verificar,
+# ao final da execução, arquivos ausentes, ilegíveis ou incompletos.
+#
+# Regra de completude:
+#   - somente 1 fold distinto -> exatamente 100 rodadas completas;
+#   - mais de 1 fold distinto -> exatamente 500 rodadas completas.
+#
+# "Rodadas completas" significa que, para CADA fold, as rodadas esperadas
+# estão presentes de 1 até o número esperado, sem faltar nenhuma rodada.
+EXPERIMENT_VALIDATION = []
 
 def read_data(
     read_solutions,
@@ -55,6 +62,20 @@ def read_data(
                 if not os.path.exists(path):
                     print("\n#########")
                     print(f"Arquivo não encontrado: {path}")
+
+                    EXPERIMENT_VALIDATION.append({
+                        "path": os.path.abspath(path),
+                        "solution": solution_names.get(solution, solution),
+                        "dataset": None,
+                        "experiment_id": experiment_id,
+                        "transition_window": transition_window,
+                        "fold_count": 0,
+                        "fold_ids": [],
+                        "expected_rounds": None,
+                        "fold_details": {},
+                        "complete": False,
+                        "status": "missing",
+                    })
                     continue
 
                 df = pd.read_csv(
@@ -64,6 +85,20 @@ def read_data(
 
                 if df.empty:
                     print(f"\nArquivo vazio: {path}")
+
+                    EXPERIMENT_VALIDATION.append({
+                        "path": os.path.abspath(path),
+                        "solution": solution_names.get(solution, solution),
+                        "dataset": None,
+                        "experiment_id": experiment_id,
+                        "transition_window": transition_window,
+                        "fold_count": 0,
+                        "fold_ids": [],
+                        "expected_rounds": None,
+                        "fold_details": {},
+                        "complete": False,
+                        "status": "empty",
+                    })
                     continue
 
                 # Manter somente as três colunas do CSV.
@@ -114,18 +149,100 @@ def read_data(
                 # the result-directory path. Sudden shifts use None.
                 df["Transition Window"] = transition_window
 
-                # Verificação por arquivo: um CSV completo deve conter
-                # exatamente 5 folds distintos.
-                fold_ids = pd.to_numeric(
+                # --------------------------------------------------------
+                # VALIDAÇÃO DE COMPLETUDE DO CSV
+                # --------------------------------------------------------
+                # A quantidade de rodadas esperada depende da quantidade
+                # de folds encontrados no arquivo:
+                #
+                #   1 fold  -> 100 rodadas
+                #   >1 fold -> 500 rodadas
+                #
+                # A validação é feita por fold, garantindo que cada fold
+                # contenha todas as rodadas de 1 até o limite esperado.
+                fold_numeric = pd.to_numeric(
                     df["Fold ID"],
                     errors="coerce"
-                ).dropna().unique().tolist()
+                )
+                round_numeric = pd.to_numeric(
+                    df["Round (t)"],
+                    errors="coerce"
+                )
 
-                FOLD_VALIDATION.append({
+                valid_mask = (
+                    fold_numeric.notna()
+                    & round_numeric.notna()
+                )
+
+                fold_round_df = pd.DataFrame({
+                    "Fold ID": fold_numeric[valid_mask],
+                    "Round (t)": round_numeric[valid_mask],
+                })
+
+                fold_ids = sorted(
+                    fold_round_df["Fold ID"].unique().tolist()
+                )
+
+                fold_count = len(fold_ids)
+                expected_rounds = (
+                    100 if fold_count <= 1 else 500
+                )
+
+                fold_details = {}
+
+                for fold_id in fold_ids:
+                    rounds = sorted(
+                        set(
+                            fold_round_df.loc[
+                                fold_round_df["Fold ID"] == fold_id,
+                                "Round (t)"
+                            ].astype(int).tolist()
+                        )
+                    )
+
+                    expected_round_set = set(
+                        range(1, expected_rounds + 1)
+                    )
+                    actual_round_set = set(rounds)
+
+                    missing_rounds = sorted(
+                        expected_round_set - actual_round_set
+                    )
+                    extra_rounds = sorted(
+                        actual_round_set - expected_round_set
+                    )
+
+                    fold_details[fold_id] = {
+                        "round_count": len(rounds),
+                        "min_round": min(rounds) if rounds else None,
+                        "max_round": max(rounds) if rounds else None,
+                        "missing_rounds": missing_rounds,
+                        "extra_rounds": extra_rounds,
+                        "complete": (
+                            actual_round_set == expected_round_set
+                        ),
+                    }
+
+                file_complete = (
+                    fold_count >= 1
+                    and all(
+                        details["complete"]
+                        for details in fold_details.values()
+                    )
+                )
+
+                EXPERIMENT_VALIDATION.append({
                     "path": os.path.abspath(path),
                     "solution": df["Solution"].iloc[0],
-                    "fold_count": len(fold_ids),
-                    "fold_ids": sorted(fold_ids),
+                    "dataset": dataset_name,
+                    "experiment_id": experiment_id,
+                    "transition_window": transition_window,
+                    "fold_count": fold_count,
+                    "fold_ids": fold_ids,
+                    "expected_rounds": expected_rounds,
+                    "fold_details": fold_details,
+                    "complete": file_complete,
+                    "status": "complete" if file_complete else "incomplete",
                 })
 
                 df_list.append(df)
@@ -145,10 +262,40 @@ def read_data(
                     f"em: {path}"
                 )
                 print(f"Erro: {e}")
+
+                EXPERIMENT_VALIDATION.append({
+                    "path": os.path.abspath(path),
+                    "solution": solution_names.get(solution, solution),
+                    "dataset": None,
+                    "experiment_id": experiment_id,
+                    "transition_window": transition_window,
+                    "fold_count": 0,
+                    "fold_ids": [],
+                    "expected_rounds": None,
+                    "fold_details": {},
+                    "complete": False,
+                    "status": "invalid",
+                    "error": str(e),
+                })
                 continue
 
             except Exception as e:
                 print(f"\nErro ao ler {path}: {e}")
+
+                EXPERIMENT_VALIDATION.append({
+                    "path": os.path.abspath(path),
+                    "solution": solution_names.get(solution, solution),
+                    "dataset": None,
+                    "experiment_id": experiment_id,
+                    "transition_window": transition_window,
+                    "fold_count": 0,
+                    "fold_ids": [],
+                    "expected_rounds": None,
+                    "fold_details": {},
+                    "complete": False,
+                    "status": "error",
+                    "error": str(e),
+                })
                 continue
 
     if not df_list:
@@ -3383,41 +3530,232 @@ if __name__ == "__main__":
     print(df_all)
 
     # ============================================================
-    # VERIFICAÇÃO FINAL: 5 FOLDS POR ARQUIVO
+    # HELPERS PARA IDENTIFICAR A CONFIGURAÇÃO EXPERIMENTAL
+    # ============================================================
+
+    def _validation_shift_type(experiment_id):
+        """
+        Extrai o tipo de data shift do Experiment ID.
+        """
+        exp = str(experiment_id or "").strip().lower()
+
+        if exp.startswith("concept_drift#"):
+            return "Concept drift"
+        if exp.startswith("label_shift#"):
+            return "Label shift"
+        if exp.startswith("combined_shift#"):
+            return "Combined shift"
+
+        return "N/A"
+
+
+    def _validation_temporal_type(experiment_id):
+        """
+        Extrai se o shift é sudden ou gradual.
+        """
+        exp = str(experiment_id or "").strip().lower()
+
+        if exp.endswith("_sudden"):
+            return "Sudden"
+        if exp.endswith("_gradual"):
+            return "Gradual"
+
+        return "N/A"
+
+
+    def _validation_alpha(experiment_id):
+        """
+        Extrai a configuração/alpha do Experiment ID.
+
+        Exemplos:
+            concept_drift#0.1_sudden
+                -> 0.1
+
+            label_shift#0.1-1.0_sudden
+                -> 0.1 -> 1.0
+
+            combined_shift#0.1-1.0_sudden
+                -> 0.1 -> 1.0
+        """
+        exp = str(experiment_id or "").strip()
+
+        if "#" not in exp:
+            return "N/A"
+
+        config = exp.split("#", 1)[1]
+
+        if "_" in config:
+            config = config.split("_", 1)[0]
+
+        if not config:
+            return "N/A"
+
+        # Mantém a configuração de label/combined shift legível.
+        if "-" in config:
+            parts = config.split("-", 1)
+
+            try:
+                first = float(parts[0])
+                second = float(parts[1])
+                return f"{first:g} -> {second:g}"
+            except (ValueError, TypeError):
+                return config
+
+        try:
+            return f"{float(config):g}"
+        except (ValueError, TypeError):
+            return config
+
+
+    # ============================================================
+    # VERIFICAÇÃO FINAL: ARQUIVOS AUSENTES OU INCOMPLETOS
+    # ============================================================
+    #
+    # Critério solicitado:
+    #   * 1 fold distinto  -> 100 rodadas completas;
+    #   * >1 fold distinto -> 500 rodadas completas.
+    #
+    # A lista abaixo inclui também configurações sem arquivo, porque
+    # read_data() registra TODOS os caminhos esperados antes de continuar.
     # ============================================================
 
     print("\n" + "=" * 100)
-    print("ARQUIVOS SEM 5 FOLDS COMPLETOS")
+    print("CONFIGURAÇÕES SEM ARQUIVO OU INCOMPLETAS")
     print("=" * 100)
 
-    incomplete_fold_files = [
+    incomplete_records = [
         record
-        for record in FOLD_VALIDATION
-        if record["fold_count"] != 5
+        for record in EXPERIMENT_VALIDATION
+        if not record.get("complete", False)
     ]
 
-    if incomplete_fold_files:
-        # Agrupa por solução e diretório para evitar repetir os
-        # diferentes datasets/arquivos que pertencem ao mesmo conjunto.
-        incomplete_solution_dirs = {}
+    if incomplete_records:
 
-        for record in incomplete_fold_files:
-            solution = record.get("solution")
-            directory = os.path.dirname(record["path"])
-
-            key = (solution, directory)
-            incomplete_solution_dirs[key] = True
-
-        for solution, directory in sorted(
-            incomplete_solution_dirs.keys(),
-            key=lambda item: (str(item[0]), item[1])
+        for record in sorted(
+            incomplete_records,
+            key=lambda r: (
+                str(r.get("experiment_id")),
+                str(r.get("transition_window")),
+                str(r.get("solution")),
+                str(r.get("dataset")),
+                r.get("path", ""),
+            ),
         ):
-            print(f"\nSolução: {solution}")
-            print(f"Diretório: {directory}")
+
+            status = record.get("status", "incomplete")
+            solution = record.get("solution", "N/A")
+            dataset_name = record.get("dataset", "N/A")
+            experiment = record.get("experiment_id", "N/A")
+            transition_window = record.get(
+                "transition_window",
+                None
+            )
+
+            shift_type = _validation_shift_type(experiment)
+            temporal_type = _validation_temporal_type(experiment)
+            alpha = _validation_alpha(experiment)
+
+            fold_count = record.get("fold_count", 0)
+            expected_rounds = record.get(
+                "expected_rounds",
+                None
+            )
+
+            print("\n------------------------------------------------------------")
+            print(f"Experiment ID      : {experiment}")
+            print(f"Solução             : {solution}")
+            print(f"Dataset             : {dataset_name}")
+            print(f"Data shift          : {shift_type}")
+            print(f"Temporal type       : {temporal_type}")
+            print(f"Alpha/configuração  : {alpha}")
+            print(
+                f"Transition Window   : "
+                f"{transition_window if transition_window is not None else 'N/A'}"
+            )
+            print(f"Status              : {status}")
+            print(f"Arquivo            : {record.get('path', 'N/A')}")
+            print(f"Folds encontrados  : {fold_count}")
+
+            if expected_rounds is not None:
+                print(
+                    f"Rodadas esperadas  : "
+                    f"{expected_rounds} por fold"
+                )
+
+            fold_details = record.get(
+                "fold_details",
+                {}
+            )
+
+            if fold_details:
+
+                for fold_id in sorted(
+                    fold_details.keys()
+                ):
+                    details = fold_details[fold_id]
+
+                    print(
+                        f"  Fold {fold_id}: "
+                        f"{details['round_count']} rodadas | "
+                        f"intervalo "
+                        f"{details['min_round']} -> "
+                        f"{details['max_round']} | "
+                        f"completo={details['complete']}"
+                    )
+
+                    missing = details.get(
+                        "missing_rounds",
+                        []
+                    )
+
+                    extra = details.get(
+                        "extra_rounds",
+                        []
+                    )
+
+                    if missing:
+                        # Evita imprimir uma lista gigantesca.
+                        preview = missing[:20]
+                        suffix = (
+                            " ..."
+                            if len(missing) > 20
+                            else ""
+                        )
+                        print(
+                            f"    Rodadas ausentes: "
+                            f"{preview}{suffix}"
+                        )
+
+                    if extra:
+                        preview = extra[:20]
+                        suffix = (
+                            " ..."
+                            if len(extra) > 20
+                            else ""
+                        )
+                        print(
+                            f"    Rodadas extras: "
+                            f"{preview}{suffix}"
+                        )
+
+            if record.get("error"):
+                print(
+                    f"Erro: {record['error']}"
+                )
+
     else:
-        print("Todos os arquivos lidos possuem exatamente 5 folds distintos.")
+        print(
+            "Todos os arquivos esperados estão completos segundo "
+            "o critério de 100 rodadas (1 fold) ou 500 rodadas (>1 fold)."
+        )
 
     print("=" * 100 + "\n")
+
+    print(
+        f"Resumo da validação: "
+        f"{len(incomplete_records)} configuração(ões) sem arquivo ou incompleta(s) "
+        f"de {len(EXPERIMENT_VALIDATION)} arquivo(s)/configuração(ões) esperados."
+    )
 
     print(
         f"\nTolerância máxima de detecção: {MAX_DETECTION_DELAY} rodada(s) após o fim do episódio"
