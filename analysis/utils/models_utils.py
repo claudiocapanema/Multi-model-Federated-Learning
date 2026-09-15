@@ -26,6 +26,17 @@ import logging
 logging.basicConfig(level=logging.INFO)  # Configure logging
 logger = logging.getLogger(__name__)  # Create logger for the module
 
+
+DATASET_DUPLICATION_FACTORS = {
+    "CIFAR10": 2,
+    "MNIST": 2,
+    "GTSRB": 2,
+    "claudiogsc/WISDM-W": 3,
+    "ImageNet10": 4,
+    "Foursquare": 2,
+    "F-MNIST": 2,
+}
+DATASET_DUPLICATION_CLIENT_THRESHOLD = 100
 def fedpredict_client_weight_predictions_torch(output: torch.Tensor, t: int, current_proportion: np.array, similarity: float) -> np.array:
     """
         This function gives more weight to the predominant classes in the current dataset. This function is part of
@@ -60,13 +71,13 @@ def fedpredict_client_weight_predictions_torch(output: torch.Tensor, t: int, cur
         print("FedPredict client weight prediction")
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-DATASET_INPUT_MAP = {"CIFAR10": "img", "MNIST": "image", "EMNIST": "image", "GTSRB": "image", "Gowalla": "sequence",
+DATASET_INPUT_MAP = {"CIFAR10": "img", "CINIC10": "image", "MNIST": "image", "EMNIST": "image", "F-MNIST": "image", "SVHN": "image", "GTSRB": "image", "Gowalla": "sequence",
                      "WISDM-W": "sequence", "ImageNet": "image", "ImageNet10": "image", "wikitext": "sequence", "Foursquare": "sequence"}
 
 def load_model(model_name, dataset, strategy, device):
     try:
-        num_classes = {'EMNIST': 47, 'MNIST': 10, 'CIFAR10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'Tiny-ImageNet': 200,
-         'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 30, "Foursquare": 10}[dataset]
+        num_classes = {'EMNIST': 47, 'MNIST': 10, "F-MNIST": 10, "SVHN": 10, 'CIFAR10': 10, 'CINIC10': 10, 'GTSRB': 43, 'WISDM-W': 12, 'WISDM-P': 12, 'Tiny-ImageNet': 200,
+         'ImageNet100': 15, 'ImageNet': 15, "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 25, "Fourquare": 100}[dataset]
         if model_name == 'CNN':
             if dataset in ['MNIST']:
                 input_shape = 1
@@ -232,24 +243,43 @@ def wikitext_preprocess(dataset):
 
 fds = {}  # Cache FederatedDataset
 
+fds = {}  # Cache FederatedDataset
+fds_config = {}  # Configuration used to build each cached dataset
+
 def get_transform(dataset_name, train_test):
     pytorch_transforms = {"CIFAR10": {"train":
                                           Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
                                       "test": Compose(
                                           [ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])},
-                          "CINIC10": {"train":
-                                          Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
-                                      "test": Compose(
-                                          [ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])},
+                          "CINIC10": {
+                                    "train": Compose([
+                                        Grayscale(num_output_channels=3),
+                                        ToTensor(),
+                                        Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                                    ]),
+                                    "test": Compose([
+                                        Grayscale(num_output_channels=3),
+                                        ToTensor(),
+                                        Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                                    ])
+                                },
                           "SVHN": {"train":
                                           Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
                                       "test": Compose(
                                           [ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])},
-                          "MNIST": Compose([ToTensor(), RandomRotation(10),
-                                            Normalize([0.5], [0.5])]),
-                          "EMNIST": Compose([ToTensor(), RandomRotation(10),
+                          "MNIST": {"train": Compose([ToTensor(), RandomRotation(10),
                                              Normalize([0.5], [0.5])]),
-                          "GTSRB": Compose(
+                                    "test": Compose([ToTensor(), RandomRotation(10),
+                                             Normalize([0.5], [0.5])])},
+                          "EMNIST": {"train": Compose([ToTensor(), RandomRotation(10),
+                                             Normalize([0.5], [0.5])]),
+                                    "test": Compose([ToTensor(), RandomRotation(10),
+                                             Normalize([0.5], [0.5])])},
+                          "F-MNIST": {"train": Compose([ToTensor(), RandomRotation(10),
+                                             Normalize([0.5], [0.5])]),
+                                    "test": Compose([ToTensor(), RandomRotation(10),
+                                             Normalize([0.5], [0.5])])},
+                          "GTSRB": {"train": Compose(
                               [
 
                                   Resize((32, 32)),
@@ -262,6 +292,19 @@ def get_transform(dataset_name, train_test):
                                   Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
                               ]
                           ),
+                              "test": Compose(
+                              [
+
+                                  Resize((32, 32)),
+                                  RandomHorizontalFlip(),  # FLips the image w.r.t horizontal axis
+                                  RandomRotation(10),  # Rotates the image to a specified angel
+                                  RandomAffine(0, shear=10, scale=(0.8, 1.2)),
+                                  # Performs actions like zooms, change shear angles.
+                                  ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+                                  ToTensor(),
+                                  Normalize((0.3337, 0.3064, 0.3171), (0.2672, 0.2564, 0.2629))
+                              ]
+                          )},
                           "ImageNet": Compose(
                               [
 
@@ -312,69 +355,148 @@ def get_transform(dataset_name, train_test):
                           "wikitext": {"train": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32))),
                                       "test": Lambda(lambda x: torch.from_numpy(np.array(x, dtype=np.float32)))},
                           "Foursquare": {"train": lambda x: torch.tensor(x, dtype=torch.float32),
-                                         "test": lambda x: torch.tensor(x, dtype=torch.float32)}
+                                      "test": lambda x: torch.tensor(x, dtype=torch.float32)},
 
                           }[dataset_name][train_test]
 
     return pytorch_transforms
 
 def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions: int, batch_size: int,
-              data_sampling_percentage: int, get_from_volume: bool = True, k_fold: int = 5, fold_id: int = 1):
+              data_sampling_percentage: int, get_from_volume: bool = True, k_fold: int = 5, fold_id: int = 1,
+              partition_seed: int = 1):
+    """
+    Load one federated partition and create the local k-fold train/test split.
+
+    Important fixes:
+      1. Never use ``partition`` before a successful load.
+      2. Preserve the real exception from ``load_partition``.
+      3. Rebuild the cached FederatedDataset if its partitioning configuration
+         (number of clients, alpha, or source) changes.
+      4. Raise the error after all retries instead of returning None, preventing
+         the later ``NoneType`` cascade during client initialization.
+    """
+    global fds, fds_config
+
+    print(
+        "Loading {} {} {} {} {} {} data.".format(
+            dataset_name,
+            partition_id,
+            num_partitions,
+            batch_size,
+            data_sampling_percentage,
+            alpha,
+        )
+    )
+
     try:
-        # Only initialize `FederatedDataset` once
-        print(
-            """Loading {} {} {} {} {} {} data.""".format(dataset_name, partition_id, num_partitions, batch_size, data_sampling_percentage, alpha))
-        global fds
-        if not get_from_volume:
+        dataset_map = {
+            "EMNIST": "claudiogsc/emnist_balanced",
+            "CIFAR10": "uoft-cs/cifar10",
+            "CINIC10": "flwrlabs/cinic10",
+            "MNIST": "ylecun/mnist",
+            "F-MNIST": "zalando-datasets/fashion_mnist",
+            "SVHN": "ufldl-stanford/svhn",
+            "GTSRB": "claudiogsc/GTSRB",
+            "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
+            "WISDM-W": "claudiogsc/WISDM-W",
+            "ImageNet": "claudiogsc/ImageNet-15_household_objects",
+            "ImageNet10": "claudiogsc/ImageNet-10_household_objects",
+            "wikitext": "claudiogsc/wikitext-Window-10-Words-25",
+            "Foursquare": "claudiogsc/foursquare-us-sequences-highlevel-40000-samples-10-seq-len-8-classes",
+        }
 
-            if dataset_name not in fds:
-                partitioner = DirichletPartitioner(num_partitions=num_partitions, partition_by="label",
+        if dataset_name not in dataset_map:
+            raise ValueError(f"Unknown dataset_name: {dataset_name}")
 
-                                                   alpha=alpha, min_partition_size=10, seed=1,
+        source_path = f"/home/gustavo/Documentos/Multi-model-Federated-Learning/system/datasets/{dataset_name}" if get_from_volume else None
 
-                                                   self_balancing=True)
-                fds[dataset_name] = CustomFederatedDataset(
-                    dataset={"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "CINIC10": "flwrlabs/cinic10",
-                             "MNIST": "ylecun/mnist", "F-MNIST": "zalando-datasets/fashion_mnist", "SVHN": "ufldl-stanford/svhn",
-                         "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
-                         "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
-                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-10-Words-25',
-                             "Foursquare": "claudiogsc/foursquare-us-sequences-highlevel-40000-samples-10-seq-len-8-classes"}[dataset_name],
-                    partitioners={"train": partitioner},
-                    seed=42
-                )
-        else:
-            # dts = dt.load_from_disk(f"datasets/{dataset_name}")
-            partitioner = DirichletPartitioner(num_partitions=num_partitions, partition_by="label",
-                                               alpha=alpha, min_partition_size=10, seed=1,
-                                               self_balancing=True)
-            print("dataset from volume")
-            fd = CustomFederatedDataset(
-                dataset={"EMNIST": "claudiogsc/emnist_balanced", "CIFAR10": "uoft-cs/cifar10", "CINIC10": "flwrlabs/cinic10",
-                             "MNIST": "ylecun/mnist", "F-MNIST": "zalando-datasets/fashion_mnist", "SVHN": "ufldl-stanford/svhn",
-                         "GTSRB": "claudiogsc/GTSRB", "Gowalla": "claudiogsc/Gowalla-State-of-Texas-Window-4-overlap-0.5",
-                         "WISDM-W": "claudiogsc/WISDM-W", "ImageNet": "claudiogsc/ImageNet-15_household_objects"
-                         , "ImageNet10": "claudiogsc/ImageNet-10_household_objects", 'wikitext': 'claudiogsc/wikitext-Window-10-Words-25',
-                             "Foursquare": "claudiogsc/foursquare-us-sequences-highlevel-40000-samples-10-seq-len-8-classes"}[
-                    dataset_name],
-                partitioners={"train": partitioner},
-                path=f"/home/gustavo/PycharmProjects/Multi-model-Federated-Learning/system/datasets/{dataset_name}",
-                seed=42
+        config = {
+            "num_partitions": int(num_partitions),
+            "alpha": float(alpha),
+            "get_from_volume": bool(get_from_volume),
+            "path": source_path,
+            "dataset_id": dataset_map[dataset_name],
+            "partition_seed": int(partition_seed),
+        }
+
+        # Do not reuse a FederatedDataset built with different partitioning
+        # parameters. This was especially important when running experiments
+        # with different Dirichlet alphas/client counts in the same process.
+        if dataset_name not in fds or fds_config.get(dataset_name) != config:
+            partitioner = DirichletPartitioner(
+                num_partitions=num_partitions,
+                partition_by="label",
+                alpha=alpha,
+                min_partition_size=10,
+                seed=int(partition_seed),
+                self_balancing=True,
             )
-            fds[dataset_name] = fd
-            print("passou dataset")
-        attempts = 0
-        while True:
-            attempts += 1
+
+            kwargs = {
+                "dataset_name": dataset_name,
+                "dataset": dataset_map[dataset_name],
+                "partitioners": {"train": partitioner},
+                "seed": 1,
+                "duplication_factors": DATASET_DUPLICATION_FACTORS,
+                "duplication_client_threshold": DATASET_DUPLICATION_CLIENT_THRESHOLD,
+            }
+
+            if get_from_volume:
+                print("dataset from volume")
+                kwargs["path"] = source_path
+            else:
+                print("dataset from Hugging Face")
+
+            fds[dataset_name] = CustomFederatedDataset(**kwargs)
+            fds_config[dataset_name] = config
+
+        # ------------------------------------------------------------------
+        # Load the partition. ``partition`` is explicitly initialized so
+        # retry exhaustion can never produce UnboundLocalError.
+        # ------------------------------------------------------------------
+        partition = None
+        last_error = None
+        max_load_attempts = 5
+
+        for attempt in range(1, max_load_attempts + 1):
+            print("tentativa", attempt)
+
             try:
-                time.sleep(random.randint(1, 1))
                 partition = fds[dataset_name].load_partition(partition_id)
-                logger.info("""Loaded dataset {} in the {} attempt for client {}""".format(dataset_name, attempts, partition_id))
+                logger.info(
+                    "Loaded dataset %s on attempt %d for client %d",
+                    dataset_name,
+                    attempt,
+                    partition_id,
+                )
                 break
-            except Exception as e:
-                logger.info("""Tried to load dataset {} for the {} time for the client {} error""".format(dataset_name, attempts, partition_id))
-                logger.info("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
-                time.sleep(1)
+
+            except Exception as exc:
+                last_error = exc
+
+                logger.exception(
+                    "Failed to load dataset '%s', partition %d, attempt %d/%d.",
+                    dataset_name,
+                    partition_id,
+                    attempt,
+                    max_load_attempts,
+                )
+
+                if attempt < max_load_attempts:
+                    time.sleep(1)
+
+        if partition is None:
+            raise RuntimeError(
+                f"Could not load partition {partition_id} of dataset "
+                f"'{dataset_name}' after {max_load_attempts} attempts. "
+                f"The original error is preserved as the exception cause."
+            ) from last_error
+
+        if len(partition) == 0:
+            raise RuntimeError(
+                f"Loaded partition {partition_id} of dataset '{dataset_name}' "
+                "but it contains zero samples."
+            )
 
         # ==============================
         # K-FOLD LOCAL (intra-client)
@@ -382,63 +504,118 @@ def load_data(dataset_name: str, alpha: float, partition_id: int, num_partitions
         num_samples = len(partition)
         indices = np.arange(num_samples)
 
+        if not 1 <= fold_id <= k_fold:
+            raise ValueError(
+                f"fold_id must be in [1, {k_fold}], but received {fold_id}."
+            )
+
         rng = np.random.default_rng(seed=k_fold)
         rng.shuffle(indices)
 
         folds = np.array_split(indices, k_fold)
 
         val_idx = folds[fold_id - 1]
-        train_idx = np.concatenate([f for i, f in enumerate(folds) if i != fold_id])
+        train_idx = np.concatenate(
+            [f for i, f in enumerate(folds) if i != fold_id - 1]
+        )
 
         partition_train = partition.select(train_idx)
         partition_test = partition.select(val_idx)
 
-        if dataset_name in ["CIFAR10", "CINIC10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla", "wikitext", "Forsquare"]:
-            # Divide data on each node: 80% train, 20% test
-
+        if dataset_name in [
+            "CIFAR10",
+            "CINIC10",
+            "MNIST",
+            "EMNIST",
+            "F-MNIST",
+            "SVHN",
+            "GTSRB",
+            "ImageNet",
+            "ImageNet10",
+            "WISDM-W",
+            "Gowalla",
+            "wikitext",
+            "Foursquare",
+        ]:
+            print("dt name", dataset_name)
             pytorch_transforms_train = get_transform(dataset_name, "train")
             pytorch_transforms_test = get_transform(dataset_name, "test")
 
-        # import torchvision.datasets as datasets
-        # datasets.EMNIST
         key = DATASET_INPUT_MAP[dataset_name]
 
         def apply_transforms_train(batch):
-            """Apply transforms to the partition from FederatedDataset."""
-
-            batch[key] = [pytorch_transforms_train(img) for img in batch[key]]
-            # logger.info("""bath key: {}""".format(batch[key]))
+            batch[key] = [
+                pytorch_transforms_train(img) for img in batch[key]
+            ]
             return batch
 
         def apply_transforms_test(batch):
-            """Apply transforms to the partition from FederatedDataset."""
-
-            batch[key] = [pytorch_transforms_test(img) for img in batch[key]]
-            # logger.info("""bath key: {}""".format(batch[key]))
+            batch[key] = [
+                pytorch_transforms_test(img) for img in batch[key]
+            ]
             return batch
 
-        if dataset_name in ["CIFAR10", "CINIC10", "MNIST", "EMNIST", "GTSRB", "ImageNet", "ImageNet10", "WISDM-W", "Gowalla", "wikitext"]:
-            partition_train = partition_train.with_transform(apply_transforms_train)
-            partition_test = partition_train.with_transform(apply_transforms_test)
+        if dataset_name in [
+            "CIFAR10",
+            "CINIC10",
+            "MNIST",
+            "EMNIST",
+            "F-MNIST",
+            "SVHN",
+            "GTSRB",
+            "ImageNet",
+            "ImageNet10",
+            "WISDM-W",
+            "Gowalla",
+            "wikitext",
+        ]:
+            partition_train = partition_train.with_transform(
+                apply_transforms_train
+            )
+            partition_test = partition_test.with_transform(
+                apply_transforms_test
+            )
+
         elif dataset_name == "Foursquare":
             partition_train = partition_train.with_format("torch")
             partition_test = partition_test.with_format("torch")
 
-        def seed_worker(worker_id):
-            np.random.seed(partition_id)
-            random.seed(partition_id)
+        GLOBAL_TORCH_GENERATOR = torch.Generator()
+        GLOBAL_TORCH_GENERATOR.manual_seed(fold_id)
 
-        g = torch.Generator()
-        g.manual_seed(partition_id)
+        random.seed(fold_id)
+        np.random.seed(fold_id)
+        torch.manual_seed(fold_id)
+        torch.cuda.manual_seed_all(fold_id)
+
         trainloader = DataLoader(
-            partition_train, batch_size=batch_size, shuffle=True, worker_init_fn=seed_worker, generator=g
+            partition_train,
+            batch_size=batch_size,
+            shuffle=True,
+            generator=GLOBAL_TORCH_GENERATOR,
+            num_workers=0,
         )
-        testloader = DataLoader(partition_test, batch_size=batch_size)
+
+        testloader = DataLoader(
+            partition_test,
+            batch_size=batch_size,
+            generator=GLOBAL_TORCH_GENERATOR,
+            num_workers=0,
+        )
+
         return trainloader, testloader
 
-    except Exception as e:
-        print("load_data error")
-        print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+    except Exception as exc:
+        logger.exception(
+            "load_data failed for dataset=%s, partition_id=%s, "
+            "num_partitions=%s, alpha=%s, get_from_volume=%s.",
+            dataset_name,
+            partition_id,
+            num_partitions,
+            alpha,
+            get_from_volume,
+        )
+        raise
 
 def train(model, trainloader, valloader, optimizer, epochs, learning_rate, device, client_id, t, dataset_name, n_classes, concept_drift_window=0):
     try:

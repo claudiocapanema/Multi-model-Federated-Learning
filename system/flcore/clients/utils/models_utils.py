@@ -70,11 +70,11 @@ DATASET_DUPLICATION_FACTORS = {
     "MNIST": 2,
     "GTSRB": 2,
     "claudiogsc/WISDM-W": 3,
-    "ImageNet10": 8,
+    "ImageNet10": 5,
     "Foursquare": 2,
     "F-MNIST": 2,
 }
-DATASET_DUPLICATION_CLIENT_THRESHOLD = 100
+DATASET_DUPLICATION_CLIENT_THRESHOLD = 10
 
 def load_model(model_name, dataset, strategy, device):
     try:

@@ -336,12 +336,16 @@ class MultiFedAvg:
             print("add_metrics error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
+    def _get_csv_strategy_name(self):
+        """Strategy suffix used in generated CSV filenames."""
+        return self.strategy_name
+
     def _save_data_metrics(self):
 
         try:
             print("save data metrics")
             for me in range(self.ME):
-                algo = self.dataset[me] + "_" + self.strategy_name
+                algo = self.dataset[me] + "_" + self._get_csv_strategy_name()
                 result_path = self.get_result_path("test")
                 file_path = result_path + "{}_metrics.csv".format(algo)
                 rows = []
@@ -393,7 +397,7 @@ class MultiFedAvg:
     def _get_results(self, train_test, mode, me):
 
         try:
-            algo = self.dataset[me] + "_" + self.strategy_name
+            algo = self.dataset[me] + "_" + self._get_csv_strategy_name()
 
             result_path = self.get_result_path(train_test)
 
@@ -767,4 +771,3 @@ class MultiFedAvg:
             )
 
             raise
-

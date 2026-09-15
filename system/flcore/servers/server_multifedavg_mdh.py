@@ -76,6 +76,9 @@ class MultiFedAvgMDH(MultiFedAvg):
 
         print(f"MultiFedAvg-MDH Q_MAX = {self.q_max}")
 
+    def _get_csv_strategy_name(self):
+        return f"{self.strategy_name}_qmax{self.q_max}"
+
     def set_clients(self):
 
         try:

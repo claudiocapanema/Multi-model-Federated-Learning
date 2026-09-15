@@ -39,7 +39,7 @@ STRATEGY = "FedDCA"
 #
 DRIFT_TYPES = [
     "sudden",
-    # "gradual",
+    "gradual",
 ]
 
 
@@ -53,7 +53,7 @@ DRIFT_TYPES = [
 #
 SHIFT_TYPES = [
     "concept",
-    # "label",
+    "label",
 ]
 
 

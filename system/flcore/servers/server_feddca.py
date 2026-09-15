@@ -132,7 +132,7 @@ class FedDCA(MultiFedAvg):
         # use the EWMA as the adaptive baseline and estimate normal temporal
         # variation from the client's own distance history.
         self.feddca_threshold_sigma = float(
-            getattr(args, "feddca_threshold_sigma", 1.0)
+            getattr(args, "feddca_threshold_sigma", 3.0)
         )
         self.feddca_min_history = int(
             getattr(args, "feddca_min_history", 3)

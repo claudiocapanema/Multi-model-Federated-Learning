@@ -31,6 +31,7 @@ from flcore.servers.server_fedfairmmfl import FedFairMMFL
 from flcore.servers.server_multifedavg_with_multifedpredict import MultiFedAvgWithMultiFedPredict
 from flcore.servers.server_dma_fl_synchronous import DMAFLSynchronous
 from flcore.servers.server_fedcond import FedConD
+from flcore.servers.server_jsdrift import JSDrift
 from flcore.servers.server_feddca import FedDCA
 from flcore.servers.server_cda_fedavg import CDAFedAvg
 from flcore.servers.server_adaptive_fedavg import AdaptiveFedAvg
@@ -208,6 +209,10 @@ def run(args):
 
             server = FedConD
 
+        elif args.strategy == "JS-Drift":
+
+            server = JSDrift
+
         elif args.strategy == "FedDCA":
 
             server = FedDCA
@@ -282,6 +287,7 @@ def run(args):
 
             if args.strategy in [
                 "FedConD",
+                "JS-Drift",
                 "FedDCA",
                 "CDA-FedAvg"
             ] and fold_id == 1:
@@ -381,6 +387,24 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--fraction_fit", type=float, default=0.3
+    )
+    parser.add_argument(
+        "--jsdrift_gamma",
+        type=float,
+        default=0.5,
+        help="JS-Drift sensitivity gamma (paper reference default: 0.5; validated optimum in ablation: 0.3)",
+    )
+    parser.add_argument(
+        "--jsdrift_epsilon",
+        type=float,
+        default=1e-10,
+        help="JS-Drift numerical epsilon for class distributions",
+    )
+    parser.add_argument(
+        "--jsdrift_threshold",
+        type=float,
+        default=0.1,
+        help="Evaluation-only JSD threshold for binary drift reporting",
     )
     parser.add_argument(
         "--q_max",

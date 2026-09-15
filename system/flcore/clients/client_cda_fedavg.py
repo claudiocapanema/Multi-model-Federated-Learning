@@ -33,7 +33,7 @@ class ClientCDAFedAvg(MultiFedAvgClient):
 
         # Sensitivity to change: lambda = 0.05
         self.cda_lambda = {
-            me: 0.1
+            me: 0.05
             for me in range(self.ME)
         }
 
@@ -47,7 +47,7 @@ class ClientCDAFedAvg(MultiFedAvgClient):
         # Maximum size of the short-term memory Q
         # Nmax = 1000
         self.cda_nmax = {
-            me: 500
+            me: 1000
             for me in range(self.ME)
         }
 
