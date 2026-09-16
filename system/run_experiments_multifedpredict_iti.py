@@ -26,7 +26,7 @@ COMMANDS_DIR = Path(
 # Exemplo no TXT:
 #     --strategy='MultiFedAvg+MFP_v2'
 #
-STRATEGY = "JS-Drift"
+STRATEGY = "MultiFedAvg+MFP_v2_iti"
 
 
 # Tipos de drift que devem ser executados.
@@ -53,7 +53,7 @@ DRIFT_TYPES = [
 #
 SHIFT_TYPES = [
     "concept",
-    # "label",
+    "label",
 ]
 
 
@@ -685,38 +685,88 @@ def main():
         )
 
     # --------------------------------------------------------
-    # Confirmação
+    # Seleção dos comandos a executar
     # --------------------------------------------------------
 
     print("\n" + "-" * 100)
+    print("SELEÇÃO DOS COMANDOS")
+    print("-" * 100)
+    print("Pressione ENTER para executar TODOS os comandos.")
+    print("Ou informe os números dos comandos separados por vírgulas.")
+    print("Exemplo: 1,3,5")
 
-    response = input(
-        "\nExecutar os comandos selecionados? [s/N]: "
-    ).strip().lower()
+    response = input("\nComandos a executar: ").strip()
 
-    if response not in (
-        "s",
-        "sim",
-        "y",
-        "yes",
-    ):
+    if not response:
+        # ENTER = todos
+        commands_to_execute = selected_commands.copy()
+    else:
+        try:
+            indexes = [
+                int(value.strip())
+                for value in response.split(",")
+                if value.strip()
+            ]
 
+            if not indexes:
+                raise ValueError
+
+            invalid = [
+                index
+                for index in indexes
+                if index < 1 or index > len(selected_commands)
+            ]
+
+            if invalid:
+                print(
+                    "\nERRO: número(s) de comando inválido(s): "
+                    f"{invalid}"
+                )
+                print(
+                    f"Informe números entre 1 e "
+                    f"{len(selected_commands)}."
+                )
+                return
+
+            # Remove duplicatas preservando a ordem informada.
+            indexes = list(dict.fromkeys(indexes))
+
+            commands_to_execute = [
+                selected_commands[index - 1]
+                for index in indexes
+            ]
+
+        except ValueError:
+            print(
+                "\nERRO: entrada inválida."
+            )
+            print(
+                "Use ENTER para todos ou números separados por vírgulas."
+            )
+            return
+
+    print(
+        f"\nComandos que serão executados: "
+        f"{len(commands_to_execute)}"
+    )
+
+    for i, item in enumerate(commands_to_execute, start=1):
+        original_index = selected_commands.index(item) + 1
         print(
-            "\nExecução cancelada."
+            f"  [{original_index}] "
+            f"{item['file']}:{item['line']}"
         )
-
-        return
 
     # --------------------------------------------------------
     # Execução sequencial
     # --------------------------------------------------------
 
-    total = len(selected_commands)
+    total = len(commands_to_execute)
 
     global_start = time.time()
 
     for i, item in enumerate(
-        selected_commands,
+        commands_to_execute,
         start=1
     ):
 
@@ -760,7 +810,7 @@ def main():
 
     print("\n")
     print("#" * 100)
-    print("TODOS OS COMANDOS FORAM CONCLUÍDOS")
+    print("EXECUÇÃO CONCLUÍDA")
     print("#" * 100)
 
     print(

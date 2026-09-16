@@ -626,29 +626,6 @@ def calculate_detection_rate(
     return detected / total
 
 
-def calculate_missed_detection_rate(
-    df,
-    max_detection_delay=None
-):
-    """
-    Missed Detection Rate (MDR).
-
-    MDR = N_missed / N_actual_shifts
-
-    Lower is better.
-    """
-
-    detection_rate = calculate_detection_rate(
-        df,
-        max_detection_delay
-    )
-
-    if pd.isna(detection_rate):
-        return np.nan
-
-    return 1.0 - detection_rate
-
-
 def calculate_average_detection_delay(
     df,
     max_detection_delay=None
@@ -918,7 +895,6 @@ def calculate_detection_metric_values(
     Métricas:
 
         Detection Rate
-        Missed Detection Rate
         Average Detection Delay
         Episode F1
         Alarm Rate
@@ -1007,18 +983,6 @@ def calculate_detection_metric_values(
                 1.0
                 if valid_detections
                 else 0.0
-            )
-
-        # ============================================================
-        # MISSED DETECTION RATE
-        # ============================================================
-
-        elif metric == "Missed Detection Rate":
-
-            values.append(
-                0.0
-                if valid_detections
-                else 1.0
             )
 
         # ============================================================
@@ -1750,7 +1714,6 @@ def calculate_detection_metric(
     bounded = metric in {
         "Detection Rate",
         "Episode F1",
-        "Missed Detection Rate",
         "Alarm Rate",
     }
 
@@ -1819,7 +1782,6 @@ def _calculate_experiment_detection_metrics(
             "Detection Rate": np.nan,
             "Episode F1": np.nan,
             "Average Detection Delay": np.nan,
-            "Missed Detection Rate": np.nan,
             "False Alarm Rate": np.nan,
         }
 
@@ -1836,7 +1798,6 @@ def _calculate_experiment_detection_metrics(
             "Detection Rate": np.nan,
             "Episode F1": np.nan,
             "Average Detection Delay": np.nan,
-            "Missed Detection Rate": np.nan,
             "False Alarm Rate": np.nan,
         }
 
@@ -1895,14 +1856,6 @@ def _calculate_experiment_detection_metrics(
 
     detection_rate = (
         1.0 if valid_detections else 0.0
-    )
-
-    # ============================================================
-    # MISSED DETECTION RATE
-    # ============================================================
-
-    missed_detection_rate = (
-        0.0 if valid_detections else 1.0
     )
 
     # ============================================================
@@ -2011,7 +1964,7 @@ def _calculate_experiment_detection_metrics(
     # Alarmes após a janela máxima são FP para o Episode F1, mas
     # não entram no FAR. O FAR mede exclusivamente falsos alarmes
     # durante o regime estável pré-shift. Assim, MAX_DETECTION_DELAY
-    # afeta DR/MDR/MTD/F1, mas não altera o FAR.
+    # afeta DR/MTD/F1, mas não altera o FAR.
     # ============================================================
 
     stable_rounds = max(
@@ -2031,7 +1984,6 @@ def _calculate_experiment_detection_metrics(
         "Detection Rate": detection_rate,
         "Episode F1": episode_f1,
         "Average Detection Delay": average_detection_delay,
-        "Missed Detection Rate": missed_detection_rate,
         "False Alarm Rate": false_alarm_rate,
     }
 
@@ -2089,11 +2041,10 @@ def table_detection_quality_by_shift_type(
 
     if metrics is None:
         metrics = [
-            "Detection Rate",
             "Episode F1",
-            "Average Detection Delay",
-            "Missed Detection Rate",
+            "Detection Rate",
             "False Alarm Rate",
+            "Average Detection Delay",
         ]
 
     if higher_is_better_metrics is None:
@@ -2302,14 +2253,36 @@ def table_detection_quality_by_shift_type(
                     bounded=metric in {
                         "Detection Rate",
                         "Episode F1",
-                        "Missed Detection Rate",
-                    },
+                                },
                 )
                 aggregated[(shift_type, temporal_type, window)][solution][metric] = {
                     "mean": mean_value,
                     "ci": ci_value,
                     "n": len(values),
                 }
+
+            # JS-Drift was not designed for Concept Drift. If its DR is zero,
+            # its Concept Drift performance metrics are not applicable.
+            # Keep the raw experimental values intact, but suppress these
+            # metrics in the final table and exclude them from "best" ranking.
+            if (
+                str(shift_type).strip().lower() == "concept drift"
+                and str(solution).strip().lower() == "js-drift"
+                and "Detection Rate"
+                in aggregated[(shift_type, temporal_type, window)][solution]
+                and np.isclose(
+                    aggregated[(shift_type, temporal_type, window)][solution]
+                    ["Detection Rate"]["mean"],
+                    0.0,
+                    atol=1e-12,
+                )
+            ):
+                for metric in metrics:
+                    aggregated[(shift_type, temporal_type, window)][solution][metric] = {
+                        "mean": np.nan,
+                        "ci": np.nan,
+                        "n": 0,
+                    }
 
     # ------------------------------------------------------------
     # Build LaTeX rows
@@ -2542,6 +2515,8 @@ def table_detection_quality_by_shift_type(
                     ):
 
                         row[metric] = "--"
+                        if metric == "Average Detection Delay":
+                            row["MTD n"] = "--"
                         continue
 
                     mean_value = result["mean"]
@@ -2623,9 +2598,6 @@ def table_detection_quality_by_shift_type(
 
             "MTD n":
                 "$n_{\\mathrm{MTD}}$",
-
-            "Missed Detection Rate":
-                "MDR $\\downarrow$",
 
             "False Alarm Rate":
                 "FAR $\\downarrow$",
@@ -2841,7 +2813,7 @@ def table_detection_quality_by_shift_type(
     # ============================================================
     #
     # The original table above is intentionally preserved unchanged.
-    # This second table aggregates ALL experimental units for each
+    # This second table aggregates the valid experimental units for each
     # solution, regardless of:
     #   - shift family;
     #   - sudden/gradual temporal type;
@@ -2852,7 +2824,9 @@ def table_detection_quality_by_shift_type(
     #
     # The aggregation is performed on the already computed
     # Solution x Dataset x Experiment x Fold x Shift unit values.
-    # Therefore, each experimental unit contributes equally.
+    # Therefore, each valid experimental unit contributes equally.
+    # For JS-Drift, Concept Drift units with DR = 0 are excluded because
+    # JS-Drift was not designed for Concept Drift and those results are N/A.
     # ============================================================
 
     overall_rows = []
@@ -2861,7 +2835,23 @@ def table_detection_quality_by_shift_type(
 
         df_solution = df_experimental[
             df_experimental["Solution"] == solution
-        ]
+        ].copy()
+
+        # JS-Drift was not designed for Concept Drift. In the overall
+        # average, Concept Drift results for JS-Drift with DR = 0 must
+        # not contribute to any metric. These are the same results
+        # represented as N/A/-- in the detailed table above.
+        if str(solution).strip().lower() == "js-drift":
+            concept_invalid = (
+                df_solution["Shift Type"].astype(str).str.strip().str.lower()
+                == "concept drift"
+            ) & (
+                pd.to_numeric(
+                    df_solution["Detection Rate"],
+                    errors="coerce"
+                ).fillna(0.0) <= 0.0
+            )
+            df_solution = df_solution.loc[~concept_invalid].copy()
 
         if df_solution.empty:
             continue
@@ -2883,7 +2873,6 @@ def table_detection_quality_by_shift_type(
                 bounded=metric in {
                     "Detection Rate",
                     "Episode F1",
-                    "Missed Detection Rate",
                     "False Alarm Rate",
                 },
             )
@@ -3057,9 +3046,6 @@ def table_detection_quality_by_shift_type(
 
             "Average Detection Delay":
                 "MTD $\\downarrow$",
-
-            "Missed Detection Rate":
-                "MDR $\\downarrow$",
 
             "False Alarm Rate":
                 "FAR $\\downarrow$",
@@ -3445,6 +3431,7 @@ if __name__ == "__main__":
 
     solutions = [
         "MultiFedAvg+MFP_v2",
+        "JS-Drift",
         "FedConD",
         "FedDCA",
         "CDA-FedAvg"
@@ -3794,11 +3781,10 @@ if __name__ == "__main__":
     #
     # "Data shift == DATA_SHIFT" is interpreted as a detector alarm.
     metrics = [
-        "Detection Rate",
         "Episode F1",
-        "Average Detection Delay",
-        "Missed Detection Rate",
+        "Detection Rate",
         "False Alarm Rate",
+        "Average Detection Delay",
     ]
 
     higher_is_better_metrics = {

@@ -32,7 +32,7 @@ DATASET_DUPLICATION_FACTORS = {
     "MNIST": 2,
     "GTSRB": 2,
     "claudiogsc/WISDM-W": 3,
-    "ImageNet10": 4,
+    "ImageNet10": 5,
     "Foursquare": 2,
     "F-MNIST": 2,
 }

@@ -13,10 +13,10 @@ import os
 from base_plots import bar_plot, line_plot, ecdf_plot
 import matplotlib.pyplot as plt
 
+
 def read_data(alphas,
               datasets,
               total_clients):
-
     filename = (
         f"clients_{total_clients}_datasets_{datasets}"
         f"_alphas_{alphas}_metrics_clients.csv"
@@ -30,20 +30,9 @@ def read_data(alphas,
         print("O arquivo não existe!")
 
         n_classes = [
-            {
-                'EMNIST': 47,
-                'MNIST': 10,
-                'CIFAR10': 10,
-                'GTSRB': 43,
-                'WISDM-W': 12,
-                'WISDM-P': 12,
-                'ImageNet': 15,
-                "ImageNet10": 10,
-                "ImageNet_v2": 15,
-                "Gowalla": 7,
-                "wikitext": 30,
-                "Foursquare": 10
-            }[dataset]
+            {'EMNIST': 47, 'MNIST': 10, 'F-MNIST': 10, 'SVHN': 10, 'CIFAR10': 10, 'CINIC10': 10, 'GTSRB': 43,
+             'WISDM-W': 12, 'WISDM-P': 12, 'ImageNet': 15,
+             "ImageNet10": 10, "ImageNet_v2": 15, "Gowalla": 7, "wikitext": 25, "Foursquare": 10}[dataset]
             for dataset in datasets
         ]
 
@@ -87,7 +76,6 @@ def read_data(alphas,
                     p_ME_old = copy.deepcopy(p_ME)
 
                 for me in range(ME):
-
                     clients_train_loader[client_id][alpha][me], a = load_data(
                         dataset_name=datasets[me],
                         alpha=alpha,
@@ -114,7 +102,6 @@ def read_data(alphas,
                 )
 
                 for me in range(ME):
-
                     client_metrics[client_id][me][alpha]["fc"] = fc_ME[me]
 
                     client_metrics[client_id][me][alpha]["il"] = il_ME[me]
@@ -166,7 +153,6 @@ def read_data(alphas,
                 }
 
                 for alpha_tuple in alpha_tuples:
-
                     alpha_a = alpha_tuple[0]
 
                     alpha_b = alpha_tuple[1]
@@ -184,11 +170,11 @@ def read_data(alphas,
                     )
 
                     similarity_me = (
-                        1 -
-                        cosine_similarity(
-                            p_ME_a[me],
-                            p_ME_b[me]
-                        )
+                            1 -
+                            cosine_similarity(
+                                p_ME_a[me],
+                                p_ME_b[me]
+                            )
                     )
 
                     similarity_ALPHA[
@@ -196,7 +182,6 @@ def read_data(alphas,
                     ] = round(similarity_me, 2)
 
                 for alpha in [0.1, 1.0, 10.0]:
-
                     dataset_size = len(
                         clients_train_loader[cid][alpha][me].dataset
                     )
@@ -240,8 +225,8 @@ def read_data(alphas,
 
     return df
 
-def get_datasets_metrics(trainloader, ME, n_classes, concept_drift_window=None):
 
+def get_datasets_metrics(trainloader, ME, n_classes, concept_drift_window=None):
     try:
         p_ME = []
         fc_ME = []
@@ -275,23 +260,25 @@ def get_datasets_metrics(trainloader, ME, n_classes, concept_drift_window=None):
                 # print(f"p_me {p_me} fc_me {fc_me} il_me {il_me} model {me} client {client_id}")
         return p_ME, fc_ME, il_ME
     except Exception as e:
-       print("_get_datasets_metrics error")
-       print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+        print("_get_datasets_metrics error")
+        print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
 
 def cosine_similarity(p_1, p_2):
-
     # compute cosine similarity
     try:
         p_1_size = np.array(p_1).shape
         p_2_size = np.array(p_2).shape
         if p_1_size != p_2_size:
-            raise Exception(f"Input sizes have different shapes: {p_1_size} and {p_2_size}. Please check your input data.")
+            raise Exception(
+                f"Input sizes have different shapes: {p_1_size} and {p_2_size}. Please check your input data.")
 
         return np.dot(p_1, p_2) / (norm(p_1) * norm(p_2))
     except Exception as e:
         print("cosine_similairty error")
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
-        
+
+
 def write_header(self, filename, header, mode):
     try:
         os.makedirs(os.path.dirname(filename), exist_ok=True)
@@ -301,6 +288,7 @@ def write_header(self, filename, header, mode):
     except Exception as e:
         print("_write_header error")
         print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
+
 
 def write_outputs(self, filename, data, mode='a'):
     try:
@@ -323,16 +311,25 @@ def latex_general_metrics_table(
         base_dir,
         selected_clients_fraction=0.4,
         seed=42):
-
     Path(base_dir).mkdir(parents=True, exist_ok=True)
 
     rng = np.random.default_rng(seed)
 
-    datasets = ["WISDM", "ImageNet-10", "Foursquare"]
+    datasets = (
+        df["Dataset"]
+        .dropna()
+        .unique()
+        .tolist()
+    )
 
     alphas = [0.1, 1.0, 10.0]
 
     metrics = ["fc", "il", "dh"]
+
+    print(
+        "Datasets included in general metrics table:",
+        datasets
+    )
 
     selected_clients = sorted(
         rng.choice(
@@ -352,7 +349,7 @@ def latex_general_metrics_table(
 
     df = df[df["cid"].isin(selected_clients)]
 
-    tex_path = f"{base_dir}/general_metrics_table.tex"
+    tex_path = f"{base_dir}/general_metrics_table_all_datasets.tex"
 
     with open(tex_path, "w") as f:
 
@@ -390,10 +387,9 @@ def latex_general_metrics_table(
                     subset = df[
                         (df["Dataset"] == dataset) &
                         (df["α"] == alpha)
-                    ]
+                        ]
 
                     if len(subset) == 0:
-
                         row.append("-")
 
                         continue
@@ -416,7 +412,7 @@ def latex_general_metrics_table(
                     n = len(values)
 
                     ci = 1.96 * (
-                        weighted_std / np.sqrt(n)
+                            weighted_std / np.sqrt(n)
                     )
 
                     value = (
@@ -438,23 +434,33 @@ def latex_general_metrics_table(
 
     print(f"Tabela salva em {tex_path}")
 
+
 def latex_ps_table(
         df,
         base_dir,
         selected_clients_fraction=0.4,
         seed=42):
-
     Path(base_dir).mkdir(parents=True, exist_ok=True)
 
     rng = np.random.default_rng(seed)
 
-    datasets = ["WISDM", "ImageNet-10", "Foursquare"]
+    datasets = (
+        df["Dataset"]
+        .dropna()
+        .unique()
+        .tolist()
+    )
 
     alpha_pairs = [
         "0.1<->1.0",
         "0.1<->10.0",
         "1.0<->10.0"
     ]
+
+    print(
+        "Datasets included in label shift table:",
+        datasets
+    )
 
     selected_clients = sorted(
         rng.choice(
@@ -474,7 +480,7 @@ def latex_ps_table(
 
     df = df[df["cid"].isin(selected_clients)]
 
-    tex_path = f"{base_dir}/label_shift_table.tex"
+    tex_path = f"{base_dir}/label_shift_table_all_datasets.tex"
 
     with open(tex_path, "w") as f:
 
@@ -504,7 +510,7 @@ def latex_ps_table(
 
             subset_dataset = df[
                 df["Dataset"] == dataset
-            ]
+                ]
 
             if len(subset_dataset) == 0:
                 continue
@@ -532,7 +538,7 @@ def latex_ps_table(
                 n = len(values)
 
                 ci = 1.96 * (
-                    weighted_std / np.sqrt(n)
+                        weighted_std / np.sqrt(n)
                 )
 
                 mean_ci_value = (
@@ -580,17 +586,25 @@ def latex_ps_table(
 
     print(f"Tabela salva em {tex_path}")
 
-if __name__ == "__main__":
 
-    total_clients = 40
-    fraction_fit = 0.375
+if __name__ == "__main__":
+    total_clients = 10
+    fraction_fit = 0.4
 
     alphas = [0.1, 1.0, 10.0]
 
     dataset = [
         "WISDM-W",
         "ImageNet10",
-        "Foursquare"
+        "Foursquare",
+        "CIFAR10",
+        "CINIC10",
+        "EMNIST",
+        "F-MNIST",
+        "GTSRB",
+        "MNIST",
+        "SVHN",
+        "wikitext"
     ]
 
     write_path = (
