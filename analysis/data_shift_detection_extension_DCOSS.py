@@ -2726,7 +2726,7 @@ def table_detection_quality_by_shift_type(
             and active_shift == previous_shift
         ):
             # Columns 2--10 correspond to Shift Type through the metrics.
-            processed_lines.append("\\cline{2-10}")
+            processed_lines.append("\\cline{2-9}")
 
         processed_lines.append(line)
 
