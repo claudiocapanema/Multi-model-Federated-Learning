@@ -41,7 +41,7 @@ class MultiFedAvgClient:
             self.dataset = args.dataset
             self.batch_size = []
             for dataset in args.dataset:
-                self.batch_size.append({"CIFAR10": 32, "CINIC10": 32, "SVHN": 32, "MNIST": 32, "F-MNIST": 32, "EMNIST": 32, "WISDM-W": 64, "ImageNet10": 10, "Gowalla": 64, "wikitext": 256, "Foursquare": 512}[dataset])
+                self.batch_size.append({"CIFAR10": 32, "CINIC10": 32, "SVHN": 32, "MNIST": 32, "F-MNIST": 32, "EMNIST": 32, "WISDM-W": 64, "ImageNet10": 32, "Gowalla": 64, "wikitext": 256, "Foursquare": 512}[dataset])
             self.lr_dict = {'EMNIST':0.01,
                             'MNIST': 0.01,
                             "F-MNIST": 0.01,
@@ -79,6 +79,18 @@ class MultiFedAvgClient:
             self.trainloader = [None] * self.ME
             self.valloader = [None] * self.ME
             self.recent_trainloader = [None] * self.ME
+
+            # Source-data cache for gradual label/combined shift.  The cache
+            # is separate from the active trainloader so delayed labeling is
+            # preserved: training data changes only when fit() invokes
+            # update_local_train_data() for a selected client.
+            self.label_shift_data_cache = [dict() for _ in range(self.ME)]
+
+            # Cache endpoint label-distribution metrics so gradual transitions
+            # never rescan the complete training dataset on every round.
+            # Keys are (alpha, partition_seed).
+            self.label_shift_metrics_cache = [dict() for _ in range(self.ME)]
+
             self.optimizer = [None] * self.ME
             self.p_ME, self.fc_ME, self.il_ME = [0] * self.ME, [0] * self.ME, [0] * self.ME
             # self.num_examples = [0] * self.ME
@@ -132,6 +144,13 @@ class MultiFedAvgClient:
                 self.p_ME[me], self.fc_ME[me], self.il_ME[me] = self._get_datasets_metrics(self.trainloader, self.ME,
                                                                                self.client_id,
                                                                                self.n_classes, me=me)
+                self.label_shift_metrics_cache[me][
+                    (float(self.alpha_train[me]), int(self.partition_seed_train[me]))
+                ] = (
+                    np.asarray(self.p_ME[me], dtype=float).copy(),
+                    float(self.fc_ME[me]),
+                    float(self.il_ME[me]),
+                )
         except Exception as e:
             print("__init__ client error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
@@ -726,13 +745,151 @@ class MultiFedAvgClient:
             print("evaluate error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
-    def _mix_label_shift_loaders(self, old_loader, new_loader, progress, shuffle=True):
-        """Create a probabilistic gradual label-shift mixture.
+    def _get_label_shift_source_loaders(self, me, base_alpha, target_alpha, partition_seed):
+        """Load and cache source loaders used by gradual label shift."""
+        key = (float(base_alpha), float(target_alpha), int(partition_seed))
+        cache = self.label_shift_data_cache[me]
 
-        With probability (1-progress) a sample comes from the old local
-        distribution and with probability progress it comes from the fixed
-        target local distribution. Labels are copied with the selected sample;
-        no interpolation of alpha is performed during the transition.
+        if key not in cache:
+            old_loader, old_val = load_data(
+                dataset_name=self.args.dataset[me],
+                alpha=float(base_alpha),
+                data_sampling_percentage=self.args.data_percentage,
+                partition_id=self.client_id,
+                num_partitions=self.args.total_clients + 1,
+                batch_size=self.batch_size[me],
+                fold_id=self.fold_id,
+                partition_seed=int(partition_seed),
+            )
+            target_loader, target_val = load_data(
+                dataset_name=self.args.dataset[me],
+                alpha=float(target_alpha),
+                data_sampling_percentage=self.args.data_percentage,
+                partition_id=self.client_id,
+                num_partitions=self.args.total_clients + 1,
+                batch_size=self.batch_size[me],
+                fold_id=self.fold_id,
+                partition_seed=int(partition_seed),
+            )
+            cache[key] = {
+                "old_loader": old_loader,
+                "old_val": old_val,
+                "target_loader": target_loader,
+                "target_val": target_val,
+            }
+
+        return cache[key]
+
+    def _set_cached_label_shift_metrics(self, me, alpha, partition_seed, loader=None):
+        """Get label-distribution metrics from a cached endpoint.
+
+        The endpoint is scanned at most once for each (alpha, partition_seed)
+        pair. Subsequent rounds reuse the cached P(Y), FC and IL.
+        """
+        key = (float(alpha), int(partition_seed))
+        cache = self.label_shift_metrics_cache[me]
+
+        if key not in cache:
+            if loader is None:
+                loader, _ = load_data(
+                    dataset_name=self.args.dataset[me],
+                    alpha=float(alpha),
+                    data_sampling_percentage=self.args.data_percentage,
+                    partition_id=self.client_id,
+                    num_partitions=self.args.total_clients + 1,
+                    batch_size=self.batch_size[me],
+                    fold_id=self.fold_id,
+                    partition_seed=int(partition_seed),
+                )
+
+            metric_loaders = [None] * self.ME
+            metric_loaders[me] = loader
+            p, fc, il = self._get_datasets_metrics(
+                metric_loaders, self.ME, self.client_id, self.n_classes, me=me
+            )
+            cache[key] = (
+                np.asarray(p, dtype=float).copy(),
+                float(fc),
+                float(il),
+            )
+
+        p, fc, il = cache[key]
+        self.p_ME[me] = p.copy()
+        self.fc_ME[me] = fc
+        self.il_ME[me] = il
+        return p, fc, il
+
+    def _update_gradual_label_shift_metrics(
+            self, me, base_alpha, target_alpha, partition_seed, progress
+    ):
+        """Update P(Y), FC and IL for a gradual label/combined shift.
+
+        Endpoint distributions are computed once and then interpolated. This
+        avoids iterating through the complete mixed training DataLoader at
+        every transition round.
+        """
+        progress = float(np.clip(progress, 0.0, 1.0))
+
+        old_key = (float(base_alpha), int(partition_seed))
+        new_key = (float(target_alpha), int(partition_seed))
+        cache = self.label_shift_metrics_cache[me]
+
+        # The initial metrics were already computed during client creation.
+        initial_key = (float(self.initial_alpha[me]), 1)
+        if old_key not in cache and old_key == initial_key:
+            cache[old_key] = (
+                np.asarray(self.p_ME[me], dtype=float).copy(),
+                float(self.fc_ME[me]),
+                float(self.il_ME[me]),
+            )
+
+        # Endpoint data are loaded by _get_label_shift_source_loaders().
+        cached_loaders = self._get_label_shift_source_loaders(
+            me, base_alpha, target_alpha, partition_seed
+        )
+
+        if old_key not in cache:
+            self._set_cached_label_shift_metrics(
+                me, base_alpha, partition_seed,
+                loader=cached_loaders["old_loader"]
+            )
+
+        if new_key not in cache:
+            self._set_cached_label_shift_metrics(
+                me, target_alpha, partition_seed,
+                loader=cached_loaders["target_loader"]
+            )
+
+        p_old, fc_old, il_old = cache[old_key]
+        p_new, fc_new, il_new = cache[new_key]
+
+        if progress <= 0.0:
+            p, fc, il = p_old, fc_old, il_old
+        elif progress >= 1.0:
+            p, fc, il = p_new, fc_new, il_new
+        else:
+            p = (1.0 - progress) * p_old + progress * p_new
+
+            # FC and IL are defined from the resulting class distribution.
+            # For a mixture, p_i > 0 is equivalent to count_i > 0, and
+            # p_i < 1/C is equivalent to count_i < N/C.
+            n_classes = int(self.n_classes[me])
+            fc = float(np.count_nonzero(p > 0.0) / n_classes)
+            il = float(np.count_nonzero(p < (1.0 / n_classes)) / n_classes)
+
+        self.p_ME[me] = np.asarray(p, dtype=float).copy()
+        self.fc_ME[me] = float(fc)
+        self.il_ME[me] = float(il)
+
+        return self.p_ME[me], self.fc_ME[me], self.il_ME[me]
+
+    def _mix_label_shift_loaders(self, old_loader, new_loader, progress, shuffle=True):
+        """Create a lazy gradual label-shift mixture without materialization.
+
+        The old implementation materialized and deep-copied every sample from
+        both loaders on every call.  Here we retain the same sampling rule but
+        store only a deterministic mask and target indices.  Samples are read
+        from the source datasets only when requested by the DataLoader.
         """
         progress = float(np.clip(progress, 0.0, 1.0))
         if progress <= 0.0:
@@ -740,44 +897,43 @@ class MultiFedAvgClient:
         if progress >= 1.0:
             return new_loader
 
-        def materialize(loader):
-            data = []
-            for batch in loader:
-                bs = batch["label"].shape[0]
-                for i in range(bs):
-                    sample = {}
-                    for key, value in batch.items():
-                        if isinstance(value, torch.Tensor):
-                            sample[key] = value[i].detach().cpu().clone()
-                        elif hasattr(value, "__getitem__"):
-                            try:
-                                sample[key] = copy.deepcopy(value[i])
-                            except Exception:
-                                sample[key] = copy.deepcopy(value)
-                        else:
-                            sample[key] = copy.deepcopy(value)
-                    data.append(sample)
-            return data
+        old_dataset = old_loader.dataset
+        new_dataset = new_loader.dataset
+        old_size = len(old_dataset)
+        new_size = len(new_dataset)
 
-        old_samples = materialize(old_loader)
-        new_samples = materialize(new_loader)
-        if not old_samples or not new_samples:
+        if old_size == 0 or new_size == 0:
             return old_loader if progress < 0.5 else new_loader
 
         rng = np.random.RandomState(
             17011 + int(self.client_id) * 100003 + int(self.fold_id) * 1009
         )
-        mixed = []
-        for i, old_sample in enumerate(old_samples):
-            if rng.rand() < progress:
-                mixed.append(copy.deepcopy(new_samples[rng.randint(len(new_samples))]))
-            else:
-                mixed.append(copy.deepcopy(old_sample))
+        use_new = rng.rand(old_size) < progress
+        selected_positions = np.flatnonzero(use_new)
+        new_indices = np.full(old_size, -1, dtype=np.int64)
+        if len(selected_positions) > 0:
+            new_indices[selected_positions] = rng.randint(
+                0, new_size, size=len(selected_positions)
+            )
 
         class MixedLabelShiftDataset(torch.utils.data.Dataset):
-            def __init__(self, data): self.data = data
-            def __len__(self): return len(self.data)
-            def __getitem__(self, index): return self.data[index]
+            def __init__(self, old_dataset, new_dataset, use_new, new_indices):
+                self.old_dataset = old_dataset
+                self.new_dataset = new_dataset
+                self.use_new = use_new
+                self.new_indices = new_indices
+
+            def __len__(self):
+                return len(self.old_dataset)
+
+            def __getitem__(self, index):
+                if self.use_new[index]:
+                    return self.new_dataset[int(self.new_indices[index])]
+                return self.old_dataset[index]
+
+        mixed_dataset = MixedLabelShiftDataset(
+            old_dataset, new_dataset, use_new, new_indices
+        )
 
         kwargs = {
             "batch_size": old_loader.batch_size,
@@ -792,7 +948,8 @@ class MultiFedAvgClient:
             kwargs["persistent_workers"] = True
         if getattr(old_loader, "prefetch_factor", None) is not None and old_loader.num_workers > 0:
             kwargs["prefetch_factor"] = old_loader.prefetch_factor
-        return torch.utils.data.DataLoader(MixedLabelShiftDataset(mixed), **kwargs)
+
+        return torch.utils.data.DataLoader(mixed_dataset, **kwargs)
 
     def _get_label_shift_state(self, server_round, me, train):
         """Return (base_alpha, target_alpha, progress, active, gradual)."""
@@ -1271,26 +1428,23 @@ class MultiFedAvgClient:
                 # =====================================================
                 if data_shift_flag and "gradual" in self.experiment_id and self.data_shift_config[me]["type"] in ("label_shift", "combined_shift"):
                     base_alpha, target_alpha, label_progress, _, _ = self._get_label_shift_state(t, me, True)
-                    old_loader, old_val = load_data(
-                        dataset_name=self.args.dataset[me], alpha=base_alpha,
-                        data_sampling_percentage=self.args.data_percentage,
-                        partition_id=self.client_id, num_partitions=self.args.total_clients + 1,
-                        batch_size=self.batch_size[me], fold_id=self.fold_id, partition_seed=partition_seed
+                    cached = self._get_label_shift_source_loaders(
+                        me, base_alpha, target_alpha, partition_seed
                     )
-                    target_loader, target_val = load_data(
-                        dataset_name=self.args.dataset[me], alpha=target_alpha,
-                        data_sampling_percentage=self.args.data_percentage,
-                        partition_id=self.client_id, num_partitions=self.args.total_clients + 1,
-                        batch_size=self.batch_size[me], fold_id=self.fold_id, partition_seed=partition_seed
+                    old_loader = cached["old_loader"]
+                    old_val = cached["old_val"]
+                    target_loader = cached["target_loader"]
+                    target_val = cached["target_val"]
+                    mixed_loader = self._mix_label_shift_loaders(
+                        old_loader, target_loader, label_progress, shuffle=True
                     )
-                    mixed_loader = self._mix_label_shift_loaders(old_loader, target_loader, label_progress, shuffle=True)
                     if self.data_shift_config[me]["type"] == "combined_shift" and concept_drift_window > 0:
                         mixed_loader = self._apply_concept_drift_to_loader(
                             mixed_loader, me, concept_drift_window, shuffle=True, shift_context="combined_shift"
                         )
                     self.trainloader[me] = mixed_loader
                     self.valloader[me] = target_val if label_progress >= 1.0 else old_val
-                    self.recent_trainloader[me] = copy.deepcopy(old_loader)
+                    self.recent_trainloader[me] = old_loader
                     self.alpha_train[me] = target_alpha
                     self.alpha_test[me] = target_alpha
                     self.partition_seed_train[me] = int(partition_seed)
@@ -1302,8 +1456,13 @@ class MultiFedAvgClient:
                         f"round={t} label_progress={label_progress:.4f} "
                         f"concept_progress={float(concept_drift_window):.4f}"
                     )
-                    (self.p_ME[me], self.fc_ME[me], self.il_ME[me]) = self._get_datasets_metrics(
-                        self.trainloader, self.ME, self.client_id, self.n_classes, me=me
+                    # P(Y), FC and IL are obtained from the endpoint
+                    # distributions. Do NOT scan the mixed DataLoader here:
+                    # this branch is executed on every selected client during
+                    # the transition window.
+                    self._update_gradual_label_shift_metrics(
+                        me, base_alpha, target_alpha, partition_seed,
+                        label_progress
                     )
                     self.num_examples[me] = len(self.trainloader[me].dataset)
                     return
@@ -1334,7 +1493,12 @@ class MultiFedAvgClient:
                             )
                         )
 
-                        (self.p_ME[me], self.fc_ME[me], self.il_ME[me]) = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id, self.n_classes, me=me)
+                        self._set_cached_label_shift_metrics(
+                            me,
+                            self.alpha_train[me],
+                            self.partition_seed_train[me],
+                            loader=self.trainloader[me]
+                        )
 
                     else:
 
@@ -1369,7 +1533,12 @@ class MultiFedAvgClient:
                             )
                         )
 
-                        (self.p_ME[me], self.fc_ME[me], self.il_ME[me]) = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id, self.n_classes, me=me)
+                        self._set_cached_label_shift_metrics(
+                            me,
+                            self.alpha_train[me],
+                            self.partition_seed_train[me],
+                            loader=self.trainloader[me]
+                        )
 
                 # =====================================================
                 # COMBINED SHIFT
@@ -1428,17 +1597,15 @@ class MultiFedAvgClient:
                             )
                         )
 
-                    (
-                        self.p_ME[me],
-                        self.fc_ME[me],
-                        self.il_ME[me]
-                    ) = self._get_datasets_metrics(
-                        self.trainloader,
-                        self.ME,
-                        self.client_id,
-                        self.n_classes,
-                        me=me
-                    )
+                    # Concept drift preserves P(Y); only the label-shift
+                    # component can change the dataset metrics.
+                    if self.data_shift_config[me].get("type") == "combined_shift":
+                        self._set_cached_label_shift_metrics(
+                            me,
+                            self.alpha_train[me],
+                            self.partition_seed_train[me],
+                            loader=self.trainloader[me]
+                        )
 
                 # =====================================================
                 # CONCEPT DRIFT
@@ -1510,11 +1677,8 @@ class MultiFedAvgClient:
                             f"original training data restored"
                         )
 
-                        (self.p_ME[me], self.fc_ME[me], self.il_ME[me]) = self._get_datasets_metrics(self.trainloader,
-                                                                                                     self.ME,
-                                                                                                     self.client_id,
-                                                                                                     self.n_classes,
-                                                                                                     me=me)
+                        # Concept drift changes P(X|Y), not P(Y), so the
+                        # dataset metrics remain unchanged.
 
                     else:
 
@@ -1552,7 +1716,8 @@ class MultiFedAvgClient:
                                 )
                             )
 
-                    (self.p_ME[me], self.fc_ME[me], self.il_ME[me]) = self._get_datasets_metrics(self.trainloader, self.ME, self.client_id, self.n_classes, me=me)
+                    # Concept drift preserves the label distribution.
+                    # No full-dataset metrics scan is necessary here.
 
             self.num_examples[me] = (
                 len(
@@ -1609,25 +1774,20 @@ class MultiFedAvgClient:
             # =========================================================
             if data_shift_flag and "gradual" in self.experiment_id and self.data_shift_config[me]["type"] in ("label_shift", "combined_shift"):
                 base_alpha, target_alpha, label_progress, _, _ = self._get_label_shift_state(t, me, False)
-                old_loader, _ = load_data(
-                    dataset_name=self.args.dataset[me], alpha=base_alpha,
-                    data_sampling_percentage=self.args.data_percentage,
-                    partition_id=self.client_id, num_partitions=self.args.total_clients + 1,
-                    batch_size=self.batch_size[me], fold_id=self.fold_id, partition_seed=partition_seed
+                cached = self._get_label_shift_source_loaders(
+                    me, base_alpha, target_alpha, partition_seed
                 )
-                target_loader, _ = load_data(
-                    dataset_name=self.args.dataset[me], alpha=target_alpha,
-                    data_sampling_percentage=self.args.data_percentage,
-                    partition_id=self.client_id, num_partitions=self.args.total_clients + 1,
-                    batch_size=self.batch_size[me], fold_id=self.fold_id, partition_seed=partition_seed
+                old_loader = cached["old_loader"]
+                target_loader = cached["target_loader"]
+                mixed_loader = self._mix_label_shift_loaders(
+                    old_loader, target_loader, label_progress, shuffle=False
                 )
-                mixed_loader = self._mix_label_shift_loaders(old_loader, target_loader, label_progress, shuffle=False)
                 if self.data_shift_config[me]["type"] == "combined_shift" and concept_drift_window > 0:
                     mixed_loader = self._apply_concept_drift_to_loader(
                         mixed_loader, me, concept_drift_window, shuffle=False, shift_context="combined_shift"
                     )
                 self.valloader[me] = mixed_loader
-                self.recent_trainloader[me] = copy.deepcopy(old_loader)
+                self.recent_trainloader[me] = old_loader
                 self.alpha_test[me] = target_alpha
                 self.partition_seed_test[me] = int(partition_seed)
                 if self.data_shift_config[me]["type"] == "combined_shift":
