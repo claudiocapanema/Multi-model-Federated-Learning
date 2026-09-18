@@ -3821,6 +3821,410 @@ def table_accuracy_concept_drift_by_dataset(
 
     return table_results
 
+
+def table_accuracy_label_shift_by_dataset(
+    df_all,
+    write_path,
+    solutions,
+    label_config=("0.1", "1.0"),
+    gradual_windows=(5, 10),
+    ci=0.95,
+    accuracy_rounds=None,
+):
+    """
+    Gera três tabelas LaTeX de acurácia para Label Shift:
+
+        WISDM-W
+        ImageNet10
+        Foursquare
+
+    Como o experimento atual utiliza uma única configuração de Label Shift
+    (0.1 -> 1.0), cada tabela contém as três configurações temporais:
+
+        Sudden, 0.1 -> 1.0
+        Gradual (5), 0.1 -> 1.0
+        Gradual (10), 0.1 -> 1.0
+
+    A organização e o critério estatístico seguem o mesmo padrão das
+    tabelas de Concept Drift: uma linha por solução, resultados como
+    mean +/- 95% CI e negrito somente quando o intervalo de confiança
+    da solução é estritamente separado acima dos intervalos das demais
+    soluções na mesma configuração.
+
+    ``accuracy_rounds`` possui a mesma semântica da tabela de Concept
+    Drift e afeta somente estas tabelas de acurácia.
+    """
+    if df_all is None or df_all.empty:
+        print(
+            "\nWARNING: empty dataframe passed to "
+            "table_accuracy_label_shift_by_dataset."
+        )
+        return {}
+
+    required_columns = {
+        "Solution",
+        "Dataset",
+        "Experiment ID",
+        "Transition Window",
+        "Accuracy",
+    }
+
+    missing_columns = required_columns.difference(df_all.columns)
+    if missing_columns:
+        raise KeyError(
+            "The dataframe is missing columns required for the "
+            f"Label Shift accuracy tables: {sorted(missing_columns)}"
+        )
+
+    Path(write_path).mkdir(parents=True, exist_ok=True)
+
+    # ------------------------------------------------------------
+    # Current Label Shift configuration
+    # ------------------------------------------------------------
+    alpha_before = float(label_config[0])
+    alpha_after = float(label_config[1])
+    config_id = f"{alpha_before:g}-{alpha_after:g}"
+
+    configurations = [
+        {
+            "temporal": "Sudden",
+            "window": None,
+            "experiment_id": f"label_shift#{alpha_before:.1f}-{alpha_after:.1f}_sudden",
+            "column": rf"Sudden, ${alpha_before:g}\rightarrow {alpha_after:g}$",
+        }
+    ]
+
+    for window in gradual_windows:
+        configurations.append(
+            {
+                "temporal": "Gradual",
+                "window": int(window),
+                "experiment_id": (
+                    f"label_shift#{alpha_before:.1f}-{alpha_after:.1f}_gradual"
+                ),
+                "column": (
+                    rf"Gradual ($W={int(window)}$), "
+                    rf"${alpha_before:g}\rightarrow {alpha_after:g}$"
+                ),
+            }
+        )
+
+    # ------------------------------------------------------------
+    # Restrict to Label Shift and normalize transition windows.
+    # ------------------------------------------------------------
+    df = df_all.copy()
+    df = df[
+        df["Experiment ID"]
+        .astype(str)
+        .str.startswith("label_shift#")
+    ].copy()
+
+    if df.empty:
+        print(
+            "\nWARNING: no Label Shift data found for the "
+            "accuracy tables."
+        )
+        return {}
+
+    def normalize_window(value):
+        if pd.isna(value):
+            return None
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return None
+
+    df["_TransitionWindow"] = df["Transition Window"].apply(
+        normalize_window
+    )
+
+    df["_Accuracy"] = pd.to_numeric(
+        df["Accuracy"],
+        errors="coerce",
+    )
+
+    table_results = {}
+
+    for dataset_name in [
+        "WISDM-W",
+        "ImageNet10",
+        "Foursquare",
+    ]:
+        df_dataset = df[
+            df["Dataset"] == dataset_name
+        ].copy()
+
+        if df_dataset.empty:
+            print(
+                f"\nWARNING: no Label Shift accuracy data for "
+                f"dataset {dataset_name}."
+            )
+            continue
+
+        # --------------------------------------------------------
+        # Resolve selected rounds using the same mechanism as the
+        # Concept Drift tables.
+        # --------------------------------------------------------
+        def resolve_accuracy_rounds(config):
+            selection = accuracy_rounds
+
+            if isinstance(accuracy_rounds, dict):
+                keys = [
+                    config["column"],
+                    (config["temporal"], config["window"]),
+                    "default",
+                ]
+                selection = None
+                for key in keys:
+                    if key in accuracy_rounds:
+                        selection = accuracy_rounds[key]
+                        break
+
+            if selection is None:
+                return None
+
+            if isinstance(selection, str):
+                if selection.strip().lower() == "all":
+                    return None
+                raise ValueError(
+                    "accuracy_rounds must be None/'all', an iterable of rounds, "
+                    "a (start, end) tuple, or a dictionary."
+                )
+
+            if isinstance(selection, tuple) and len(selection) == 2:
+                try:
+                    start = int(float(selection[0]))
+                    end = int(float(selection[1]))
+                    if start > end:
+                        raise ValueError(
+                            f"Invalid accuracy round interval: {selection}"
+                        )
+                    return set(range(start, end + 1))
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        f"Invalid accuracy round interval: {selection}"
+                    )
+
+            try:
+                rounds = {int(float(r)) for r in selection}
+            except (TypeError, ValueError):
+                raise ValueError(
+                    "Invalid accuracy_rounds. Use None/'all', an iterable, "
+                    "a (start, end) tuple, or a dictionary."
+                )
+
+            if any(r <= 0 for r in rounds):
+                raise ValueError(
+                    f"Accuracy rounds must be positive: {sorted(rounds)}"
+                )
+            return rounds
+
+        # --------------------------------------------------------
+        # Calculate mean + CI independently for every:
+        #
+        # Solution × temporal type × transition window
+        #
+        # There is intentionally no alpha dimension here because the
+        # current Label Shift experiment has only one transition
+        # configuration: 0.1 -> 1.0.
+        # --------------------------------------------------------
+        raw_results = {
+            solution: {}
+            for solution in solutions
+        }
+
+        for solution in solutions:
+            df_solution = df_dataset[
+                df_dataset["Solution"] == solution
+            ].copy()
+
+            for config in configurations:
+                mask = (
+                    df_solution["Experiment ID"]
+                    .astype(str)
+                    .eq(config["experiment_id"])
+                )
+
+                if config["window"] is None:
+                    mask &= df_solution["_TransitionWindow"].isna()
+                else:
+                    mask &= (
+                        df_solution["_TransitionWindow"]
+                        == config["window"]
+                    )
+
+                filtered = df_solution.loc[mask].copy()
+
+                selected_rounds = resolve_accuracy_rounds(config)
+                if selected_rounds is not None:
+                    round_numeric = pd.to_numeric(
+                        filtered["Round (t)"],
+                        errors="coerce",
+                    )
+                    filtered = filtered.loc[
+                        round_numeric.isin(selected_rounds)
+                    ]
+
+                mean_value, ci_value, n_value = _accuracy_ci(
+                    filtered["_Accuracy"],
+                    ci=ci,
+                )
+
+                raw_results[solution][config["column"]] = {
+                    "mean": mean_value,
+                    "ci": ci_value,
+                    "n": n_value,
+                }
+
+        # --------------------------------------------------------
+        # Build one LaTeX row per solution.
+        # --------------------------------------------------------
+        output_rows = []
+
+        for solution in solutions:
+            if solution not in raw_results:
+                continue
+
+            row = {
+                "Solution": _format_solution_for_accuracy_table(solution)
+            }
+
+            for config in configurations:
+                column = config["column"]
+                result = raw_results[solution][column]
+
+                if (
+                    pd.isna(result["mean"])
+                    or result["n"] == 0
+                ):
+                    row[column] = "--"
+                    continue
+
+                value_text = (
+                    f"{result['mean']:.2f} "
+                    f"$\\pm$ {result['ci']:.2f}"
+                )
+
+                # Same statistical criterion used by the Concept Drift
+                # tables: bold only for strict CI separation above all
+                # other solutions in this exact configuration.
+                all_results = [
+                    raw_results[other_solution][column]
+                    for other_solution in solutions
+                    if (
+                        other_solution in raw_results
+                        and raw_results[other_solution][column]["n"] > 0
+                        and not pd.isna(
+                            raw_results[other_solution][column]["mean"]
+                        )
+                        and not pd.isna(
+                            raw_results[other_solution][column]["ci"]
+                        )
+                    )
+                ]
+
+                if _accuracy_is_statistically_superior_candidate(
+                    result,
+                    all_results,
+                ):
+                    value_text = f"\\textbf{{{value_text}}}"
+
+                row[column] = value_text
+
+            output_rows.append(row)
+
+        df_table = pd.DataFrame(
+            output_rows,
+            columns=(
+                ["Solution"]
+                + [config["column"] for config in configurations]
+            ),
+        )
+
+        filename = os.path.join(
+            write_path,
+            f"accuracy_label_shift_{dataset_name}.tex",
+        )
+
+        latex = df_table.to_latex(
+            index=False,
+            escape=False,
+            caption=(
+                f"Accuracy of the evaluated solutions under Label Shift "
+                f"for {dataset_name}. Results are reported for the "
+                f"0.1 $\\rightarrow$ 1.0 label-distribution transition "
+                f"under sudden and gradual shifts with transition windows "
+                f"$W=5$ and $W=10$. For each configuration, the mean "
+                f"accuracy and its 95\\% confidence interval are computed "
+                f"over the selected rounds and folds. The highest mean "
+                f"accuracy is highlighted in bold only when its 95\\% "
+                f"confidence interval is strictly separated above the "
+                f"confidence intervals of all other solutions."
+            ),
+            label=(
+                "tab:accuracy_label_shift_"
+                + dataset_name.lower().replace("-", "_")
+            ),
+            column_format="l" + "c" * len(configurations),
+        )
+
+        latex = (
+            "% Requires: \\usepackage{booktabs}\n"
+            + latex
+        )
+
+        # Same two-column-paper formatting used by Concept Drift.
+        latex = latex.replace(
+            "\\begin{table}",
+            "\\begin{table*}",
+            1,
+        )
+        latex = latex.replace(
+            "\\end{table}",
+            "\\end{table*}",
+            1,
+        )
+        latex = latex.replace(
+            "\\begin{tabular}",
+            "\\resizebox{\\textwidth}{!}{%\n\\begin{tabular}",
+            1,
+        )
+        latex = latex.replace(
+            "\\end{tabular}",
+            "\\end{tabular}%\n}",
+            1,
+        )
+
+        latex = latex.replace(
+            "MFP\\_v2\\_dh",
+            "$\\textit{MFP}_{\\textit{DDH}}$",
+        )
+        latex = latex.replace(
+            "MFP\\_v2\\_iti",
+            "$\\textit{MFP}_{\\textit{ITI}}$",
+        )
+        latex = latex.replace(
+            "MFP\\_v2",
+            "$\\textit{MFP}$",
+        )
+
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(latex)
+
+        table_results[dataset_name] = df_table
+
+        print("\n" + "=" * 100)
+        print(
+            "ACCURACY TABLE - LABEL SHIFT - "
+            f"{dataset_name}"
+        )
+        print("=" * 100)
+        print(df_table.to_string(index=False))
+        print(f"\nLaTeX table written to:\n{filename}")
+        print("=" * 100)
+
+    return table_results
+
 def extract_alpha_from_experiment(experiment_id):
     """
     Extrai os valores de alpha do Experiment ID.
@@ -4438,12 +4842,11 @@ if __name__ == "__main__":
     # MFP -> FPD -> demais variantes/soluções -> baselines.
     concept_solutions = [
         "MultiFedAvg+MFP_v2",
-        "MultiFedAvg+FPD",
-        "MultiFedAvg+MFP_v2_iti",
         "MultiFedAvg+MFP_v2_dh",
+        "MultiFedAvg+MFP_v2_iti",
+        "MultiFedAvg+FPD",
         "MultiFedAvg",
         "MultiFedAvgRR",
-        "JS-Drift",
         "FedConD",
         "FedDCA",
         "CDA-FedAvg",
@@ -4456,6 +4859,20 @@ if __name__ == "__main__":
         "concept_drift#0.1_gradual",
         "concept_drift#1.0_gradual",
         "concept_drift#10.0_gradual"
+    ]
+
+    # Lista específica para as tabelas de Accuracy de Label Shift.
+    # Mantém a mesma ordem canônica usada em Concept Drift.
+    label_solutions = [
+        "MultiFedAvg+MFP_v2",
+        "MultiFedAvg+MFP_v2_dh",
+        "MultiFedAvg+MFP_v2_iti",
+        "MultiFedAvg+FPD",
+        "MultiFedAvg",
+        "MultiFedAvgRR",
+        "FedConD",
+        "FedDCA",
+        "CDA-FedAvg",
     ]
 
     label_experiments = [
@@ -4809,6 +5226,40 @@ if __name__ == "__main__":
         datasets_order=dataset,
         alphas_order=(0.1, 1.0),
         ci=0.95,
+    )
+
+    # ============================================================
+    # TABELAS ADICIONAIS: ACCURACY -- LABEL SHIFT
+    # ============================================================
+    #
+    # O experimento atual possui uma única configuração de Label Shift:
+    # 0.1 -> 1.0. Portanto, a tabela mantém essa configuração fixa e
+    # separa apenas o tipo temporal:
+    #
+    #   Sudden
+    #   Gradual, W=5
+    #   Gradual, W=10
+    #
+    # A estrutura, IC de 95% e critério de negrito são os mesmos
+    # utilizados nas tabelas de Concept Drift.
+    # ============================================================
+    ACCURACY_LABEL_ROUNDS = None
+
+    accuracy_label_tables = (
+        table_accuracy_label_shift_by_dataset(
+            df_all=df_all,
+            write_path=write_path,
+            solutions=label_solutions,
+            label_config=("0.1", "1.0"),
+            gradual_windows=(5, 10),
+            ci=0.95,
+            accuracy_rounds=ACCURACY_LABEL_ROUNDS,
+        )
+    )
+
+    print(
+        "\nTabelas adicionais de acurácia de Label Shift geradas: "
+        f"{list(accuracy_label_tables.keys())}"
     )
 
     # ============================================================
