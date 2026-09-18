@@ -32,8 +32,13 @@ def read_data(
     """
     Lê os CSVs específicos de cada dataset e solução.
 
-    Cada CSV deve conter as colunas:
-        Fold ID, Round (t), Data shift
+    Cada CSV principal deve conter:
+        Fold ID, Round (t), Accuracy
+
+    A coluna Data shift é opcional. Quando ausente (como nos baselines
+    sem detector, por exemplo MultiFedAvg e MultiFedAvgRR), ela é
+    preenchida com NO_SHIFT exclusivamente para manter o dataframe
+    compatível com as métricas de detecção.
 
     São adicionadas:
         Solution
@@ -78,10 +83,74 @@ def read_data(
                     })
                     continue
 
+                # ========================================================
+                # LEITURA EXCLUSIVA DOS CSVs PRINCIPAIS
+                # ========================================================
+                # Os arquivos de resultados usados por este script seguem:
+                #
+                #     {dataset}_{solution}.csv
+                #
+                # NUNCA utilizar:
+                #
+                #     {dataset}_{solution}_metrics.csv
+                #
+                # Alguns baselines (em particular MultiFedAvg e
+                # MultiFedAvgRR) não possuem a coluna "Data shift", pois
+                # não executam um detector de data shift. Essa coluna é
+                # necessária apenas para as métricas de detecção e, por
+                # isso, deve ser tratada como opcional no carregamento.
+                # Accuracy, Fold ID e Round (t) continuam sendo os dados
+                # obrigatórios para as tabelas de desempenho.
+                if os.path.basename(path).endswith("_metrics.csv"):
+                    raise ValueError(
+                        "Arquivo _metrics.csv não pode ser utilizado: "
+                        f"{path}"
+                    )
+
+                # Ler apenas o cabeçalho primeiro para evitar que a
+                # ausência de "Data shift" descarte MultiFedAvg /
+                # MultiFedAvgRR do dataframe.
+                header = pd.read_csv(
+                    path,
+                    nrows=0
+                ).columns.tolist()
+
+                required_columns = [
+                    "Fold ID",
+                    "Round (t)",
+                    "Accuracy",
+                ]
+
+                missing_required = [
+                    column
+                    for column in required_columns
+                    if column not in header
+                ]
+
+                if missing_required:
+                    raise ValueError(
+                        "Colunas obrigatórias ausentes: "
+                        + ", ".join(missing_required)
+                    )
+
+                columns_to_read = required_columns.copy()
+
+                has_data_shift = "Data shift" in header
+
+                if has_data_shift:
+                    columns_to_read.append("Data shift")
+
                 df = pd.read_csv(
                     path,
-                    usecols=["Fold ID", "Round (t)", "Data shift"]
+                    usecols=columns_to_read
                 )
+
+                # Baselines sem detector não possuem "Data shift".
+                # Para eles, todas as rodadas são consideradas como
+                # ausência de alarme. Isso preserva seus resultados de
+                # Accuracy sem atribuir-lhes detecções inexistentes.
+                if not has_data_shift:
+                    df["Data shift"] = "NO_SHIFT"
 
                 if df.empty:
                     print(f"\nArquivo vazio: {path}")
@@ -101,9 +170,12 @@ def read_data(
                     })
                     continue
 
-                # Manter somente as três colunas do CSV.
+                # Manter somente as colunas necessárias do CSV.
+                # Accuracy é utilizada adicionalmente nas tabelas de
+                # desempenho, enquanto as demais colunas continuam sendo
+                # utilizadas para as métricas de detecção.
                 df = df[
-                    ["Fold ID", "Round (t)", "Data shift"]
+                    ["Fold ID", "Round (t)", "Data shift", "Accuracy"]
                 ].copy()
 
                 # ----------------------------------------------------
@@ -129,6 +201,14 @@ def read_data(
                     )
 
                 df["Dataset"] = dataset_name
+
+                # Preserve the experiment alpha in the dataframe.
+                # This is required by the accuracy tables, which compare
+                # solutions separately for each alpha/configuration.
+                if isinstance(alpha_value, (tuple, list)):
+                    df["Alpha"] = float(alpha_value[0])
+                else:
+                    df["Alpha"] = float(alpha_value) if alpha_value is not None else np.nan
 
                 # ----------------------------------------------------
                 # SOLUTION
@@ -304,6 +384,7 @@ def read_data(
                 "Fold ID",
                 "Round (t)",
                 "Data shift",
+                "Accuracy",
                 "Solution",
                 "Dataset",
                 "Shift Round"
@@ -3130,6 +3211,616 @@ def table_detection_quality_by_shift_type(
 
     return df_experimental, df_table, df_overall_table
 
+
+
+def _format_solution_for_accuracy_table(solution):
+    """
+    Formata o nome da solução para apresentação nas tabelas LaTeX.
+    Mantém a mesma nomenclatura utilizada na tabela de detecção.
+    """
+    solution_display = str(solution)
+
+    if solution_display == "MFP_v2_dh":
+        return "$\\textit{MFP}_{\\textit{DDH}}$"
+
+    if solution_display == "MFP_v2_iti":
+        return "$\\textit{MFP}_{\\textit{ITI}}$"
+
+    if solution_display == "MFP_v2":
+        return "MFP"
+
+    if solution_display == "MultiFedAvg+MFP_v2":
+        return "MultiFedAvg+MFP"
+
+    return solution_display.replace("_", r"\_")
+
+
+def _accuracy_ci(values, ci=0.95):
+    """
+    Calcula média e IC de 95% da acurácia.
+
+    A acurácia é convertida para porcentagem antes da agregação.
+    """
+    values = pd.to_numeric(values, errors="coerce").dropna()
+
+    if values.empty:
+        return np.nan, np.nan, 0
+
+    values = values.to_numpy(dtype=float) * 100.0
+
+    mean_value = float(np.mean(values))
+
+    if len(values) == 1 or np.allclose(values, values[0]):
+        return round(mean_value, 2), 0.00, len(values)
+
+    sem = st.sem(values)
+
+    lower, upper = st.t.interval(
+        confidence=ci,
+        df=len(values) - 1,
+        loc=mean_value,
+        scale=sem,
+    )
+
+    margin = max(
+        mean_value - lower,
+        upper - mean_value,
+    )
+
+    return round(mean_value, 2), round(margin, 2), len(values)
+
+
+def _accuracy_is_statistically_superior_candidate(candidate, all_results):
+    """
+    Verifica se uma solução pertence ao grupo estatisticamente superior
+    dentro de UMA configuração experimental.
+
+    A regra para o destaque é baseada no maior valor médio observado:
+
+      1. identifica-se a maior média de acurácia;
+      2. todas as soluções com essa maior média são candidatas ao destaque;
+      3. uma solução com média menor também é destacada quando seu IC de
+         95% se sobrepõe ao IC de pelo menos uma das soluções com a maior
+         média.
+
+    Assim, a tabela não destaca somente um máximo pontual. Ela destaca
+    o maior valor e também os valores que, considerando os ICs de 95%,
+    não podem ser distinguidos do maior valor.
+
+    Esta regra é aplicada independentemente em cada configuração
+    experimental (dataset × temporal type × transition window × alpha).
+    """
+    if candidate is None or not all_results:
+        return False
+
+    candidate_mean = candidate.get("mean", np.nan)
+    candidate_ci = candidate.get("ci", np.nan)
+
+    if pd.isna(candidate_mean) or pd.isna(candidate_ci):
+        return False
+
+    valid_results = []
+    for result in all_results:
+        if result is None:
+            continue
+
+        mean_value = result.get("mean", np.nan)
+        ci_value = result.get("ci", np.nan)
+
+        if pd.isna(mean_value) or pd.isna(ci_value):
+            continue
+
+        valid_results.append(result)
+
+    if not valid_results:
+        return False
+
+    # ------------------------------------------------------------
+    # Identify the maximum mean accuracy in this exact column.
+    # ------------------------------------------------------------
+    max_mean = max(
+        result["mean"]
+        for result in valid_results
+    )
+
+    # ------------------------------------------------------------
+    # All solutions attaining the maximum mean are part of the
+    # statistically highest group, regardless of CI overlap.
+    # ------------------------------------------------------------
+    maximum_results = [
+        result
+        for result in valid_results
+        if np.isclose(
+            result["mean"],
+            max_mean,
+            rtol=0.0,
+            atol=1e-12,
+        )
+    ]
+
+    if any(candidate is result for result in maximum_results):
+        return True
+
+    # ------------------------------------------------------------
+    # A lower mean is also highlighted when its 95% CI overlaps
+    # the 95% CI of at least one maximum-mean solution.
+    #
+    # Intervals are represented as mean ± CI margin.
+    # ------------------------------------------------------------
+    candidate_lower = candidate_mean - candidate_ci
+    candidate_upper = candidate_mean + candidate_ci
+
+    for maximum_result in maximum_results:
+        maximum_mean = maximum_result["mean"]
+        maximum_ci = maximum_result["ci"]
+
+        maximum_lower = maximum_mean - maximum_ci
+        maximum_upper = maximum_mean + maximum_ci
+
+        intervals_overlap = (
+            candidate_lower <= maximum_upper
+            and candidate_upper >= maximum_lower
+        )
+
+        if intervals_overlap:
+            return True
+
+    return False
+
+
+def table_accuracy_concept_drift_by_dataset(
+    df_all,
+    write_path,
+    solutions,
+    concept_alphas=(0.1, 1.0),
+    gradual_windows=(5, 10),
+    ci=0.95,
+    accuracy_rounds=None,
+):
+    """
+    Gera três tabelas LaTeX de acurácia para Concept Drift:
+
+        WISDM-W
+        ImageNet10
+        Foursquare
+
+    Cada tabela contém, para cada solução, as seis configurações:
+
+        Sudden, alpha=0.1
+        Sudden, alpha=1.0
+        Gradual (5), alpha=0.1
+        Gradual (5), alpha=1.0
+        Gradual (10), alpha=0.1
+        Gradual (10), alpha=1.0
+
+    Para cada configuração, a acurácia é agregada sobre as observações
+    disponíveis nos CSVs, incluindo os folds e rounds correspondentes.
+
+    A célula é apresentada como:
+
+        mean +/- 95% CI
+
+    Em cada configuração, o maior valor médio de acurácia é destacado.
+    Também são destacados os valores menores que possuem IC de 95% que
+    se sobrepõe ao IC de pelo menos uma solução com a maior média,
+    representando valores estatisticamente indistinguíveis do máximo
+    segundo o critério baseado na sobreposição dos ICs.
+
+    As tabelas são salvas como:
+
+        accuracy_concept_drift_WISDM-W.tex
+        accuracy_concept_drift_ImageNet10.tex
+        accuracy_concept_drift_Foursquare.tex
+
+
+    Parameters
+    ----------
+    accuracy_rounds : None, str, iterable or dict, optional
+        Controls which rounds are used to compute the accuracy reported
+        in the Concept Drift tables. ``None`` or ``"all"`` uses all
+        available rounds. An iterable (e.g. ``[30, 31, 32]``) uses only
+        those rounds. A tuple ``(start, end)`` uses the inclusive interval.
+        A dictionary allows different selections per configuration; keys
+        can be the generated column name, ``(temporal, window, alpha)``,
+        or ``"default"``. This affects only accuracy tables.
+    """
+    if df_all is None or df_all.empty:
+        print(
+            "\nWARNING: empty dataframe passed to "
+            "table_accuracy_concept_drift_by_dataset."
+        )
+        return {}
+
+    required_columns = {
+        "Solution",
+        "Dataset",
+        "Experiment ID",
+        "Transition Window",
+        "Accuracy",
+    }
+
+    missing_columns = required_columns.difference(df_all.columns)
+
+    if missing_columns:
+        raise KeyError(
+            "The dataframe is missing columns required for the "
+            f"accuracy tables: {sorted(missing_columns)}"
+        )
+
+    Path(write_path).mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    # ------------------------------------------------------------
+    # Experimental configurations
+    # ------------------------------------------------------------
+    configurations = [
+        {
+            "temporal": "Sudden",
+            "window": None,
+            "alpha": float(alpha),
+            "experiment_id": f"concept_drift#{alpha:.1f}_sudden",
+            "column": rf"Sudden, $\alpha={alpha:g}$",
+        }
+        for alpha in concept_alphas
+    ]
+
+    for window in gradual_windows:
+        for alpha in concept_alphas:
+            configurations.append(
+                {
+                    "temporal": "Gradual",
+                    "window": int(window),
+                    "alpha": float(alpha),
+                    "experiment_id": (
+                        f"concept_drift#{alpha:.1f}_gradual"
+                    ),
+                    "column": (
+                        rf"Gradual ($W={int(window)}$), "
+                        rf"$\alpha={alpha:g}$"
+                    ),
+                }
+            )
+
+    # ------------------------------------------------------------
+    # Restrict to Concept Drift and normalize transition windows.
+    # ------------------------------------------------------------
+    df = df_all.copy()
+
+    df = df[
+        df["Experiment ID"]
+        .astype(str)
+        .str.startswith("concept_drift#")
+    ].copy()
+
+    if df.empty:
+        print(
+            "\nWARNING: no Concept Drift data found for the "
+            "accuracy tables."
+        )
+        return {}
+
+    def normalize_window(value):
+        if pd.isna(value):
+            return None
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return None
+
+    df["_TransitionWindow"] = df["Transition Window"].apply(
+        normalize_window
+    )
+
+    # Normalize Accuracy to numeric once.
+    df["_Accuracy"] = pd.to_numeric(
+        df["Accuracy"],
+        errors="coerce",
+    )
+
+    # ------------------------------------------------------------
+    # The current experiment setup uses the transition window as an
+    # explicit directory dimension. For sudden, it is None.
+    # ------------------------------------------------------------
+    table_results = {}
+
+    for dataset_name in [
+        "WISDM-W",
+        "ImageNet10",
+        "Foursquare",
+    ]:
+
+        df_dataset = df[
+            df["Dataset"] == dataset_name
+        ].copy()
+
+        if df_dataset.empty:
+            print(
+                f"\nWARNING: no Concept Drift accuracy data for "
+                f"dataset {dataset_name}."
+            )
+            continue
+
+        # --------------------------------------------------------
+        # Resolve which rounds are used for each configuration.
+        # --------------------------------------------------------
+        def resolve_accuracy_rounds(config):
+            selection = accuracy_rounds
+
+            if isinstance(accuracy_rounds, dict):
+                keys = [
+                    config["column"],
+                    (config["temporal"], config["window"], config["alpha"]),
+                    "default",
+                ]
+                selection = None
+                for key in keys:
+                    if key in accuracy_rounds:
+                        selection = accuracy_rounds[key]
+                        break
+
+            if selection is None:
+                return None
+
+            if isinstance(selection, str):
+                if selection.strip().lower() == "all":
+                    return None
+                raise ValueError(
+                    "accuracy_rounds must be None/'all', an iterable of rounds, "
+                    "a (start, end) tuple, or a dictionary."
+                )
+
+            if isinstance(selection, tuple) and len(selection) == 2:
+                try:
+                    start = int(float(selection[0]))
+                    end = int(float(selection[1]))
+                    if start > end:
+                        raise ValueError(f"Invalid accuracy round interval: {selection}")
+                    return set(range(start, end + 1))
+                except (TypeError, ValueError):
+                    raise ValueError(f"Invalid accuracy round interval: {selection}")
+
+            try:
+                rounds = {int(float(r)) for r in selection}
+            except (TypeError, ValueError):
+                raise ValueError(
+                    "Invalid accuracy_rounds. Use None/'all', an iterable, "
+                    "a (start, end) tuple, or a dictionary."
+                )
+
+            if any(r <= 0 for r in rounds):
+                raise ValueError(f"Accuracy rounds must be positive: {sorted(rounds)}")
+            return rounds
+
+        # --------------------------------------------------------
+        # Calculate mean + CI independently for every:
+        #
+        # Solution × temporal type × transition window × alpha
+        #
+        # This preserves the requested experimental configuration.
+        # --------------------------------------------------------
+        raw_results = {
+            solution: {}
+            for solution in solutions
+        }
+
+        for solution in solutions:
+
+            df_solution = df_dataset[
+                df_dataset["Solution"] == solution
+            ].copy()
+
+            for config in configurations:
+
+                mask = (
+                    df_solution["Experiment ID"]
+                    .astype(str)
+                    .eq(config["experiment_id"])
+                )
+
+                if config["window"] is None:
+                    mask &= df_solution["_TransitionWindow"].isna()
+                else:
+                    mask &= (
+                        df_solution["_TransitionWindow"]
+                        == config["window"]
+                    )
+
+                filtered = df_solution.loc[mask].copy()
+
+                # Optional round filter for Concept Drift accuracy only.
+                selected_rounds = resolve_accuracy_rounds(config)
+                if selected_rounds is not None:
+                    round_numeric = pd.to_numeric(
+                        filtered["Round (t)"], errors="coerce"
+                    )
+                    filtered = filtered.loc[round_numeric.isin(selected_rounds)]
+
+                mean_value, ci_value, n_value = _accuracy_ci(
+                    filtered["_Accuracy"],
+                    ci=ci,
+                )
+
+                raw_results[solution][config["column"]] = {
+                    "mean": mean_value,
+                    "ci": ci_value,
+                    "n": n_value,
+                }
+
+        # --------------------------------------------------------
+        # Build one LaTeX row per solution.
+        # --------------------------------------------------------
+        output_rows = []
+
+        for solution in solutions:
+
+            if solution not in raw_results:
+                continue
+
+            row = {
+                "Solution": _format_solution_for_accuracy_table(
+                    solution
+                )
+            }
+
+            for config in configurations:
+
+                column = config["column"]
+                result = raw_results[solution][column]
+
+                if (
+                    pd.isna(result["mean"])
+                    or result["n"] == 0
+                ):
+                    row[column] = "--"
+                    continue
+
+                text = (
+                    f"{result['mean']:.2f} "
+                    f"$\\pm$ {result['ci']:.2f}"
+                )
+
+                # ------------------------------------------------
+                # Statistical superiority:
+                # compare ONLY solutions within this exact
+                # dataset × temporal type × transition window
+                # × alpha configuration.
+                # ------------------------------------------------
+                candidate = result
+
+                all_results = [
+                    raw_results[other_solution][column]
+                    for other_solution in solutions
+                    if (
+                        other_solution in raw_results
+                        and raw_results[other_solution][column]["n"] > 0
+                        and not pd.isna(
+                            raw_results[other_solution][column]["mean"]
+                        )
+                        and not pd.isna(
+                            raw_results[other_solution][column]["ci"]
+                        )
+                    )
+                ]
+
+                if _accuracy_is_statistically_superior_candidate(
+                    candidate,
+                    all_results,
+                ):
+                    text = f"\\textbf{{{text}}}"
+
+                row[column] = text
+
+            output_rows.append(row)
+
+        df_table = pd.DataFrame(
+            output_rows,
+            columns=(
+                ["Solution"]
+                + [config["column"] for config in configurations]
+            ),
+        )
+
+        # --------------------------------------------------------
+        # LaTeX
+        # --------------------------------------------------------
+        filename = os.path.join(
+            write_path,
+            f"accuracy_concept_drift_{dataset_name}.tex",
+        )
+
+        column_format = "l" + "c" * len(configurations)
+
+        latex = df_table.to_latex(
+            index=False,
+            escape=False,
+            caption=(
+                f"Accuracy of the evaluated solutions under Concept "
+                f"Drift for {dataset_name}. Results are reported for "
+                f"sudden and gradual shifts with transition windows "
+                f"$W=5$ and $W=10$, considering $\\alpha=0.1$ and "
+                f"$\\alpha=1.0$. For each configuration, the mean "
+                f"accuracy and its 95\\% confidence interval are "
+                f"computed over the selected rounds and folds. "
+                f"For each configuration, the highest mean accuracy "
+                f"is highlighted in bold, together with any lower "
+                f"accuracy whose 95\\% confidence interval overlaps "
+                f"the interval of a solution attaining the highest "
+                f"mean accuracy."
+            ),
+            label=(
+                "tab:accuracy_concept_drift_"
+                + dataset_name.lower().replace("-", "_")
+            ),
+            column_format=column_format,
+        )
+
+        latex = (
+            "% Requires: \\usepackage{booktabs}\n"
+            + latex
+        )
+
+        # Use table* so the six configurations fit comfortably in
+        # a two-column paper.
+        latex = latex.replace(
+            "\\begin{table}",
+            "\\begin{table*}",
+            1,
+        )
+        latex = latex.replace(
+            "\\end{table}",
+            "\\end{table*}",
+            1,
+        )
+
+        latex = latex.replace(
+            "\\begin{tabular}",
+            "\\resizebox{\\textwidth}{!}{%\n\\begin{tabular}",
+            1,
+        )
+        latex = latex.replace(
+            "\\end{tabular}",
+            "\\end{tabular}%\n}",
+            1,
+        )
+
+        latex = latex.replace(
+            "MFP\\_v2\\_dh",
+            "$\\textit{MFP}_{\\textit{DDH}}$",
+        )
+        latex = latex.replace(
+            "MFP\\_v2\\_iti",
+            "$\\textit{MFP}_{\\textit{ITI}}$",
+        )
+        latex = latex.replace(
+            "MFP\\_v2",
+            "$\\textit{MFP}$",
+        )
+
+        with open(
+            filename,
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write(latex)
+
+        table_results[dataset_name] = df_table
+
+        print("\n" + "=" * 100)
+        print(
+            "ACCURACY TABLE - CONCEPT DRIFT - "
+            f"{dataset_name}"
+        )
+        print("=" * 100)
+        print(df_table.to_string(index=False))
+        print(
+            f"\nLaTeX table written to:\n{filename}"
+        )
+        print("=" * 100)
+
+    return table_results
+
 def extract_alpha_from_experiment(experiment_id):
     """
     Extrai os valores de alpha do Experiment ID.
@@ -3238,6 +3929,301 @@ def extract_alpha_from_experiment(experiment_id):
 
 import matplotlib.pyplot as plt
 import seaborn as sns
+
+
+
+def _accuracy_solution_display_name(solution):
+    """Convert internal solution names to the names used in LaTeX tables."""
+    solution = str(solution)
+
+    replacements = {
+        "MultiFedAvg+MFP_v2": "MultiFedAvg+MFP",
+        "MFP_v2_dh": r"$\textit{MFP}_{\textit{DDH}}$",
+        "MFP_v2_iti": r"$\textit{MFP}_{\textit{ITI}}$",
+        "MFP_v2": "MFP",
+    }
+
+    if solution in replacements:
+        return replacements[solution]
+
+    return solution.replace("_", r"\_")
+
+
+def _accuracy_is_statistically_superior(results, candidate_solution):
+    """
+    A solution is marked as superior only if:
+      1. it has the highest mean accuracy; and
+      2. its 95% CI is strictly separated from the 95% CIs of ALL
+         other solutions in the same experimental configuration.
+
+    Thus, overlapping confidence intervals do not produce boldface.
+    """
+    candidate = results.get(candidate_solution)
+
+    if candidate is None or pd.isna(candidate["mean"]):
+        return False
+
+    candidate_mean = candidate["mean"]
+    candidate_ci = candidate["ci"]
+
+    for other_solution, other in results.items():
+        if other_solution == candidate_solution:
+            continue
+
+        if other is None or pd.isna(other["mean"]):
+            continue
+
+        # If the candidate does not have a usable CI, we cannot claim
+        # statistical superiority from CI separation.
+        if pd.isna(candidate_ci) or pd.isna(other["ci"]):
+            return False
+
+        candidate_lower = candidate_mean - candidate_ci
+        other_upper = other["mean"] + other["ci"]
+
+        # Strict separation is required.
+        if candidate_lower <= other_upper:
+            return False
+
+    return True
+
+
+def table_accuracy_concept_drift(
+    df,
+    write_path,
+    solutions_order,
+    datasets_order=None,
+    alphas_order=(0.1, 1.0),
+    ci=0.95,
+):
+    """
+    Generate one LaTeX accuracy table for each Concept Drift dataset.
+
+    Each table contains:
+        Sudden, alpha=0.1
+        Sudden, alpha=1.0
+        Gradual W=5, alpha=0.1
+        Gradual W=5, alpha=1.0
+        Gradual W=10, alpha=0.1
+        Gradual W=10, alpha=1.0
+
+    Accuracy is aggregated over the rounds/folds present in the CSVs.
+    The mean and 95% t-confidence interval are computed over the
+    available Accuracy observations.
+
+    A solution is bolded only when its 95% CI is strictly separated
+    above the CI of every other solution in that same configuration.
+    """
+    if df is None or df.empty:
+        print("\nWARNING: empty dataframe; Concept Drift accuracy tables not generated.")
+        return
+
+    required_columns = {
+        "Accuracy",
+        "Dataset",
+        "Solution",
+        "Experiment ID",
+        "Round (t)",
+        "Alpha",
+        "Transition Window",
+    }
+    missing = required_columns - set(df.columns)
+    if missing:
+        raise KeyError(
+            "Missing columns for Concept Drift accuracy tables: "
+            + ", ".join(sorted(missing))
+        )
+
+    concept = df[
+        df["Experiment ID"].astype(str).str.startswith("concept_drift#")
+    ].copy()
+
+    # Keep exactly the requested alpha values.
+    concept["Alpha"] = pd.to_numeric(concept["Alpha"], errors="coerce")
+    concept = concept[
+        concept["Alpha"].apply(
+            lambda x: any(np.isclose(x, a, rtol=1e-12, atol=1e-12)
+                          for a in alphas_order)
+            if not pd.isna(x) else False
+        )
+    ].copy()
+
+    # Derive temporal type from Experiment ID.
+    exp_lower = concept["Experiment ID"].astype(str).str.strip().str.lower()
+    concept["Temporal Type"] = np.select(
+        [
+            exp_lower.str.endswith("_sudden"),
+            exp_lower.str.endswith("_gradual"),
+        ],
+        [
+            "Sudden",
+            "Gradual",
+        ],
+        default="N/A",
+    )
+
+    concept["Transition Window"] = pd.to_numeric(
+        concept["Transition Window"],
+        errors="coerce",
+    )
+
+    if datasets_order is None:
+        datasets_order = sorted(concept["Dataset"].dropna().unique().tolist())
+
+    Path(write_path).mkdir(parents=True, exist_ok=True)
+
+    # Requested order of configurations.
+    configurations = [
+        ("Sudden", None, 0.1),
+        ("Sudden", None, 1.0),
+        ("Gradual", 5, 0.1),
+        ("Gradual", 5, 1.0),
+        ("Gradual", 10, 0.1),
+        ("Gradual", 10, 1.0),
+    ]
+
+    # Keep only solutions that actually occur in the dataframe.
+    solutions = [
+        s for s in solutions_order
+        if s in concept["Solution"].astype(str).values
+    ]
+
+    for dataset_name in datasets_order:
+        dataset_df = concept[
+            concept["Dataset"].astype(str) == str(dataset_name)
+        ].copy()
+
+        table_rows = []
+
+        for temporal_type, transition_window, alpha in configurations:
+            # Match alpha robustly rather than relying on exact floating
+            # point equality.
+            mask_alpha = np.isclose(
+                dataset_df["Alpha"].astype(float),
+                float(alpha),
+                rtol=1e-12,
+                atol=1e-12,
+            )
+
+            filtered = dataset_df[
+                (dataset_df["Temporal Type"] == temporal_type)
+                & mask_alpha
+            ].copy()
+
+            if temporal_type == "Sudden":
+                filtered = filtered[filtered["Transition Window"].isna()]
+            else:
+                filtered = filtered[
+                    np.isclose(
+                        filtered["Transition Window"].astype(float),
+                        float(transition_window),
+                        rtol=1e-12,
+                        atol=1e-12,
+                    )
+                ]
+
+            results = {}
+
+            for solution in solutions:
+                values = pd.to_numeric(
+                    filtered.loc[
+                        filtered["Solution"].astype(str) == str(solution),
+                        "Accuracy",
+                    ],
+                    errors="coerce",
+                ).dropna()
+
+                # Accuracy in the CSV is expected in [0, 1].
+                # Convert to percentage for the table.
+                values = values * 100.0
+
+                mean_value, ci_value = mean_ci(
+                    values,
+                    ci=ci,
+                    bounded=False,
+                )
+
+                results[solution] = {
+                    "mean": mean_value,
+                    "ci": ci_value,
+                    "n": len(values),
+                }
+
+            for solution in solutions:
+                result = results[solution]
+
+                if pd.isna(result["mean"]):
+                    value_text = "--"
+                elif pd.isna(result["ci"]):
+                    value_text = f"{result['mean']:.2f}"
+                else:
+                    value_text = (
+                        f"{result['mean']:.2f} "
+                        f"$\\pm$ {result['ci']:.2f}"
+                    )
+
+                if _accuracy_is_statistically_superior(results, solution):
+                    value_text = f"\\textbf{{{value_text}}}"
+
+                table_rows.append({
+                    "Temporal Type": temporal_type,
+                    "Transition Window": (
+                        "N/A"
+                        if transition_window is None
+                        else str(transition_window)
+                    ),
+                    r"$\alpha$": f"{alpha:g}",
+                    "Solution": _accuracy_solution_display_name(solution),
+                    "Accuracy": value_text,
+                })
+
+        table_df = pd.DataFrame(
+            table_rows,
+            columns=[
+                "Temporal Type",
+                "Transition Window",
+                r"$\alpha$",
+                "Solution",
+                "Accuracy",
+            ],
+        )
+
+        filename = os.path.join(
+            write_path,
+            f"accuracy_concept_drift_{dataset_name}.tex",
+        )
+
+        latex = table_df.to_latex(
+            index=False,
+            escape=False,
+            caption=(
+                f"Accuracy of the evaluated solutions on {dataset_name} "
+                "under Concept Drift. Results are reported as mean "
+                "$\\pm$ 95\\% confidence interval for each temporal "
+                "shift configuration and alpha. A solution is shown in "
+                "\\textbf{bold} only when its confidence interval is "
+                "strictly separated above the confidence intervals of "
+                "all other solutions in the same configuration."
+            ),
+            label=(
+                "tab:accuracy_concept_drift_"
+                + re.sub(r"[^A-Za-z0-9]+", "_", str(dataset_name)).strip("_").lower()
+            ),
+            column_format="ccccc",
+        )
+
+        latex = (
+            "% Requires: \\usepackage{booktabs}\n"
+            + latex
+        )
+
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(latex)
+
+        print(
+            f"\nAccuracy Concept Drift table generated for {dataset_name}:"
+            f"\n{filename}"
+        )
 
 
 def plot_per_dataset_alpha(df, solutions_order, metric="Accuracy (%)", save_path=None):
@@ -3429,13 +4415,38 @@ if __name__ == "__main__":
 
     train_test = "test"
 
+    # Soluções utilizadas nas tabelas de detecção e nos demais shifts.
+    # Ordem canônica das soluções nas tabelas:
+    # MFP -> FPD (quando aplicável) -> demais soluções/variantes -> baselines.
+    # A mesma ordem é reutilizada nas tabelas de Concept Drift e nas demais
+    # tabelas que usam esta lista.
     solutions = [
         "MultiFedAvg+MFP_v2",
+        "MultiFedAvg+FPD",
+        "MultiFedAvg+MFP_v2_iti",
+        "MultiFedAvg+MFP_v2_dh",
+        "MultiFedAvg",
+        "MultiFedAvgRR",
         "JS-Drift",
         "FedConD",
         "FedDCA",
-        "CDA-FedAvg"
-        # adicionar demais soluções aqui
+        "CDA-FedAvg",
+    ]
+
+    # Lista específica para as tabelas de Accuracy de Concept Drift.
+    # Mantém exatamente a mesma ordem canônica:
+    # MFP -> FPD -> demais variantes/soluções -> baselines.
+    concept_solutions = [
+        "MultiFedAvg+MFP_v2",
+        "MultiFedAvg+FPD",
+        "MultiFedAvg+MFP_v2_iti",
+        "MultiFedAvg+MFP_v2_dh",
+        "MultiFedAvg",
+        "MultiFedAvgRR",
+        "JS-Drift",
+        "FedConD",
+        "FedDCA",
+        "CDA-FedAvg",
     ]
 
     concept_experiments = [
@@ -3574,14 +4585,22 @@ if __name__ == "__main__":
                 f"Experiment ID não suportado: {experiment_id}"
             )
 
+        # Concept Drift usa a lista expandida; Label/Combined Shift
+        # continuam usando somente as soluções atuais.
+        active_solutions = (
+            concept_solutions
+            if experiment_id.startswith("concept_drift#")
+            else solutions
+        )
+
         read_solutions = {
             solution: []
-            for solution in solutions
+            for solution in active_solutions
         }
 
         read_dataset_order = []
 
-        for solution in solutions:
+        for solution in active_solutions:
 
             # A diretoria continua sendo construída com a LISTA
             # completa de datasets, exatamente como no código original.
@@ -3756,6 +4775,7 @@ if __name__ == "__main__":
                 "Fold ID",
                 "Round (t)",
                 "Data shift",
+                "Accuracy",
                 "Shift Round",
             ]
         ].head(20)
@@ -3770,6 +4790,25 @@ if __name__ == "__main__":
     Path(write_path).mkdir(
         parents=True,
         exist_ok=True
+    )
+
+    # ============================================================
+    # TABELAS ADICIONAIS: ACCURACY -- CONCEPT DRIFT
+    # ============================================================
+    #
+    # IMPORTANT:
+    # Alpha is taken from the Experiment ID and stored explicitly in
+    # df_all["Alpha"]. The requested values 0.1 and 1.0 are therefore
+    # kept separate, including for gradual windows 5 and 10.
+    # ============================================================
+
+    table_accuracy_concept_drift(
+        df=df_all,
+        write_path=write_path,
+        solutions_order=concept_solutions,
+        datasets_order=dataset,
+        alphas_order=(0.1, 1.0),
+        ci=0.95,
     )
 
     # ============================================================
@@ -3796,7 +4835,7 @@ if __name__ == "__main__":
     print("VALIDAÇÃO DOS CSVs UTILIZADOS NA TABELA")
     print("=" * 100)
 
-    for solution in solutions:
+    for solution in concept_solutions:
 
         solution_df = df_all[
             df_all["Solution"] == solution
@@ -4078,4 +5117,135 @@ if __name__ == "__main__":
                 USE_TRANSITION_WINDOW_FOR_GRADUAL_METRICS
             ),
         )
+    )
+
+    # ============================================================
+    # TABELAS ADICIONAIS DE ACURÁCIA - CONCEPT DRIFT
+    # ============================================================
+    #
+    # Uma tabela independente é gerada para cada dataset:
+    #   * WISDM-W
+    #   * ImageNet10
+    #   * Foursquare
+    #
+    # Cada tabela contém as seis configurações:
+    #   * Sudden, alpha=0.1
+    #   * Sudden, alpha=1.0
+    #   * Gradual W=5, alpha=0.1
+    #   * Gradual W=5, alpha=1.0
+    #   * Gradual W=10, alpha=0.1
+    #   * Gradual W=10, alpha=1.0
+    #
+    # A acurácia é apresentada como média +/- IC 95%.
+    # A solução só é marcada em negrito quando é estritamente
+    # superior a todas as demais e seu IC não se sobrepõe ao IC
+    # de nenhuma outra solução na mesma configuração.
+    # ============================================================
+
+    # ======================================================================
+    # DEBUG - VERIFICAR RESULTADOS LIDOS PARA ALPHA = 1.0
+    # ======================================================================
+    print("\n" + "=" * 100)
+    print("DEBUG - RESULTADOS LIDOS PARA ALPHA = 1.0")
+    print("=" * 100)
+
+    if "Alpha" not in df_all.columns:
+        print("ERRO: a coluna 'Alpha' NÃO existe em df_all.")
+    else:
+        alpha_numeric = pd.to_numeric(df_all["Alpha"], errors="coerce")
+
+        print(f"Total de linhas lidas: {len(df_all)}")
+        print(f"Linhas com Alpha válido: {alpha_numeric.notna().sum()}")
+        print(
+            "Linhas com Alpha = 1.0: "
+            f"{np.isclose(alpha_numeric, 1.0, rtol=0, atol=1e-8).sum()}"
+        )
+
+        print("\nDistribuição dos valores de Alpha:")
+        print(
+            df_all.assign(_AlphaNumeric=alpha_numeric)["_AlphaNumeric"]
+            .value_counts(dropna=False)
+            .sort_index()
+            .to_string()
+        )
+
+        alpha1 = df_all[
+            np.isclose(alpha_numeric, 1.0, rtol=0, atol=1e-8)
+        ].copy()
+
+        if alpha1.empty:
+            print("\nNENHUM RESULTADO FOI LIDO PARA ALPHA = 1.0.")
+        else:
+            print("\nRESULTADOS ENCONTRADOS PARA ALPHA = 1.0")
+            print(f"Total de linhas: {len(alpha1)}")
+
+            for col in [
+                "Experiment ID",
+                "Dataset",
+                "Solution",
+                "Temporal Shift Type",
+                "Transition Window",
+                "Fold ID",
+                "Round (t)",
+            ]:
+                if col in alpha1.columns:
+                    print(f"\n--- {col} ---")
+                    print(
+                        alpha1[col]
+                        .value_counts(dropna=False)
+                        .sort_index()
+                        .to_string()
+                    )
+
+            group_cols = [
+                c for c in
+                ["Experiment ID", "Dataset", "Solution", "Transition Window"]
+                if c in alpha1.columns
+            ]
+
+            if group_cols:
+                print("\nResumo por experimento / dataset / solução / janela:")
+                print(
+                    alpha1.groupby(group_cols, dropna=False)
+                    .size()
+                    .reset_index(name="Rows")
+                    .to_string(index=False)
+                )
+
+    print("=" * 100)
+    # ======================================================================
+    # FIM DEBUG ALPHA = 1.0
+    # ======================================================================
+
+    # ============================================================
+    # RODADAS USADAS NAS TABELAS DE ACCURACY - CONCEPT DRIFT
+    # ============================================================
+    # None / "all"       -> todas as rodadas disponíveis (padrão).
+    # [30, 31, 32]       -> somente essas rodadas.
+    # (30, 50)           -> intervalo inclusivo 30..50.
+    # {"default": ...}  -> seleção por configuração; também aceita
+    #                        chaves (temporal, window, alpha).
+    # Exemplo:
+    # ACCURACY_CONCEPT_ROUNDS = {
+    #     "default": (30, 50),
+    #     ("Gradual", 5, 0.1): (30, 34),
+    # }
+    # ============================================================
+    ACCURACY_CONCEPT_ROUNDS = None
+
+    accuracy_concept_tables = (
+        table_accuracy_concept_drift_by_dataset(
+            df_all=df_all,
+            write_path=write_path,
+            solutions=concept_solutions,
+            concept_alphas=(0.1, 1.0),
+            gradual_windows=(5, 10),
+            ci=0.95,
+            accuracy_rounds=ACCURACY_CONCEPT_ROUNDS,
+        )
+    )
+
+    print(
+        "\nTabelas adicionais de acurácia geradas: "
+        f"{list(accuracy_concept_tables.keys())}"
     )
