@@ -29,6 +29,12 @@ DATASET_INPUT_MAP = {"CIFAR10": "img", "CINIC10": "image", "MNIST": "image", "EM
 
 
 class MultiFedAvgClient:
+    # Shared only by the simulator process: a compact, deterministic bank of
+    # original training inputs per class, built from all client partitions.
+    # It is used solely to synthesize concept drift when a client's local
+    # partition lacks the globally mapped source class.
+    _concept_drift_global_source_pool_cache = {}
+
     def __init__(self, args, id, model, fold_id):
         try:
             self.args = args
@@ -41,7 +47,7 @@ class MultiFedAvgClient:
             self.dataset = args.dataset
             self.batch_size = []
             for dataset in args.dataset:
-                self.batch_size.append({"CIFAR10": 32, "CINIC10": 32, "SVHN": 32, "MNIST": 32, "F-MNIST": 32, "EMNIST": 32, "WISDM-W": 64, "ImageNet10": 32, "Gowalla": 64, "wikitext": 256, "Foursquare": 512}[dataset])
+                self.batch_size.append({"CIFAR10": 32, "CINIC10": 32, "SVHN": 32, "MNIST": 32, "F-MNIST": 32, "EMNIST": 32, "WISDM-W": 128, "ImageNet10": 32, "Gowalla": 64, "wikitext": 256, "Foursquare": 256}[dataset])
             self.lr_dict = {'EMNIST':0.01,
                             'MNIST': 0.01,
                             "F-MNIST": 0.01,
@@ -49,7 +55,7 @@ class MultiFedAvgClient:
                             'CINIC10': 0.01,
                             'GTSRB': 0.01,
                             "SVHN": 0.01,
-                            'WISDM-W': 0.001,
+                            'WISDM-W': 0.0001,
                             'WISDM-P': 0.001,
                             'ImageNet100': 0.01,
                             'ImageNet': 0.1,
@@ -57,7 +63,7 @@ class MultiFedAvgClient:
                             "ImageNet_v2": 0.01,
                             "Gowalla": 0.001,
                             "wikitext": 0.001,
-                            "Foursquare": 0.001}
+                            "Foursquare": 0.0001}
             self.model = model
             self.alpha_train = [float(i) for i in args.alpha]
             self.alpha_test = [float(i) for i in args.alpha]
@@ -1022,6 +1028,108 @@ class MultiFedAvgClient:
         rng.shuffle(class_order)
         return {int(c) for c in class_order[:n_affected]}
 
+    def _get_global_concept_drift_class_mapping(self, me, n_classes):
+        """Return one deterministic class mapping shared by every client.
+
+        The mapping is built from the complete global class-ID range, never
+        from a client's locally present classes.  Therefore, for a given model
+        and fold, every client maps each target class to the same source class.
+        """
+        n_classes = int(n_classes)
+        if n_classes < 2:
+            return {}
+
+        seed = 42 + int(me) * 1009 + int(self.fold_id) * 9176 + 1543
+        rng = np.random.RandomState(seed)
+        class_order = np.arange(n_classes, dtype=np.int64)
+        rng.shuffle(class_order)
+        return {
+            int(class_order[i]): int(class_order[(i + 1) % n_classes])
+            for i in range(n_classes)
+        }
+
+    def _get_global_concept_drift_source_pool(self, me, input_key, max_samples_per_class=64):
+        """Build/cache a compact source-example bank from original train partitions.
+
+        The bank is a simulation utility, not a training-data loader: its samples
+        are used only as replacement inputs during synthetic concept-drift
+        generation. The class mapping remains global and fixed for all clients.
+        This avoids client-specific remapping when a mapped source class is
+        absent from one client's local partition.
+        """
+        dataset_name = self.args.dataset[me]
+        alpha = float(self.initial_alpha[me])
+        partition_seed = 1  # original, pre-shift partitioning
+        cache_key = (
+            dataset_name,
+            alpha,
+            int(self.args.total_clients),
+            int(self.args.data_percentage * 10000),
+            int(self.fold_id),
+            partition_seed,
+            str(input_key),
+            int(max_samples_per_class),
+        )
+        cached = MultiFedAvgClient._concept_drift_global_source_pool_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        n_classes = int(self.n_classes[me])
+        rng = np.random.RandomState(
+            42017 + int(me) * 1009 + int(self.fold_id) * 9176
+        )
+        reservoir = {class_id: [] for class_id in range(n_classes)}
+        seen = {class_id: 0 for class_id in range(n_classes)}
+        num_partitions = int(self.args.total_clients) + 1
+
+        for partition_id in range(int(self.args.total_clients)):
+            source_trainloader, _ = load_data(
+                dataset_name=dataset_name,
+                alpha=alpha,
+                data_sampling_percentage=self.args.data_percentage,
+                partition_id=partition_id,
+                num_partitions=num_partitions,
+                batch_size=self.batch_size[me],
+                fold_id=self.fold_id,
+                partition_seed=partition_seed,
+            )
+            for batch in source_trainloader:
+                if not isinstance(batch, dict) or "label" not in batch or input_key not in batch:
+                    continue
+                labels_batch = batch["label"]
+                inputs_batch = batch[input_key]
+                batch_size = int(labels_batch.shape[0])
+                for i in range(batch_size):
+                    class_id = int(labels_batch[i].item())
+                    if class_id < 0 or class_id >= n_classes:
+                        continue
+                    value = inputs_batch[i]
+                    if isinstance(value, torch.Tensor):
+                        value = value.detach().cpu().clone()
+                    else:
+                        value = copy.deepcopy(value)
+                    seen[class_id] += 1
+                    if len(reservoir[class_id]) < int(max_samples_per_class):
+                        reservoir[class_id].append(value)
+                    else:
+                        j = int(rng.randint(0, seen[class_id]))
+                        if j < int(max_samples_per_class):
+                            reservoir[class_id][j] = value
+
+        source_pool = {
+            class_id: values
+            for class_id, values in reservoir.items()
+            if values
+        }
+        MultiFedAvgClient._concept_drift_global_source_pool_cache[cache_key] = source_pool
+        print(
+            f"[CONCEPT DRIFT SOURCE POOL] dataset={dataset_name} model={me} "
+            f"fold={self.fold_id} scope=all_original_train_partitions "
+            f"max_samples_per_class={max_samples_per_class} "
+            f"pool_sizes={{{', '.join(f'{c}: {len(v)}' for c, v in sorted(source_pool.items()))}}}"
+        )
+        return source_pool
+
     def _apply_concept_drift_to_loader(
             self,
             loader,
@@ -1112,8 +1220,31 @@ class MultiFedAvgClient:
                 for class_id in range(n_classes)
             }
             present_classes = [c for c in range(n_classes) if class_indices[c]]
-            if len(present_classes) < 2:
+            if not present_classes:
                 return loader
+
+            # One mapping over the GLOBAL class-ID range. Do not derive this
+            # mapping from present_classes, because local class distributions
+            # differ across clients.
+            global_class_mapping = self._get_global_concept_drift_class_mapping(
+                me, n_classes
+            )
+            if not global_class_mapping:
+                return loader
+
+            # Global source examples guarantee that a fixed mapped source class
+            # remains available even when it is absent from this client.
+            global_source_pool = self._get_global_concept_drift_source_pool(
+                me, input_key
+            )
+
+            def _resolve_source_input(source_idx, source_class):
+                # Non-negative indices refer to the current local loader.
+                # Negative indices encode an index into the global source pool.
+                if int(source_idx) >= 0:
+                    return samples[int(source_idx)][input_key]
+                pool_index = -int(source_idx) - 1
+                return global_source_pool[int(source_class)][pool_index]
 
             # Stable randomness: the same class-level transformation is used
             # across clients and across rounds.  This is important for gradual
@@ -1126,6 +1257,8 @@ class MultiFedAvgClient:
                 + 7919
             )
             rng = np.random.RandomState(seed)
+
+            selected_target_indices = []
 
             if affected_classes is not None:
                 # ---------------------------------------------------------
@@ -1140,35 +1273,40 @@ class MultiFedAvgClient:
                     if c in affected_classes
                 }
                 if not target_by_class:
-                    return loader
-
-                source_classes = present_classes.copy()
-                rng.shuffle(source_classes)
-
-                # Each affected target class receives X from another class.
-                # A cyclic permutation guarantees source_class != target_class
-                # whenever at least two local classes are present. Sampling with
-                # replacement is allowed because class sizes can differ.
-                if len(source_classes) < 2:
-                    return loader
-
-                source_for_target = {
-                    source_classes[i]: source_classes[(i + 1) % len(source_classes)]
-                    for i in range(len(source_classes))
-                }
-
-                assignments = []
-                for target_class, target_indices in target_by_class.items():
-                    source_class = source_for_target[target_class]
-                    source_indices = np.asarray(class_indices[source_class], dtype=np.int64)
-                    if len(source_indices) == 0:
-                        continue
-                    sampled_sources = rng.choice(
-                        source_indices, size=len(target_indices), replace=True
+                    print(
+                        f"[CONCEPT DRIFT AUDIT] status=NO_TARGETS "
+                        f"mode=gradual_class_level shift_type={shift_context} "
+                        f"client={self.client_id} model={me} dataset={dataset_name} "
+                        f"fraction_configured={fraction:.4f} "
+                        f"affected_classes={sorted(affected_classes)} "
+                        f"samples_total={len(samples)} samples_selected=0 "
+                        f"assignments=0 actually_changed=0"
                     )
+                    return loader
+
+                selected_target_indices = [
+                    int(idx) for indices in target_by_class.values() for idx in indices
+                ]
+                # Every target class uses its globally defined source class.
+                # Source samples may be reused (sampling with replacement),
+                # but the source CLASS mapping is never client-specific.
+                assignments = []
+                missing_source_classes = set()
+                for target_class, target_indices in target_by_class.items():
+                    source_class = global_class_mapping[target_class]
+                    source_values = global_source_pool.get(int(source_class), [])
+                    if not source_values:
+                        missing_source_classes.add(int(source_class))
+                        continue
+                    sampled_pool_indices = rng.choice(
+                        np.arange(len(source_values), dtype=np.int64),
+                        size=len(target_indices), replace=True
+                    )
+                    # Negative index encodes a source-pool index; the class
+                    # field carries the global source class for resolution.
                     assignments.extend(
-                        (int(target_idx), int(source_idx), target_class, source_class)
-                        for target_idx, source_idx in zip(target_indices, sampled_sources)
+                        (int(target_idx), -int(pool_idx) - 1, target_class, source_class)
+                        for target_idx, pool_idx in zip(target_indices, sampled_pool_indices)
                     )
             else:
                 # ---------------------------------------------------------
@@ -1191,68 +1329,121 @@ class MultiFedAvgClient:
                         selected_by_class[class_id] = []
 
                 if not selected_targets:
+                    print(
+                        f"[CONCEPT DRIFT AUDIT] status=NO_TARGETS "
+                        f"mode=sample_level shift_type={shift_context} "
+                        f"client={self.client_id} model={me} dataset={dataset_name} "
+                        f"fraction_configured={fraction:.4f} "
+                        f"samples_total={len(samples)} samples_selected=0 "
+                        f"assignments=0 actually_changed=0"
+                    )
                     return loader
 
-                source_by_class = {
-                    class_id: selected_by_class[class_id].copy()
-                    for class_id in present_classes
-                }
-                for class_id in present_classes:
-                    rng.shuffle(source_by_class[class_id])
+                selected_target_indices = [int(idx) for idx, _ in selected_targets]
 
-                class_order = present_classes.copy()
-                rng.shuffle(class_order)
-                if len(class_order) > 1:
-                    target_to_source_class = {
-                        class_order[i]: class_order[(i + 1) % len(class_order)]
-                        for i in range(len(class_order))
-                    }
-                else:
-                    return loader
-
-                available_sources = {
-                    c: list(source_by_class[c]) for c in present_classes
-                }
-                for c in present_classes:
-                    rng.shuffle(available_sources[c])
-
+                # Apply the SAME global target->source class mapping for all
+                # clients. Source inputs come from the shared simulation bank,
+                # so local class absence cannot trigger client-specific remapping.
                 assignments = []
+                missing_source_classes = set()
                 selected_targets_by_class = {
                     c: list(selected_by_class[c]) for c in present_classes
                 }
-                for c in present_classes:
-                    rng.shuffle(selected_targets_by_class[c])
-
-                pending = []
                 for target_class in present_classes:
-                    source_class = target_to_source_class[target_class]
                     targets = selected_targets_by_class[target_class]
-                    sources = available_sources[source_class]
-                    n = min(len(targets), len(sources))
-                    for target_idx, source_idx in zip(targets[:n], sources[:n]):
-                        assignments.append((target_idx, source_idx, target_class, source_class))
-                    del targets[:n]
-                    del sources[:n]
-                    pending.extend((target_idx, target_class) for target_idx in targets)
-
-                used_sources = {source_idx for _, source_idx, _, _ in assignments}
-                for target_idx, target_class in pending:
-                    candidates = [
-                        idx for idx in range(len(samples))
-                        if idx not in used_sources and int(labels[idx]) != target_class
-                    ]
-                    if not candidates:
+                    if not targets:
                         continue
-                    source_idx = int(candidates[rng.randint(len(candidates))])
-                    source_class = int(labels[source_idx])
-                    assignments.append((target_idx, source_idx, target_class, source_class))
-                    used_sources.add(source_idx)
+                    source_class = global_class_mapping[target_class]
+                    source_values = global_source_pool.get(int(source_class), [])
+                    if not source_values:
+                        missing_source_classes.add(int(source_class))
+                        continue
+                    sampled_pool_indices = rng.choice(
+                        np.arange(len(source_values), dtype=np.int64),
+                        size=len(targets), replace=True
+                    )
+                    assignments.extend(
+                        (int(target_idx), -int(pool_idx) - 1, target_class, source_class)
+                        for target_idx, pool_idx in zip(targets, sampled_pool_indices)
+                    )
 
             shifted_samples = [copy.deepcopy(sample) for sample in samples]
-            for target_idx, source_idx, _, _ in assignments:
+            for target_idx, source_idx, _, source_class in assignments:
                 shifted_samples[target_idx][input_key] = copy.deepcopy(
-                    samples[source_idx][input_key]
+                    _resolve_source_input(source_idx, source_class)
                 )
+
+            # Audit intended intensity separately from successful assignments
+            # and from input tensors that actually changed. This is diagnostic
+            # only: it does not alter the drift transformation.
+            assignment_by_target = {int(target_idx): (int(source_idx), int(target_class), int(source_class))
+                                    for target_idx, source_idx, target_class, source_class in assignments}
+            assigned_target_indices = set(assignment_by_target)
+            selected_target_set = set(int(i) for i in selected_target_indices)
+            assigned_and_selected = assigned_target_indices & selected_target_set
+            actually_changed_targets = set()
+            assigned_unchanged_targets = set()
+            for target_idx in assigned_target_indices:
+                source_idx, _, source_class = assignment_by_target[target_idx]
+                target_x = samples[target_idx][input_key]
+                source_x = _resolve_source_input(source_idx, source_class)
+                if isinstance(target_x, torch.Tensor) and isinstance(source_x, torch.Tensor):
+                    is_changed = not torch.equal(target_x, source_x)
+                else:
+                    try:
+                        is_changed = not np.array_equal(np.asarray(target_x), np.asarray(source_x))
+                    except Exception:
+                        is_changed = target_x != source_x
+                if is_changed:
+                    actually_changed_targets.add(target_idx)
+                else:
+                    assigned_unchanged_targets.add(target_idx)
+
+            if affected_classes is not None:
+                expected_selected = sum(
+                    len(class_indices[c]) for c in present_classes if c in affected_classes
+                )
+            else:
+                expected_selected = 0
+                for class_id in present_classes:
+                    n_class = len(class_indices[class_id])
+                    n_expected = int(round(fraction * n_class))
+                    if fraction > 0.0 and n_expected == 0 and n_class > 0:
+                        n_expected = 1
+                    expected_selected += min(n_expected, n_class)
+
+            per_class_audit = []
+            for class_id in present_classes:
+                selected_c = [idx for idx in selected_target_set if int(labels[idx]) == class_id]
+                assigned_c = [idx for idx in assigned_and_selected if int(labels[idx]) == class_id]
+                changed_c = [idx for idx in actually_changed_targets if idx in assigned_c]
+                per_class_audit.append(
+                    f"{class_id}:selected={len(selected_c)},assigned={len(assigned_c)},"
+                    f"changed={len(changed_c)},unassigned={len(selected_c)-len(assigned_c)}"
+                )
+
+            print(
+                f"[CONCEPT DRIFT AUDIT] status={'APPLIED' if actually_changed_targets else 'INEFFECTIVE'} "
+                f"mode={'gradual_class_level' if affected_classes is not None else 'sample_level'} "
+                f"shift_type={shift_context} client={self.client_id} model={me} dataset={dataset_name} "
+                f"fraction_configured={fraction:.4f} "
+                f"intensity_applies={'class_level' if affected_classes is not None else 'sample_level'} "
+                f"samples_total={len(samples)} expected_selected={expected_selected} "
+                f"samples_selected={len(selected_target_set)} "
+                f"selection_matches_expected={len(selected_target_set) == expected_selected} "
+                f"assignments_total={len(assignments)} assigned_selected={len(assigned_and_selected)} "
+                f"selected_unassigned={len(selected_target_set - assigned_target_indices)} "
+                f"assigned_but_unchanged={len(assigned_unchanged_targets)} "
+                f"actually_changed={len(actually_changed_targets)} "
+                f"selected_fraction={len(selected_target_set)/max(len(samples),1):.4f} "
+                f"assigned_fraction={len(assigned_and_selected)/max(len(samples),1):.4f} "
+                f"actually_changed_fraction={len(actually_changed_targets)/max(len(samples),1):.4f} "
+                f"affected_classes={sorted(affected_classes) if affected_classes is not None else 'N/A'} "
+                f"global_class_mapping={global_class_mapping} "
+                f"global_source_pool_sizes={{{', '.join(f'{c}: {len(v)}' for c, v in sorted(global_source_pool.items()))}}} "
+                f"missing_source_classes={sorted(missing_source_classes)} "
+                f"per_class=[{' ; '.join(per_class_audit)}]"
+            )
 
             shifted_labels = np.asarray([
                 int(sample["label"].item())
@@ -1314,7 +1505,8 @@ class MultiFedAvgClient:
             print(
                 f"[CONCEPT DRIFT VERIFY] shift_type={shift_context} "
                 f"client={self.client_id} model={me} dataset={dataset_name} "
-                f"fraction={fraction:.4f} X_changed={changed_x}/{len(samples)} "
+                f"fraction={fraction:.4f} global_class_mapping={global_class_mapping} "
+                f"X_changed={changed_x}/{len(samples)} "
                 f"X_changed_fraction={empirical_x_changed_fraction:.4f} "
                 f"mean_abs_X_change={mean_abs_x_change:.8f} "
                 f"P(X|Y)_mean_change={mean_conditional_change:.8f} "
@@ -1913,7 +2105,8 @@ class MultiFedAvgClient:
             if (
                     self.data_shift_config[me]["type"]
                     == "concept_drift"
-                    and data_shift_flag and t - self.lt[me] > 0 and self.concept_drift_window_test[me] != concept_drift_window
+                    and data_shift_flag
+                    and self.concept_drift_window_test[me] != concept_drift_window
             ):
 
                 old_window = (
@@ -1934,9 +2127,9 @@ class MultiFedAvgClient:
                 # -----------------------------------------------------
                 # IMPORTANT:
                 #
-                # Test data changes for EVERY CLIENT.
-                #
-                # It does NOT depend on self.lt[me].
+                # Test data changes for EVERY CLIENT, including clients
+                # that trained during this same round. The update is gated
+                # by the test drift state, not by self.lt[me].
                 # -----------------------------------------------------
 
                 self.concept_drift_window_test[me] = (

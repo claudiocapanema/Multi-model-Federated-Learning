@@ -96,9 +96,9 @@ class MultiFedAvg:
             self.number_of_rounds = args.number_of_rounds
             self.cd = f"experiment_id_{args.experiment_id}"
             self.strategy_name = args.strategy
-            self.test_metrics_names = ["Accuracy", "Balanced accuracy", "Loss", "Round (t)", "Fraction fit",
+            self.test_metrics_names = ["Accuracy", "Balanced accuracy", "Loss", "Round (t)", "Round time (s)", "Fraction fit",
                                        "# training clients", "training clients and models", "Model size", "Alpha", "Fold ID"]
-            self.train_metrics_names = ["Accuracy", "Balanced accuracy", "Loss", "Round (t)", "Fraction fit",
+            self.train_metrics_names = ["Accuracy", "Balanced accuracy", "Loss", "Round (t)", "Round time (s)", "Fraction fit",
                                         "# training clients", "training clients and models", "Model size", "Alpha"]
             self.rs_test_acc = {me: [] for me in range(self.ME)}
             self.rs_test_auc = {me: [] for me in range(self.ME)}
@@ -152,6 +152,7 @@ class MultiFedAvg:
                 self.parameters_aggregated_mefl[me] = get_weights(self.global_model[me])
             for t in range(1, self.number_of_rounds + 1):
                 s_t = time.time()
+                self.round_start_time = s_t
                 self.selected_clients = self.select_clients(t+self.fold_id)
                 print("selected clients: ", self.selected_clients)
                 fit_results = []
@@ -271,6 +272,14 @@ class MultiFedAvg:
                 results_mefl[me].append(result)
 
 
+            # Measure the elapsed time of the current round on the server.
+            # The timer starts in train() before client selection and therefore
+            # includes selection, client training, fit aggregation and evaluation.
+            if hasattr(self, "round_start_time"):
+                round_time = time.time() - self.round_start_time
+            else:
+                round_time = None
+
             # Aggregate loss
             # print("""metricas recebidas rodada {}: {}""".format(server_round, results_mefl[0]))
             loss_aggregated_mefl = {me: 0. for me in range(self.ME)}
@@ -291,6 +300,7 @@ class MultiFedAvg:
                     metrics_aggregated_mefl[int(me)] = self.evaluate_metrics_aggregation_fn(eval_metrics)
 
             for me in range(self.ME):
+                metrics_aggregated_mefl[me]["Round time (s)"] = round_time
                 self.add_metrics(server_round, metrics_aggregated_mefl, me)
                 self._save_results(server_round, me)
 

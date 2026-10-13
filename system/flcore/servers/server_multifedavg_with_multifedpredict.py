@@ -72,8 +72,10 @@ def weighted_average_fit(metrics):
                       "Round (t)": metrics[0][1]["Round (t)"],
                       "Model size": metrics[0][1]["Model size"]}
 
-        # combined_train_accuracy is generated during client.fit(), so it
+        # global_train_accuracy is generated during client.fit(), so it
         # must be aggregated together with the other fit-time evidence.
+        # Accuracy of the previous combined model on each client's current
+        # training data, measured in fit() before local optimization.
         combined_values = [
             num_examples * float(m["combined_train_accuracy"])
             for num_examples, m in metrics
@@ -85,9 +87,22 @@ def weighted_average_fit(metrics):
             if m.get("combined_train_accuracy") is not None
         ]
         if combined_examples and sum(combined_examples) > 0:
-            aggregated["combined_train_accuracy"] = (
-                sum(combined_values) / sum(combined_examples)
-            )
+            combined_accuracy = sum(combined_values) / sum(combined_examples)
+            aggregated["combined_train_accuracy"] = combined_accuracy
+            # Keep legacy metric key for existing CSVs and downstream code.
+            aggregated["global_train_accuracy"] = combined_accuracy
+
+        reported_drops = [
+            (num_examples, float(np.clip(m.get("relative_accuracy_drop", 0.0), 0.0, 1.0)))
+            for num_examples, m in metrics
+            if m.get("relative_accuracy_drop") is not None
+        ]
+        if reported_drops:
+            total_drop_examples = sum(n for n, _ in reported_drops)
+            if total_drop_examples > 0:
+                aggregated["relative_accuracy_drop"] = sum(
+                    n * drop for n, drop in reported_drops
+                ) / total_drop_examples
 
         return aggregated
     except Exception as e:
@@ -120,13 +135,42 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             self.train_accuracy_by_round = {
                 me: {} for me in range(self.ME)
             }
+            # Arithmetic mean of the previous combined model's accuracy
+            # on the current training data of clients selected for each
+            # model, indexed by server round.
+            self.combined_train_accuracy_by_round = {
+                me: {} for me in range(self.ME)
+            }
 
-            # Server-side history of the combined model's training accuracy.
-            self.combined_train_accuracy = {me: 0.0 for me in range(self.ME)}
-            self.combined_train_accuracy_history = {me: [] for me in range(self.ME)}
-            self.combined_accuracy_reference = {me: 0.0 for me in range(self.ME)}
-            self.combined_accuracy_drop = {me: 0.0 for me in range(self.ME)}
-            self.combined_accuracy_drop_significant = {me: False for me in range(self.ME)}
+            # Server-side history of the global model's training accuracy.
+            self.global_train_accuracy = {me: 0.0 for me in range(self.ME)}
+            self.global_train_accuracy_history = {me: [] for me in range(self.ME)}
+            self.combined_train_accuracy_by_round = {
+                me: {} for me in range(self.ME)
+            }
+            self.global_accuracy_reference = {me: 0.0 for me in range(self.ME)}
+            self.global_accuracy_drop = {me: 0.0 for me in range(self.ME)}
+            self.global_accuracy_drop_significant = {me: False for me in range(self.ME)}
+
+            # Adaptive baseline and cumulative negative-deviation state
+            # used by the concept-drift detector.
+            self.global_accuracy_ewma = {me: None for me in range(self.ME)}
+            self.global_accuracy_cusum = {me: 0.0 for me in range(self.ME)}
+            self.global_accuracy_persistent_drops = {me: 0 for me in range(self.ME)}
+            self.global_accuracy_cusum_triggered = {me: False for me in range(self.ME)}
+            self.global_accuracy_client_drop_ratio = {me: 0.0 for me in range(self.ME)}
+            self.global_accuracy_client_drop_count = {me: 0 for me in range(self.ME)}
+            self.global_accuracy_client_count = {me: 0 for me in range(self.ME)}
+            # Per-client temporal baselines prevent cross-client non-IID
+            # differences from being mistaken for concept drift.
+            self.global_accuracy_client_history = {
+                me: {} for me in range(self.ME)
+            }
+            # Consecutive rounds with enough clients reporting a significant
+            # drop in their own combined-model training accuracy.
+            self.global_accuracy_client_consensus_persistence = {
+                me: 0 for me in range(self.ME)
+            }
 
             # FedPredict weights returned by client.evaluate().
             # These must come exclusively from evaluate(), never from fit().
@@ -135,8 +179,48 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             self.gw_by_round = {me: {} for me in range(self.ME)}
             self.lw_by_round = {me: {} for me in range(self.ME)}
 
-            self.combined_accuracy_history_window = 10
-            self.combined_accuracy_drop_threshold = 0.15
+            # ============================================================
+            # CONCEPT-DRIFT DETECTOR: EWMA + CUSUM + PERSISTENCE
+            #
+            # A single low accuracy is not sufficient evidence of concept
+            # drift.  The detector keeps an adaptive EWMA baseline and
+            # accumulates only sustained negative deviations with CUSUM.
+            # A minimum number of consecutive deteriorations is also
+            # required before declaring a drift.
+            # ============================================================
+
+            # Number of previous fit rounds required before the detector
+            # can start accumulating CUSUM evidence.
+            self.global_accuracy_history_window = 10
+
+            # Minimum number of observed rounds before concept-drift
+            # detection is allowed. This prevents unstable early-training
+            # accuracies from being interpreted as drift.
+            self.global_accuracy_min_baseline_rounds = 10
+
+            # EWMA smoothing factor. Smaller values make the baseline more
+            # stable and less sensitive to individual rounds.
+            self.global_accuracy_ewma_alpha = 0.20
+
+            # Slack (k) in accuracy points used by CUSUM. Deviations below
+            # this value are treated as normal fluctuation.
+            self.global_accuracy_cusum_k = 0.05
+
+            # CUSUM decision threshold (h). Larger values reduce false
+            # positives but increase detection delay.
+            self.global_accuracy_cusum_h = 0.08
+
+            # Minimum relative accuracy deterioration required in the
+            # current round. This prevents a very small final deviation
+            # from triggering a detection merely because CUSUM is high.
+            self.global_accuracy_drop_threshold = 0.20
+            self.global_accuracy_min_absolute_drop = 0.05
+            self.global_accuracy_min_client_drop_ratio = 0.60
+            self.global_accuracy_min_client_examples = 50
+
+            # Minimum number of consecutive rounds with meaningful
+            # deterioration required to declare concept drift.
+            self.global_accuracy_min_persistent_drops = 2
 
             self.max_number_of_rounds_data_drift_adaptation = (
                     len(self.clients)
@@ -236,7 +320,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             # Unified operational detector threshold. LS and CD are
             # complementary evidence only; the operational state is
             # exclusively DATA_SHIFT or NO_SHIFT.
-            self.data_shift_threshold = 0.7
+            self.data_shift_threshold = 0.6
 
             # ============================================================
             # DATA-SHIFT ADAPTATION
@@ -309,11 +393,31 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             }
 
 
-            self.combined_train_accuracy = {me: 0.0 for me in range(self.ME)}
-            self.combined_train_accuracy_history = {me: [] for me in range(self.ME)}
-            self.combined_accuracy_reference = {me: 0.0 for me in range(self.ME)}
-            self.combined_accuracy_drop = {me: 0.0 for me in range(self.ME)}
-            self.combined_accuracy_drop_significant = {me: False for me in range(self.ME)}
+            self.global_train_accuracy = {me: 0.0 for me in range(self.ME)}
+            self.global_train_accuracy_history = {me: [] for me in range(self.ME)}
+            self.global_accuracy_reference = {me: 0.0 for me in range(self.ME)}
+            self.global_accuracy_drop = {me: 0.0 for me in range(self.ME)}
+            self.global_accuracy_drop_significant = {me: False for me in range(self.ME)}
+
+            # Adaptive baseline and cumulative negative-deviation state
+            # used by the concept-drift detector.
+            self.global_accuracy_ewma = {me: None for me in range(self.ME)}
+            self.global_accuracy_cusum = {me: 0.0 for me in range(self.ME)}
+            self.global_accuracy_persistent_drops = {me: 0 for me in range(self.ME)}
+            self.global_accuracy_cusum_triggered = {me: False for me in range(self.ME)}
+            self.global_accuracy_client_drop_ratio = {me: 0.0 for me in range(self.ME)}
+            self.global_accuracy_client_drop_count = {me: 0 for me in range(self.ME)}
+            self.global_accuracy_client_count = {me: 0 for me in range(self.ME)}
+            # Per-client temporal baselines prevent cross-client non-IID
+            # differences from being mistaken for concept drift.
+            self.global_accuracy_client_history = {
+                me: {} for me in range(self.ME)
+            }
+            # Consecutive rounds with enough clients reporting a significant
+            # drop in their own combined-model training accuracy.
+            self.global_accuracy_client_consensus_persistence = {
+                me: 0 for me in range(self.ME)
+            }
 
             self.gw = {me: [] for me in range(self.ME)}
             self.lw = {me: [] for me in range(self.ME)}
@@ -679,6 +783,51 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 ] = aggregated_ndarrays_mefl[me]
 
             # ============================================================
+            # Client-reported relative accuracy-drop consensus
+            # ============================================================
+            # Each client computes the relative drop against its own historical
+            # accuracy baseline. The server receives that scalar directly;
+            # it does not reconstruct the client's history from raw accuracy.
+            for me in trained_models:
+                drop_count = 0
+                eligible_count = 0
+                drop_threshold = float(self.global_accuracy_drop_threshold)
+
+                for _, num_examples, fit_res in results_mefl[me]:
+                    client_id = fit_res.get("client_id")
+                    if client_id is None:
+                        continue
+                    try:
+                        reported_drop = float(np.clip(
+                            fit_res.get("relative_accuracy_drop", 0.0), 0.0, 1.0
+                        ))
+                        num_examples = int(num_examples)
+                    except (TypeError, ValueError):
+                        continue
+
+                    if num_examples < self.global_accuracy_min_client_examples:
+                        continue
+                    eligible_count += 1
+                    if reported_drop >= drop_threshold and reported_drop > 0.0:
+                        drop_count += 1
+
+                self.global_accuracy_client_drop_count[me] = drop_count
+                self.global_accuracy_client_count[me] = eligible_count
+                self.global_accuracy_client_drop_ratio[me] = (
+                    drop_count / eligible_count if eligible_count > 0 else 0.0
+                )
+                consensus_now = (
+                    eligible_count >= 2
+                    and drop_count >= 2
+                    and self.global_accuracy_client_drop_ratio[me]
+                    >= self.global_accuracy_min_client_drop_ratio
+                )
+                if consensus_now:
+                    self.global_accuracy_client_consensus_persistence[me] += 1
+                else:
+                    self.global_accuracy_client_consensus_persistence[me] = 0
+
+            # ============================================================
             # Aggregate custom training metrics
             # ============================================================
 
@@ -740,6 +889,35 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 else:
 
                     print("nao tem")
+
+            # ============================================================
+            # Mean combined-model accuracy on selected clients' train data
+            # ============================================================
+            # Each client evaluates the combined model saved from its previous
+            # evaluation on its current local training data before local
+            # optimization. Store the arithmetic mean across selected clients
+            # for this model and round. Missing values (e.g., first round,
+            # when no previous combined model exists) are excluded.
+            for me in trained_models:
+                combined_accuracies = []
+                for _, _, fit_res in results_mefl[me]:
+                    value = fit_res.get("combined_train_accuracy")
+                    if value is None:
+                        continue
+                    try:
+                        value = float(value)
+                    except (TypeError, ValueError):
+                        continue
+                    if np.isfinite(value):
+                        combined_accuracies.append(
+                            float(np.clip(value, 0.0, 1.0))
+                        )
+
+                self.combined_train_accuracy_by_round[me][server_round] = (
+                    float(np.mean(combined_accuracies))
+                    if combined_accuracies
+                    else None
+                )
 
             # ============================================================
             # Shift-detection CSVs
@@ -1061,18 +1239,33 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     self.ls[me]
                 )
 
-                # combined_train_accuracy is returned by client.fit().
-                # Keep the same weighted aggregation semantics used for
-                # the ordinary training accuracy.
+                # Keep aggregate combined-model accuracy for logging/CSV
+                # diagnostics only. Concept-drift detection uses client-reported
+                # relative_accuracy_drop, not this server-side history.
                 combined_train_accuracy = metrics_aggregated_mefl[me].get(
                     "combined_train_accuracy"
                 )
+                if combined_train_accuracy is None:
+                    combined_train_accuracy = metrics_aggregated_mefl[me].get(
+                        "global_train_accuracy"
+                    )
                 if combined_train_accuracy is not None:
-                    self.combined_train_accuracy[me] = float(
+                    self.global_train_accuracy[me] = float(
                         np.clip(combined_train_accuracy, 0.0, 1.0)
                     )
-                    self.combined_train_accuracy_history[me].append(
-                        self.combined_train_accuracy[me]
+                    self.global_train_accuracy_history[me].append(
+                        self.global_train_accuracy[me]
+                    )
+
+                # Diagnostic aggregate only: the detector decision itself uses
+                # each client's relative_accuracy_drop and consensus, not this
+                # aggregate and not a server-side accuracy-history baseline.
+                reported_relative_drop = metrics_aggregated_mefl[me].get(
+                    "relative_accuracy_drop"
+                )
+                if reported_relative_drop is not None:
+                    self.global_accuracy_drop[me] = float(
+                        np.clip(reported_relative_drop, 0.0, 1.0)
                     )
 
                 self.heterogeneity_degree_list[
@@ -1098,7 +1291,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             # DATA-SHIFT DETECTION
             # ============================================================
             # IMPORTANT: this must run AFTER the loop above has stored the
-            # current round's LS and combined_train_accuracy histories.
+            # current round's LS and global_train_accuracy histories.
             # Detection is therefore entirely fit-time. aggregate_evaluate()
             # is not involved in detecting data shift.
             for me in trained_models:
@@ -1283,9 +1476,14 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             # LS replaces PS as the signal indicating label-
             # distribution change.
             #
-            # DH itself continues to control the aggregation degree.
+            # DH controls the aggregation degree. If a data shift was
+            # detected, DDH forces DH=0 so that the global learning rate
+            # becomes 1 for the aggregation of the shifted data.
             # ---------------------------------------------------------
-            if (
+            if self.data_shift_detected[me]:
+                heterogeneity_degree = 0
+
+            elif (
                     self.version in ["iti"]
                     or t == 1
             ):
@@ -1305,6 +1503,13 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 heterogeneity_degree = 0
 
             global_lr = 1 - heterogeneity_degree
+
+            print(
+                f"[DDH] round={t} model={me} "
+                f"data_shift_detected={self.data_shift_detected[me]} "
+                f"DH={heterogeneity_degree} "
+                f"global_lr={global_lr}"
+            )
 
             weighted_parameters_update_list = [
                 np.array(original_layer + (1 - heterogeneity_degree) * layer)
@@ -1355,17 +1560,19 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))
 
     def _detect_data_shift_after_fit(self, server_round, model=None):
-        """Detect data shift from fit-time evidence of ``server_round``.
+        """Detect data shift from client-reported drops and the LS signal.
 
-        The detector runs at the end of ``aggregate_fit()``, after the
-        current round's LS and combined-train-accuracy values have been
-        aggregated and appended to their histories.  No validation/test
-        metrics are required for shift detection.
+        For concept drift, clients compute relative_accuracy_drop against their
+        own historical combined-model accuracy and send the scalar to the
+        server. The server only aggregates these signals and checks consensus
+        persistence; it does not calculate a drop from global accuracy history.
+        Label-shift detection continues to use the LS detector and its own
+        observation history.
         """
         try:
             ls_threshold = float(self.data_shift_threshold)
-            acc_drop_threshold = float(self.combined_accuracy_drop_threshold)
-            history_window = int(self.combined_accuracy_history_window)
+            min_ls_observations = int(self.global_accuracy_min_baseline_rounds)
+            min_relative_drop = float(self.global_accuracy_drop_threshold)
 
             models = range(self.ME) if model is None else [int(model)]
             for me in models:
@@ -1374,67 +1581,74 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     float(np.clip(ls_history[-1], 0.0, 1.0))
                     if ls_history else 0.0
                 )
-                previous_ls_history = ls_history[:-1]
                 ls_significant = current_ls >= ls_threshold
+                # LS warm-up depends only on LS observations, never on global
+                # or combined-model accuracy history.
+                ls_history_ready = len(ls_history) >= min_ls_observations
 
-                history = self.combined_train_accuracy_history[me]
-                current_accuracy = (
-                    float(np.clip(history[-1], 0.0, 1.0))
-                    if history else float(np.clip(self.combined_train_accuracy[me], 0.0, 1.0))
+                client_drop_ratio = float(self.global_accuracy_client_drop_ratio[me])
+                client_drop_count = int(self.global_accuracy_client_drop_count[me])
+                eligible_client_count = int(self.global_accuracy_client_count[me])
+                client_consensus = bool(
+                    eligible_client_count >= 2
+                    and client_drop_count >= 2
+                    and client_drop_ratio >= float(self.global_accuracy_min_client_drop_ratio)
                 )
-                previous_history = history[:-1]
 
-                accuracy_history_ready = len(previous_history) >= history_window
-                if accuracy_history_ready:
-                    reference = float(np.mean(previous_history[-history_window:]))
-                    relative_drop = (
-                        max(0.0, (reference - current_accuracy) / reference)
-                        if reference > 1e-12 else 0.0
-                    )
-                    accuracy_drop_significant = relative_drop >= acc_drop_threshold
-                else:
-                    reference = 0.0
-                    relative_drop = 0.0
-                    accuracy_drop_significant = False
+                # This value is the weighted mean of the relative drops
+                # reported by clients. It is diagnostic only; the decision is
+                # based on per-client significant-drop consensus below.
+                relative_drop = float(np.clip(self.global_accuracy_drop[me], 0.0, 1.0))
+                self.global_accuracy_drop_significant[me] = bool(
+                    relative_drop >= min_relative_drop
+                )
+                self.global_accuracy_reference[me] = 0.0  # no server-side baseline
+                self.global_accuracy_cusum[me] = 0.0       # no server-side CUSUM
+                self.global_accuracy_persistent_drops[me] = 0
+                self.global_accuracy_cusum_triggered[me] = False
 
-                self.combined_accuracy_reference[me] = reference
-                self.combined_accuracy_drop[me] = relative_drop
-                self.combined_accuracy_drop_significant[me] = accuracy_drop_significant
-
-                label_shift_history_ready = len(previous_ls_history) >= history_window
+                concept_drift_detected = bool(
+                    client_consensus
+                    and self.global_accuracy_client_consensus_persistence[me] >= 2
+                )
 
                 if self.shift_type == "LABEL_SHIFT":
-                    shift_detection_ready = label_shift_history_ready
-                    detected = bool(shift_detection_ready and ls_significant)
-                else:
-                    shift_detection_ready = accuracy_history_ready
+                    detected = bool(ls_history_ready and ls_significant)
+                elif self.shift_type == "CONCEPT_DRIFT":
+                    detected = concept_drift_detected
+                elif self.shift_type == "COMBINED_SHIFT":
                     detected = bool(
-                        shift_detection_ready
-                        and (ls_significant or accuracy_drop_significant)
+                        (ls_history_ready and ls_significant)
+                        or concept_drift_detected
                     )
+                else:
+                    detected = False
 
                 self.data_shift_detected[me] = detected
                 self.data_shift_score[me] = max(current_ls, relative_drop)
 
-
+                current_accuracy = self.global_train_accuracy.get(me)
+                accuracy_text = (
+                    f"{float(current_accuracy):.3f}"
+                    if current_accuracy is not None else "n/a"
+                )
                 print(
+                    f"\n----------------------------------\n"
                     f"[DATA SHIFT DETECTOR] round={server_round} model={me} "
-                    f"evidence_round={server_round} "
-                    f"shift_type={self.shift_type} "
-                    f"LS={current_ls:.6f} LS_threshold={ls_threshold:.6f} "
-                    f"LS_significant={ls_significant} "
-                    f"combined_train_accuracy={current_accuracy:.6f} "
-                    f"accuracy_reference={reference:.6f} "
-                    f"relative_accuracy_drop={relative_drop:.6f} "
-                    f"drop_threshold={acc_drop_threshold:.6f} "
-                    f"accuracy_drop_significant={accuracy_drop_significant} "
-                    f"ls_history_size={len(ls_history)} "
-                    f"label_shift_history_ready={label_shift_history_ready} "
-                    f"accuracy_history_size={len(history)} "
-                    f"accuracy_history_ready={accuracy_history_ready} "
+                    f"shift_type={self.shift_type} LS={current_ls:.3f} "
+                    f"LS_threshold={ls_threshold:.3f} LS_significant={ls_significant} "
+                    f"LS_history_size={len(ls_history)} "
+                    f"LS_history_ready={ls_history_ready} "
+                    f"\ncombined_train_accuracy_diagnostic={accuracy_text} "
+                    f"client_mean_relative_drop={relative_drop:.3f} "
+                    f"client_drop_count={client_drop_count} "
+                    f"eligible_client_count={eligible_client_count} "
+                    f"client_drop_ratio={client_drop_ratio:.3f} "
+                    f"client_consensus={client_consensus} "
+                    f"consensus_persistence={self.global_accuracy_client_consensus_persistence[me]} "
+                    f"concept_drift_detected={concept_drift_detected} "
                     f"state={'DATA_SHIFT' if detected else 'NO_SHIFT'}"
                 )
-
         except Exception as e:
             print("_detect_data_shift_after_fit error")
             print("Error on line {} {} {}".format(
@@ -1565,7 +1779,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 self.last_drift_round[me] = t
 
                 # --------------------------------------------------------
-                # RESET THE COMBINED-ACCURACY HISTORY AT THE NEW SHIFT
+                # RESET THE GLOBAL-MODEL ACCURACY HISTORY AT THE NEW SHIFT
                 # EVENT.
                 #
                 # The current round must NOT be discarded: its accuracy
@@ -1578,14 +1792,31 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 # affect the current detection decision.
                 # --------------------------------------------------------
                 current_accuracy_for_new_regime = float(
-                    np.clip(self.combined_train_accuracy[me], 0.0, 1.0)
+                    np.clip(self.global_train_accuracy[me], 0.0, 1.0)
                 )
-                self.combined_train_accuracy_history[me] = [
+                self.global_train_accuracy_history[me] = [
                     current_accuracy_for_new_regime
                 ]
 
+                # Start a fresh adaptive detector for the new regime.
+                # The detection decision has already been made using the
+                # pre-shift baseline, so no old-regime CUSUM evidence should
+                # leak into the next detection episode.
+                self.global_accuracy_ewma[me] = current_accuracy_for_new_regime
+                self.global_accuracy_cusum[me] = 0.0
+                self.global_accuracy_persistent_drops[me] = 0
+                self.global_accuracy_cusum_triggered[me] = False
+                self.global_accuracy_client_drop_ratio[me] = 0.0
+                self.global_accuracy_client_drop_count[me] = 0
+                self.global_accuracy_client_count[me] = 0
+                self.global_accuracy_client_history[me] = {}
+                self.global_accuracy_client_consensus_persistence[me] = 0
+                self.global_accuracy_reference[me] = current_accuracy_for_new_regime
+                self.global_accuracy_drop[me] = 0.0
+                self.global_accuracy_drop_significant[me] = False
+
                 # LABEL_SHIFT has its own temporal warm-up because the
-                # combined-model test is disabled for label-shift experiments.
+                # global-model test is disabled for label-shift experiments.
                 # Preserve the current LS observation as the first sample of
                 # the new regime and require a full subsequent LS window
                 # before another detection can be confirmed.
@@ -1596,7 +1827,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                     f"[DATA SHIFT ACCURACY HISTORY RESET] "
                     f"round={t} model={me} "
                     f"preserved_current_accuracy={current_accuracy_for_new_regime:.6f} "
-                    f"history_size={len(self.combined_train_accuracy_history[me])}"
+                    f"history_size={len(self.global_train_accuracy_history[me])}"
                 )
                 print(
                     f"[DATA SHIFT LS HISTORY RESET] "
@@ -2138,7 +2369,7 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             results,
             failures,
     ):
-        """Aggregate evaluation metrics and combined-model train accuracy."""
+        """Aggregate evaluation metrics and global-model train accuracy."""
         try:
             results_mefl = {me: [] for me in range(self.ME)}
             for loss, num_examples, result in results:
@@ -2193,9 +2424,10 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 self.lw_by_round[me][server_round] = list(self.lw[me])
 
                 metrics_aggregated_mefl[me] = {
-                    "combined_train_accuracy": self.combined_train_accuracy[me] if self.combined_train_accuracy_history[me] else None,
+                    "global_train_accuracy": self.global_train_accuracy[me] if self.global_train_accuracy_history[me] else None,
                     "train_accuracy": train_acc,
                     "Round (t)": server_round,
+                    "Round time (s)": time.time() - self.round_start_time,
                 }
 
                 if self.evaluate_metrics_aggregation_fn:
@@ -2308,11 +2540,18 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
             # Combined-model accuracy evidence
             # ============================================================
             # Keep ONE canonical combined-train-accuracy field.
-            metrics_aggregated[me]["combined_train_accuracy"] = self.combined_train_accuracy[me]
-            metrics_aggregated[me]["Combined accuracy reference"] = self.combined_accuracy_reference[me]
-            metrics_aggregated[me]["Combined accuracy drop"] = self.combined_accuracy_drop[me]
-            metrics_aggregated[me]["Combined accuracy drop significant"] = self.combined_accuracy_drop_significant[me]
-            metrics_aggregated[me]["Combined accuracy history size"] = len(self.combined_train_accuracy_history[me])
+            metrics_aggregated[me]["global_train_accuracy"] = self.global_train_accuracy[me]
+            metrics_aggregated[me]["Global accuracy reference"] = self.global_accuracy_reference[me]
+            metrics_aggregated[me]["Global accuracy drop"] = self.global_accuracy_drop[me]
+            metrics_aggregated[me]["Global accuracy drop significant"] = self.global_accuracy_drop_significant[me]
+            metrics_aggregated[me]["Global accuracy history size"] = len(self.global_train_accuracy_history[me])
+            metrics_aggregated[me]["Global accuracy EWMA"] = self.global_accuracy_ewma[me]
+            metrics_aggregated[me]["Global accuracy CUSUM"] = self.global_accuracy_cusum[me]
+            metrics_aggregated[me]["Global accuracy persistent drops"] = self.global_accuracy_persistent_drops[me]
+            metrics_aggregated[me]["Global accuracy CUSUM triggered"] = self.global_accuracy_cusum_triggered[me]
+            metrics_aggregated[me]["Global accuracy client drop ratio"] = self.global_accuracy_client_drop_ratio[me]
+            metrics_aggregated[me]["Global accuracy client drop count"] = self.global_accuracy_client_drop_count[me]
+            metrics_aggregated[me]["Global accuracy client count"] = self.global_accuracy_client_count[me]
 
             # train_accuracy comes from aggregate_fit() and is indexed by
             # round, so skipped-training rounds remain empty.
@@ -2320,6 +2559,13 @@ class MultiFedAvgWithMultiFedPredict(MultiFedAvgWithMultiFedPredictv0):
                 server_round
             )
             metrics_aggregated[me]["train_accuracy"] = round_train_accuracy
+
+            # Mean accuracy of the previous combined model on selected
+            # clients' current local training data, for this exact round.
+            # None is written when no eligible client supplied a value.
+            metrics_aggregated[me]["Combined model mean train accuracy"] = (
+                self.combined_train_accuracy_by_round[me].get(server_round)
+            )
 
             # ============================================================
             # Data-shift information
