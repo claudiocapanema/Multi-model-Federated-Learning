@@ -36,6 +36,12 @@ class ClientFedDCA(MultiFedAvgClient):
         self.feddca_feature_module = getattr(
             args, "feddca_feature_module", None
         )
+        # Gradient-stability controls for local FedDCA training.
+        # The clipping is intentionally conservative and only affects the
+        # optimizer step; the FedDCA profiling/detection logic is unchanged.
+        self.feddca_grad_clip_norm = float(
+            getattr(args, "feddca_grad_clip_norm", 1.0)
+        )
 
     # ------------------------------------------------------------------
     # Input / output helpers
@@ -199,6 +205,41 @@ class ClientFedDCA(MultiFedAvgClient):
             features = features[0]
         return logits, features
 
+    def _check_finite_model_parameters(self, model, stage, me, t):
+        """Raise with the exact parameter name if model weights are non-finite."""
+        for name, param in model.named_parameters():
+            if not torch.isfinite(param).all():
+                finite = param.detach()[torch.isfinite(param.detach())]
+                if finite.numel():
+                    min_value = float(finite.min().cpu())
+                    max_value = float(finite.max().cpu())
+                else:
+                    min_value = float("nan")
+                    max_value = float("nan")
+                raise RuntimeError(
+                    f"Client {self.client_id}, model {me}, round {t}: "
+                    f"non-finite parameter at {stage}: {name} "
+                    f"shape={tuple(param.shape)} min_finite={min_value} "
+                    f"max_finite={max_value}"
+                )
+
+    def _check_finite_tensor(self, tensor, name, me, t):
+        """Raise with tensor statistics when an input/output is non-finite."""
+        if not torch.isfinite(tensor).all():
+            finite = tensor.detach()[torch.isfinite(tensor.detach())]
+            if finite.numel():
+                min_value = float(finite.min().cpu())
+                max_value = float(finite.max().cpu())
+            else:
+                min_value = float("nan")
+                max_value = float("nan")
+            raise RuntimeError(
+                f"Client {self.client_id}, model {me}, round {t}: "
+                f"non-finite {name} detected; shape={tuple(tensor.shape)} "
+                f"dtype={tensor.dtype} min_finite={min_value} "
+                f"max_finite={max_value}"
+            )
+
     # ------------------------------------------------------------------
     # FedDCA Label Profile
     # ------------------------------------------------------------------
@@ -226,14 +267,25 @@ class ClientFedDCA(MultiFedAvgClient):
         candidates = {label: [] for label in range(n_classes)}
         loader = self.trainloader[me]
 
+        # The profile is built after local training. Check the model state
+        # before the first forward pass so that divergence is attributed to
+        # the weights rather than being reported later by SciPy.
+        self._check_finite_model_parameters(model, "before_label_profile", me, self.lt[me])
+
         for batch in loader:
             x, y = self._unpack_batch(batch, self.args.dataset[me])
             x = x.to(self.device)
             y = y.to(self.device).long()
 
+            self._check_finite_tensor(x, "input", me, self.lt[me])
+            self._check_finite_tensor(y, "labels", me, self.lt[me])
+
             logits, features = self._forward_with_features(model, x)
+            self._check_finite_tensor(logits, "logits", me, self.lt[me])
             features = self._normalize_features(features)
+            self._check_finite_tensor(features, "features", me, self.lt[me])
             per_sample_loss = F.cross_entropy(logits, y, reduction="none")
+            self._check_finite_tensor(per_sample_loss, "per-sample loss", me, self.lt[me])
 
             for label in torch.unique(y).tolist():
                 mask = y == int(label)
@@ -324,10 +376,172 @@ class ClientFedDCA(MultiFedAvgClient):
     # ------------------------------------------------------------------
     # Local training
     # ------------------------------------------------------------------
+    def _train_with_diagnostics(self, me, t):
+        """Train locally while identifying the first source of NaNs/Infs.
+
+        This replaces the generic ``models_utils.train`` call only for the
+        FedDCA client so that we can inspect every batch before backward,
+        every gradient after backward, and every parameter immediately after
+        ``optimizer.step()``. Gradient clipping is applied before the step
+        to prevent exploding recurrent-model gradients from corrupting the
+        GRU parameters.
+        """
+        model = self.model[me]
+        trainloader = self.trainloader[me]
+        valloader = self.valloader[me]
+        optimizer = self.optimizer[me]
+        dataset_name = self.args.dataset[me]
+        n_classes = self.n_classes[me]
+
+        dataset_key = {
+            "CIFAR10": "img", "MNIST": "image", "EMNIST": "image",
+            "GTSRB": "image", "ImageNet": "image", "ImageNet10": "image",
+            "Gowalla": "sequence", "WISDM-W": "sequence",
+            "WISDM-P": "sequence", "Foursquare": "sequence",
+            "wikitext": "text",
+        }.get(dataset_name)
+        if dataset_key is None:
+            raise KeyError(f"Unknown dataset input key for {dataset_name!r}")
+
+        criterion = torch.nn.CrossEntropyLoss().to(self.device)
+        model.to(self.device)
+        model.train()
+
+        loss_total = 0.0
+        correct = 0
+        total = 0
+        y_true = []
+        y_prob = []
+
+        for epoch in range(self.local_epochs):
+            for batch_idx, batch in enumerate(trainloader):
+                x = batch[dataset_key].to(self.device)
+                labels = batch["label"].to(self.device).long()
+                self._check_finite_tensor(x, f"input (epoch={epoch}, batch={batch_idx})", me, t)
+                self._check_finite_tensor(labels, f"labels (epoch={epoch}, batch={batch_idx})", me, t)
+
+                optimizer.zero_grad(set_to_none=True)
+
+                outputs = self._as_logits(model(x))
+                self._check_finite_tensor(
+                    outputs, f"logits before loss (epoch={epoch}, batch={batch_idx})", me, t
+                )
+
+                loss = criterion(outputs, labels)
+                if not torch.isfinite(loss):
+                    raise RuntimeError(
+                        f"Client {self.client_id}, model {me}, round {t}: "
+                        f"non-finite loss before backward at epoch={epoch}, batch={batch_idx}: {loss.item()}"
+                    )
+
+                loss.backward()
+
+                # Inspect gradients before clipping. Compute the global
+                # gradient norm in float64 to avoid float32 overflow when
+                # combining many large but individually finite gradients.
+                # We then apply clipping manually using the same global norm,
+                # which avoids a second potentially overflowing norm
+                # calculation inside torch.nn.utils.clip_grad_norm_.
+                grad_norms = []
+                grad_params = []
+                for name, param in model.named_parameters():
+                    if param.grad is None:
+                        continue
+                    if not torch.isfinite(param.grad).all():
+                        raise RuntimeError(
+                            f"Client {self.client_id}, model {me}, round {t}: "
+                            f"non-finite gradient at epoch={epoch}, batch={batch_idx}: {name}"
+                        )
+                    grad_params.append(param)
+                    grad_norms.append(param.grad.detach().double().norm(2))
+
+                if grad_norms:
+                    total_grad_norm_tensor = torch.linalg.vector_norm(
+                        torch.stack(grad_norms), ord=2
+                    )
+                    total_grad_norm = float(total_grad_norm_tensor.cpu())
+
+                    if self.feddca_grad_clip_norm > 0:
+                        clip_norm = float(self.feddca_grad_clip_norm)
+                        if np.isfinite(total_grad_norm) and total_grad_norm > clip_norm:
+                            scale = clip_norm / (total_grad_norm + 1e-12)
+                        elif not np.isfinite(total_grad_norm):
+                            # This is only possible for an extreme norm beyond
+                            # float64 range. All individual gradients were
+                            # already verified finite, so zeroing this update
+                            # is safer than allowing an unstable optimizer step.
+                            scale = 0.0
+                        else:
+                            scale = 1.0
+
+                        if scale < 1.0:
+                            for param in grad_params:
+                                param.grad.mul_(scale)
+                else:
+                    total_grad_norm = 0.0
+
+                optimizer.step()
+
+                # This pinpoints the exact batch whose optimizer step
+                # corrupted the parameters.
+                try:
+                    self._check_finite_model_parameters(
+                        model,
+                        f"after_optimizer_step epoch={epoch} batch={batch_idx} "
+                        f"grad_norm={total_grad_norm:.6g}",
+                        me,
+                        t,
+                    )
+                except RuntimeError:
+                    raise
+
+                batch_size = labels.shape[0]
+                loss_total += float(loss.detach().cpu()) * batch_size
+                total += batch_size
+                y_true.append(labels.detach().cpu().numpy())
+                y_prob.append(outputs.detach().cpu().numpy())
+                correct += int((torch.argmax(outputs.detach(), dim=1) == labels).sum().item())
+
+        if total == 0:
+            raise RuntimeError(
+                f"Client {self.client_id}, model {me}, round {t}: empty training loader."
+            )
+
+        y_true_np = np.concatenate(y_true, axis=0)
+        y_prob_np = np.concatenate(y_prob, axis=0)
+        accuracy = correct / total
+
+        # Keep the same metric shape expected by the existing server.
+        from sklearn import metrics as sk_metrics
+        try:
+            balanced_accuracy = float(
+                sk_metrics.balanced_accuracy_score(y_true_np, y_prob_np.argmax(axis=1))
+            )
+        except Exception:
+            balanced_accuracy = float("nan")
+
+        model.eval()
+        val_loss, test_metrics = test(
+            model, valloader, self.device, self.client_id, t, dataset_name, n_classes
+        )
+
+        return {
+            "val_loss": val_loss,
+            "val_accuracy": test_metrics["Accuracy"],
+            "val_balanced_accuracy": test_metrics["Balanced accuracy"],
+            "train_loss": loss_total / total,
+            "train_accuracy": accuracy,
+            "train_balanced_accuracy": balanced_accuracy,
+            "Round (t)": t,
+        }
+
     def fit(self, me, t, global_model):
         try:
             self.lt[me] = t
             set_weights(self.model[me], global_model)
+            self._check_finite_model_parameters(
+                self.model[me], "after_set_weights", me, t
+            )
 
             if t > 1:
                 self.update_local_train_data(t, me)
@@ -336,18 +550,11 @@ class ClientFedDCA(MultiFedAvgClient):
                 dataset_name=self.args.dataset[me], me=me
             )
 
-            results = train(
-                model=self.model[me],
-                trainloader=self.trainloader[me],
-                valloader=self.valloader[me],
-                optimizer=self.optimizer[me],
-                epochs=self.local_epochs,
-                learning_rate=self.lr,
-                device=self.device,
-                client_id=self.client_id,
-                t=t,
-                dataset_name=self.args.dataset[me],
-                n_classes=self.n_classes[me],
+            results = self._train_with_diagnostics(me, t)
+
+            # Detect divergence immediately after local training.
+            self._check_finite_model_parameters(
+                self.model[me], "after_local_training", me, t
             )
 
             # FedDCA profiling happens AFTER local training.
