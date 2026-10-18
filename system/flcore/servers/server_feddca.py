@@ -1407,13 +1407,26 @@ class FedDCA(MultiFedAvg):
         if not members:
             return current_support
 
+        # Use float64 for the Wasserstein matching computation.  The
+        # Label Profiles are stored as float32, but squaring feature
+        # differences in float32 can overflow and create Inf values, which
+        # scipy.optimize.linear_sum_assignment rejects.
         support = np.asarray(
             current_support,
-            dtype=np.float32
+            dtype=np.float64
         )
 
         if support.ndim == 1:
             support = support[None, :]
+
+        if support.size == 0:
+            return support.astype(np.float32)
+
+        if not np.isfinite(support).all():
+            raise ValueError(
+                "FedDCA: barycenter support contains NaN or Inf. "
+                "Check the client Label Profiles."
+            )
 
         accum = np.zeros_like(
             support,
@@ -1426,7 +1439,7 @@ class FedDCA(MultiFedAvg):
 
             points = np.asarray(
                 points,
-                dtype=np.float32
+                dtype=np.float64
             )
 
             if points.ndim == 1:
@@ -1435,13 +1448,36 @@ class FedDCA(MultiFedAvg):
             if len(points) == 0:
                 continue
 
-            cost = np.sum(
-                (
-                        support[:, None, :]
-                        - points[None, :, :]
-                ) ** 2,
-                axis=2
+            if not np.isfinite(points).all():
+                raise ValueError(
+                    "FedDCA: client Label Profile contains NaN or Inf "
+                    "during barycenter computation."
+                )
+
+            if points.shape[1] != support.shape[1]:
+                raise ValueError(
+                    "FedDCA: incompatible Label Profile dimensions in "
+                    f"barycenter computation: support={support.shape}, "
+                    f"points={points.shape}."
+                )
+
+            diff = (
+                support[:, None, :]
+                - points[None, :, :]
             )
+
+            cost = np.sum(
+                diff ** 2,
+                axis=2,
+                dtype=np.float64
+            )
+
+            if not np.isfinite(cost).all():
+                raise ValueError(
+                    "FedDCA: Wasserstein matching cost contains NaN or Inf. "
+                    "The input Label Profiles are finite, so this likely "
+                    "indicates numerical overflow in the distance computation."
+                )
 
             rows, cols = linear_sum_assignment(
                 cost

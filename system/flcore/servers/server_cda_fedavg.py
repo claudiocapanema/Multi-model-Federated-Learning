@@ -28,6 +28,7 @@ class CDAFedAvg(MultiFedAvg):
             "Balanced accuracy",
             "Loss",
             "Round (t)",
+            "Round time (s)",
             "Fraction fit",
             "# training clients",
             "training clients and models",
@@ -37,7 +38,7 @@ class CDAFedAvg(MultiFedAvg):
             "Drift rate",
             "Data shift"
         ]
-        self.test_metrics_names = ["Accuracy", "Balanced accuracy", "Loss", "Round (t)", "Fraction fit",
+        self.test_metrics_names = ["Accuracy", "Balanced accuracy", "Loss", "Round (t)", "Round time (s)", "Fraction fit",
                                    "# training clients", "training clients and models", "Model size", "Fold ID", "Alpha", "Drift clients", "Drift rate", "Data shift", "Ground truth shift"]
         self.results_test_metrics = {me: {metric: [] for metric in self.test_metrics_names} for me in range(self.ME)}
 
@@ -696,8 +697,16 @@ class CDAFedAvg(MultiFedAvg):
                 else 0
             )
 
-            for metric in metrics_aggregated[me]:
-                self.results_test_metrics[me][metric].append(metrics_aggregated[me][metric])
+            # Store only metrics that are part of the configured CSV schema.
+            # This prevents a KeyError when the aggregation function returns
+            # additional metrics (e.g., "Round time (s)").
+            for metric in self.test_metrics_names:
+                if metric in metrics_aggregated[me]:
+                    self.results_test_metrics[me][metric].append(
+                        metrics_aggregated[me][metric]
+                    )
+                else:
+                    self.results_test_metrics[me][metric].append(0)
         except Exception as e:
             print("add_metrics error")
             print("""Error on line {} {} {}""".format(sys.exc_info()[-1].tb_lineno, type(e).__name__, e))

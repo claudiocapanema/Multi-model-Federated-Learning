@@ -30,19 +30,12 @@ class FedConD(MultiFedAvg):
             self.detector = "FedConD"
 
             self.shift_type = (
-                "Combined"
-                if "combined_shift" in args.experiment_id
-                else (
-                    "Label"
-                    if "label_shift" in args.experiment_id
-                    else "Concept"
-                )
+                "Label" if "label_shift" in args.experiment_id else "Concept"
             )
             self.shift_configuration = (
                 args.experiment_id
                 .replace("label_shift#", "")
                 .replace("concept_drift#", "")
-                .replace("combined_shift#", "")
                 .replace("_sudden", "")
             )
 
@@ -214,9 +207,21 @@ class FedConD(MultiFedAvg):
                             ["data_shift_rounds"]
                         )
 
-            self.test_metrics_names = ["Accuracy", "Balanced accuracy", "Loss", "Round (t)", "Fraction fit",
+            self.test_metrics_names = ["Accuracy", "Balanced accuracy", "Loss", "Round (t)", "Round time (s)", "Fraction fit",
                                        "# training clients", "training clients and models", "Model size", "Alpha",
                                        "Fold ID", "Data shift", "Drift clients", "Drift rate", "Ground truth shift"]
+
+            # ========================================================
+            # IMPORTANT:
+            #
+            # Initialize the FedConD detection CSV files here.
+            #
+            # This guarantees that the header is written BEFORE
+            # _save_shift_detection_metrics() and
+            # _save_shift_detection_curve() append rows.
+            # ========================================================
+
+            self._init_shift_detection_files()
 
         except Exception as e:
 
