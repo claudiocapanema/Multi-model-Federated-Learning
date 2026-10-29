@@ -2524,7 +2524,6 @@ def table_detection_quality_by_shift_type(
                     ):
 
                         row[metric] = "--"
-                        row[f"n_{metric}"] = "--"
                         continue
 
                     mean_value = result["mean"]
@@ -2573,10 +2572,6 @@ def table_detection_quality_by_shift_type(
                         text = f"\\textbf{{{text}}}"
 
                     row[metric] = text
-                    row[f"n_{metric}"] = str(result["n"])
-
-                    if metric == "Average Detection Delay":
-                        row["MTD n"] = str(result["n"])
 
                 table_rows.append(row)
 
@@ -2589,7 +2584,7 @@ def table_detection_quality_by_shift_type(
             "Shift",
             "Shift Type",
             "Solution",
-        ] + metrics + [f"n_{metric}" for metric in metrics],
+        ] + metrics,
     )
 
     df_table = df_table.rename(
@@ -2605,10 +2600,6 @@ def table_detection_quality_by_shift_type(
 
             "False Alarm Rate":
                 "FAR $\\downarrow$",
-            "n_Episode F1": "$n_{\\mathrm{F1}}$",
-            "n_Detection Rate": "$n_{\\mathrm{DR}}$",
-            "n_False Alarm Rate": "$n_{\\mathrm{FAR}}$",
-            "n_Average Detection Delay": "$n_{\\mathrm{MTD}}$",
         }
     )
 
@@ -2640,13 +2631,12 @@ def table_detection_quality_by_shift_type(
             "reported as mean $\\pm$ a conservative 95\\% confidence-interval margin. "
             "For DR, the margin is derived from the Wilson interval; for Episode "
             "F1, from a percentile bootstrap over experimental units; for FAR "
-            "and MTD, from the Student-t interval. The n columns report the "
-            "number of experimental units contributing to each metric."
+            "and MTD, from the Student-t interval."
         ),
         label="tab:overall_detection_quality",
         column_format=(
             "lll"
-            + "c" * (2 * len(metrics))
+            + "c" * len(metrics)
         ),
     )
 
@@ -2727,8 +2717,8 @@ def table_detection_quality_by_shift_type(
             and previous_temporal == "Sudden"
             and active_shift == previous_shift
         ):
-            # Columns 2--11 correspond to Shift Type through the n columns.
-            processed_lines.append("\\cline{2-11}")
+            # Columns 2--7 correspond to Shift Type through the four metrics.
+            processed_lines.append("\\cline{2-7}")
 
         processed_lines.append(line)
 
@@ -2971,7 +2961,6 @@ def table_detection_quality_by_shift_type(
                 or pd.isna(result["mean"])
             ):
                 output_row[metric] = "--"
-                output_row[f"n_{metric}"] = "--"
                 continue
 
             mean_value = result["mean"]
@@ -3027,13 +3016,12 @@ def table_detection_quality_by_shift_type(
                 text = f"\\textbf{{{text}}}"
 
             output_row[metric] = text
-            output_row[f"n_{metric}"] = str(result["n"])
 
         overall_table_rows.append(output_row)
 
     df_overall_table = pd.DataFrame(
         overall_table_rows,
-        columns=["Solution"] + metrics + [f"n_{metric}" for metric in metrics],
+        columns=["Solution"] + metrics,
     )
 
     df_overall_table = df_overall_table.rename(
@@ -3049,10 +3037,6 @@ def table_detection_quality_by_shift_type(
 
             "False Alarm Rate":
                 "FAR $\\downarrow$",
-            "n_Episode F1": "$n_{\\mathrm{F1}}$",
-            "n_Detection Rate": "$n_{\\mathrm{DR}}$",
-            "n_False Alarm Rate": "$n_{\\mathrm{FAR}}$",
-            "n_Average Detection Delay": "$n_{\\mathrm{MTD}}$",
         }
     )
 
@@ -3073,13 +3057,12 @@ def table_detection_quality_by_shift_type(
             "contributes equally. Results are reported as mean "
             "$\\pm$ a conservative 95\\% confidence-interval margin. DR uses "
             "a Wilson interval, Episode F1 uses a percentile bootstrap, and "
-            "FAR/MTD use Student-t intervals. The n columns report the number "
-            "of contributing experimental units."
+            "FAR/MTD use Student-t intervals."
         ),
         label="tab:overall_detection_quality_average",
         column_format=(
             "l"
-            + "c" * (2 * len(metrics))
+            + "c" * len(metrics)
         ),
     )
 

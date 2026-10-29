@@ -1257,138 +1257,72 @@ def calculate_detection_metric_values(
         dtype=float
     )
 
-def mean_ci(
-    values,
-    ci=0.95,
-    bounded=False
-):
+def mean_ci(values, ci=0.95, bounded=False, metric=None):
     """
-    Calcula a média e a margem do intervalo de confiança.
+    Retorna média e margem de IC de 95% (ou nível indicado).
 
-    Parameters
-    ----------
-    values : array-like
-        Valores individuais da métrica.
+    - Detection Rate: IC de Wilson para proporção binomial. Como as tabelas
+      existentes usam média ± margem simétrica, usa-se a maior distância
+      entre a média e os limites Wilson (envelope conservador).
+    - Episode F1: bootstrap percentil por unidade experimental; a margem
+      simétrica é o maior afastamento entre a média e os limites bootstrap.
+    - FAR e MTD: IC t de Student sem truncamento. FAR é uma taxa de alarmes
+      por rodada estável e pode exceder 1; portanto, não é limitada a [0, 1].
+    - Com n=1, a média é apresentada sem IC (margem NaN), evitando sugerir
+      precisão estatística a partir de uma única unidade experimental.
 
-    ci : float
-        Nível de confiança.
-
-    bounded : bool
-        Mantido por compatibilidade. O IC t não é truncado, mesmo
-        para métricas bounded ([0, 1]).
-
-    Returns
-    -------
-    mean : float
-        Média.
-
-    margin : float
-        Margem do intervalo de confiança.
-
-    A tabela apresenta:
-
-        mean ± margin
+    `bounded` é mantido apenas para compatibilidade com chamadas antigas.
     """
-
-    # ============================================================
-    # CONVERTER PARA SERIES
-    # ============================================================
-
-    values = pd.Series(
-        values,
-        dtype="float64"
-    )
-
-    # ============================================================
-    # REMOVER VALORES INVÁLIDOS
-    # ============================================================
-
-    values = pd.to_numeric(
-        values,
-        errors="coerce"
-    ).dropna()
-
-    values = values.to_numpy(
-        dtype=float
-    )
-
-    # ============================================================
-    # SEM DADOS
-    # ============================================================
-
-    if len(values) == 0:
+    values = pd.to_numeric(pd.Series(values), errors="coerce").dropna().to_numpy(dtype=float)
+    n = len(values)
+    if n == 0:
         return np.nan, np.nan
 
-    # ============================================================
-    # MÉDIA
-    # ============================================================
+    mean = float(np.mean(values))
+    if n == 1:
+        return round(mean, 2), np.nan
 
-    mean = np.mean(
-        values
-    )
+    alpha = 1.0 - ci
 
-    # ============================================================
-    # UMA OBSERVAÇÃO
-    # ============================================================
-
-    if len(values) == 1:
-
-        return (
-            round(mean, 2),
-            0.00
+    if metric == "Detection Rate":
+        # Wilson score interval for a binomial proportion.
+        successes = int(np.sum(np.isclose(values, 1.0)))
+        p_hat = successes / n
+        z = float(st.norm.ppf(1.0 - alpha / 2.0))
+        denom = 1.0 + z**2 / n
+        center = (p_hat + z**2 / (2.0 * n)) / denom
+        half = (
+            z * np.sqrt((p_hat * (1.0 - p_hat) / n) + z**2 / (4.0 * n**2))
+            / denom
         )
+        lower, upper = max(0.0, center - half), min(1.0, center + half)
+        margin = max(mean - lower, upper - mean)
 
-    # ============================================================
-    # TODOS OS VALORES IGUAIS
-    # ============================================================
-
-    if np.allclose(
-        values,
-        values[0]
-    ):
-
-        return (
-            round(mean, 2),
-            0.00
+    elif metric == "Episode F1":
+        # Percentile bootstrap over experimental units. A fixed seed makes
+        # the generated tables reproducible. Keep the resampling unit at the
+        # already-aggregated Solution × Dataset × Experiment × Fold level.
+        rng = np.random.default_rng(20261017)
+        bootstrap_means = np.mean(
+            rng.choice(values, size=(10000, n), replace=True), axis=1
         )
+        lower, upper = np.quantile(
+            bootstrap_means, [alpha / 2.0, 1.0 - alpha / 2.0]
+        )
+        margin = max(mean - float(lower), float(upper) - mean)
 
-    # ============================================================
-    # STANDARD ERROR
-    # ============================================================
+    else:
+        # Student-t interval for unbounded continuous/rate metrics.
+        sem = float(st.sem(values))
+        if not np.isfinite(sem):
+            return round(mean, 2), np.nan
+        lower, upper = st.t.interval(
+            confidence=ci, df=n - 1, loc=mean, scale=sem
+        )
+        margin = max(mean - float(lower), float(upper) - mean)
 
-    sem = st.sem(
-        values
-    )
+    return round(mean, 2), round(float(margin), 2)
 
-    # ============================================================
-    # CONFIDENCE INTERVAL
-    # ============================================================
-
-    lower, upper = st.t.interval(
-        confidence=ci,
-        df=len(values) - 1,
-        loc=mean,
-        scale=sem
-    )
-
-    # ============================================================
-    # IC REPRESENTADO COMO MARGEM
-    # ============================================================
-    #
-    # Para métricas bounded ([0, 1]), o IC t é mantido sem
-    # truncamento. Isso evita transformar um intervalo truncado
-    # em uma margem simétrica que não representa o IC real.
-    # ============================================================
-
-    margin = max(
-        mean - lower,
-        upper - mean
-    )
-
-    return (
-        round(mean, 2),
-        round(margin, 2)
-    )
 
 def normalize_configuration_for_table(configuration):
     if pd.isna(configuration):
@@ -1801,7 +1735,7 @@ def calculate_detection_metric(
     return mean_ci(
         values,
         ci=ci,
-        bounded=bounded
+        metric=metric,
     )
 
 def _extract_detection_rounds_from_unit(df_experiment):
@@ -2331,10 +2265,7 @@ def table_detection_quality_by_shift_type(
                 mean_value, ci_value = mean_ci(
                     values,
                     ci=ci,
-                    bounded=metric in {
-                        "Detection Rate",
-                        "Episode F1",
-                                },
+                    metric=metric,
                 )
                 aggregated[(shift_type, temporal_type, window)][solution][metric] = {
                     "mean": mean_value,
@@ -2596,8 +2527,7 @@ def table_detection_quality_by_shift_type(
                     ):
 
                         row[metric] = "--"
-                        if metric == "Average Detection Delay":
-                            row["MTD n"] = "--"
+                        row[f"n_{metric}"] = "--"
                         continue
 
                     mean_value = result["mean"]
@@ -2646,9 +2576,9 @@ def table_detection_quality_by_shift_type(
                         text = f"\\textbf{{{text}}}"
 
                     row[metric] = text
+                    row[f"n_{metric}"] = str(result["n"])
 
                     if metric == "Average Detection Delay":
-
                         row["MTD n"] = str(result["n"])
 
                 table_rows.append(row)
@@ -2663,7 +2593,7 @@ def table_detection_quality_by_shift_type(
             "Shift Type",
             "Transition Window",
             "Solution",
-        ] + metrics + ["MTD n"],
+        ] + metrics + [f"n_{metric}" for metric in metrics],
     )
 
     df_table = df_table.rename(
@@ -2677,11 +2607,12 @@ def table_detection_quality_by_shift_type(
             "Average Detection Delay":
                 "MTD $\\downarrow$",
 
-            "MTD n":
-                "$n_{\\mathrm{MTD}}$",
-
             "False Alarm Rate":
                 "FAR $\\downarrow$",
+            "n_Episode F1": "$n_{\\mathrm{F1}}$",
+            "n_Detection Rate": "$n_{\\mathrm{DR}}$",
+            "n_False Alarm Rate": "$n_{\\mathrm{FAR}}$",
+            "n_Average Detection Delay": "$n_{\\mathrm{MTD}}$",
         }
     )
 
@@ -2716,15 +2647,18 @@ def table_detection_quality_by_shift_type(
             "Fold ID and then aggregated. The best result for each metric "
             "is determined independently within each Shift $\\times$ "
             "Shift Type $\\times$ Transition Window group. Results are "
-            "reported as mean $\\pm$ 95\\% confidence interval."
+            "reported as mean $\\pm$ a conservative 95\\% confidence-interval margin. "
+            "For DR, the margin is derived from the Wilson interval; for Episode "
+            "F1, from a percentile bootstrap over experimental units; for FAR "
+            "and MTD, from the Student-t interval. The n columns report the "
+            "number of experimental units contributing to each metric."
         ),
         label="tab:overall_detection_quality",
         column_format=(
             "ll"
             ">{\\centering\\arraybackslash}p{2cm}"
             "l"
-            "ccccc"
-            "c"
+            + "c" * (2 * len(metrics))
         ),
     )
 
@@ -2951,11 +2885,7 @@ def table_detection_quality_by_shift_type(
             mean_value, ci_value = mean_ci(
                 values,
                 ci=ci,
-                bounded=metric in {
-                    "Detection Rate",
-                    "Episode F1",
-                    "False Alarm Rate",
-                },
+                metric=metric,
             )
 
             row[metric] = {
@@ -3054,6 +2984,7 @@ def table_detection_quality_by_shift_type(
                 or pd.isna(result["mean"])
             ):
                 output_row[metric] = "--"
+                output_row[f"n_{metric}"] = "--"
                 continue
 
             mean_value = result["mean"]
@@ -3109,12 +3040,13 @@ def table_detection_quality_by_shift_type(
                 text = f"\\textbf{{{text}}}"
 
             output_row[metric] = text
+            output_row[f"n_{metric}"] = str(result["n"])
 
         overall_table_rows.append(output_row)
 
     df_overall_table = pd.DataFrame(
         overall_table_rows,
-        columns=["Solution"] + metrics,
+        columns=["Solution"] + metrics + [f"n_{metric}" for metric in metrics],
     )
 
     df_overall_table = df_overall_table.rename(
@@ -3130,6 +3062,10 @@ def table_detection_quality_by_shift_type(
 
             "False Alarm Rate":
                 "FAR $\\downarrow$",
+            "n_Episode F1": "$n_{\\mathrm{F1}}$",
+            "n_Detection Rate": "$n_{\\mathrm{DR}}$",
+            "n_False Alarm Rate": "$n_{\\mathrm{FAR}}$",
+            "n_Average Detection Delay": "$n_{\\mathrm{MTD}}$",
         }
     )
 
@@ -3148,12 +3084,15 @@ def table_detection_quality_by_shift_type(
             "types, transition windows, datasets, experiment "
             "configurations, and folds. Each experimental unit "
             "contributes equally. Results are reported as mean "
-            "$\\pm$ 95\\% confidence interval."
+            "$\\pm$ a conservative 95\\% confidence-interval margin. DR uses "
+            "a Wilson interval, Episode F1 uses a percentile bootstrap, and "
+            "FAR/MTD use Student-t intervals. The n columns report the number "
+            "of contributing experimental units."
         ),
         label="tab:overall_detection_quality_average",
         column_format=(
             "l"
-            + "c" * len(metrics)
+            + "c" * (2 * len(metrics))
         ),
     )
 
@@ -3826,7 +3765,6 @@ def table_accuracy_label_shift_by_dataset(
     df_all,
     write_path,
     solutions,
-    label_config=("0.1", "1.0"),
     gradual_windows=(5, 10),
     ci=0.95,
     accuracy_rounds=None,
@@ -3838,18 +3776,18 @@ def table_accuracy_label_shift_by_dataset(
         ImageNet10
         Foursquare
 
-    Como o experimento atual utiliza uma única configuração de Label Shift
-    (0.1 -> 1.0), cada tabela contém as três configurações temporais:
+    Para cada dataset, todas as transições de alpha presentes nos
+    experimentos de Label Shift são agregadas. A tabela não diferencia
+    as transições de alpha.
 
-        Sudden, 0.1 -> 1.0
-        Gradual (5), 0.1 -> 1.0
-        Gradual (10), 0.1 -> 1.0
+    Cada tabela contém:
+        Sudden
+        Gradual (W=5)
+        Gradual (W=10)
 
-    A organização e o critério estatístico seguem o mesmo padrão das
-    tabelas de Concept Drift: uma linha por solução, resultados como
-    mean +/- 95% CI e negrito somente quando o intervalo de confiança
-    da solução é estritamente separado acima dos intervalos das demais
-    soluções na mesma configuração.
+    Para cada combinação Solution × Dataset × configuração temporal,
+    a média é calculada sobre todas as transições de alpha disponíveis,
+    considerando também os folds e rounds selecionados.
 
     ``accuracy_rounds`` possui a mesma semântica da tabela de Concept
     Drift e afeta somente estas tabelas de acurácia.
@@ -3879,38 +3817,7 @@ def table_accuracy_label_shift_by_dataset(
     Path(write_path).mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------
-    # Current Label Shift configuration
-    # ------------------------------------------------------------
-    alpha_before = float(label_config[0])
-    alpha_after = float(label_config[1])
-    config_id = f"{alpha_before:g}-{alpha_after:g}"
-
-    configurations = [
-        {
-            "temporal": "Sudden",
-            "window": None,
-            "experiment_id": f"label_shift#{alpha_before:.1f}-{alpha_after:.1f}_sudden",
-            "column": rf"Sudden, ${alpha_before:g}\rightarrow {alpha_after:g}$",
-        }
-    ]
-
-    for window in gradual_windows:
-        configurations.append(
-            {
-                "temporal": "Gradual",
-                "window": int(window),
-                "experiment_id": (
-                    f"label_shift#{alpha_before:.1f}-{alpha_after:.1f}_gradual"
-                ),
-                "column": (
-                    rf"Gradual ($W={int(window)}$), "
-                    rf"${alpha_before:g}\rightarrow {alpha_after:g}$"
-                ),
-            }
-        )
-
-    # ------------------------------------------------------------
-    # Restrict to Label Shift and normalize transition windows.
+    # Restrict to Label Shift.
     # ------------------------------------------------------------
     df = df_all.copy()
     df = df[
@@ -3943,6 +3850,21 @@ def table_accuracy_label_shift_by_dataset(
         errors="coerce",
     )
 
+    # Determine the temporal type directly from Experiment ID.
+    exp_lower = df["Experiment ID"].astype(str).str.lower()
+
+    df["_Temporal"] = np.select(
+        [
+            exp_lower.str.endswith("_sudden"),
+            exp_lower.str.endswith("_gradual"),
+        ],
+        [
+            "Sudden",
+            "Gradual",
+        ],
+        default="Unknown",
+    )
+
     table_results = {}
 
     for dataset_name in [
@@ -3965,13 +3887,12 @@ def table_accuracy_label_shift_by_dataset(
         # Resolve selected rounds using the same mechanism as the
         # Concept Drift tables.
         # --------------------------------------------------------
-        def resolve_accuracy_rounds(config):
+        def resolve_accuracy_rounds(temporal, window):
             selection = accuracy_rounds
 
             if isinstance(accuracy_rounds, dict):
                 keys = [
-                    config["column"],
-                    (config["temporal"], config["window"]),
+                    (temporal, window),
                     "default",
                 ]
                 selection = None
@@ -4017,17 +3938,33 @@ def table_accuracy_label_shift_by_dataset(
                 raise ValueError(
                     f"Accuracy rounds must be positive: {sorted(rounds)}"
                 )
+
             return rounds
 
         # --------------------------------------------------------
-        # Calculate mean + CI independently for every:
+        # Configurations shown in the table.
         #
-        # Solution × temporal type × transition window
-        #
-        # There is intentionally no alpha dimension here because the
-        # current Label Shift experiment has only one transition
-        # configuration: 0.1 -> 1.0.
+        # Alpha transitions are deliberately NOT part of the columns.
+        # All label-shift transitions are averaged together inside
+        # each temporal configuration.
         # --------------------------------------------------------
+        configurations = [
+            {
+                "temporal": "Sudden",
+                "window": None,
+                "column": "Sudden",
+            }
+        ]
+
+        for window in gradual_windows:
+            configurations.append(
+                {
+                    "temporal": "Gradual",
+                    "window": int(window),
+                    "column": rf"Gradual ($W={int(window)}$)",
+                }
+            )
+
         raw_results = {
             solution: {}
             for solution in solutions
@@ -4040,22 +3977,29 @@ def table_accuracy_label_shift_by_dataset(
 
             for config in configurations:
                 mask = (
-                    df_solution["Experiment ID"]
-                    .astype(str)
-                    .eq(config["experiment_id"])
+                    df_solution["_Temporal"]
+                    == config["temporal"]
                 )
 
-                if config["window"] is None:
-                    mask &= df_solution["_TransitionWindow"].isna()
-                else:
+                if config["temporal"] == "Gradual":
                     mask &= (
                         df_solution["_TransitionWindow"]
                         == config["window"]
                     )
+                else:
+                    mask &= df_solution["_TransitionWindow"].isna()
 
+                # IMPORTANT:
+                # There is deliberately NO filter on Experiment ID
+                # or alpha transition here. Therefore all transitions
+                # available for this dataset/configuration are included.
                 filtered = df_solution.loc[mask].copy()
 
-                selected_rounds = resolve_accuracy_rounds(config)
+                selected_rounds = resolve_accuracy_rounds(
+                    config["temporal"],
+                    config["window"],
+                )
+
                 if selected_rounds is not None:
                     round_numeric = pd.to_numeric(
                         filtered["Round (t)"],
@@ -4105,9 +4049,6 @@ def table_accuracy_label_shift_by_dataset(
                     f"$\\pm$ {result['ci']:.2f}"
                 )
 
-                # Same statistical criterion used by the Concept Drift
-                # tables: bold only for strict CI separation above all
-                # other solutions in this exact configuration.
                 all_results = [
                     raw_results[other_solution][column]
                     for other_solution in solutions
@@ -4151,15 +4092,16 @@ def table_accuracy_label_shift_by_dataset(
             escape=False,
             caption=(
                 f"Accuracy of the evaluated solutions under Label Shift "
-                f"for {dataset_name}. Results are reported for the "
-                f"0.1 $\\rightarrow$ 1.0 label-distribution transition "
-                f"under sudden and gradual shifts with transition windows "
-                f"$W=5$ and $W=10$. For each configuration, the mean "
-                f"accuracy and its 95\\% confidence interval are computed "
-                f"over the selected rounds and folds. The highest mean "
-                f"accuracy is highlighted in bold only when its 95\\% "
-                f"confidence interval is strictly separated above the "
-                f"confidence intervals of all other solutions."
+                f"for {dataset_name}. Results are averaged over all "
+                f"available alpha transitions for each temporal shift "
+                f"configuration (sudden and gradual with transition "
+                f"windows $W=5$ and $W=10$). For each configuration, "
+                f"the mean accuracy and its 95\\% confidence interval "
+                f"are computed over the selected rounds, folds, and "
+                f"alpha transitions. The highest mean accuracy is "
+                f"highlighted in bold only when its 95\\% confidence "
+                f"interval is strictly separated above the confidence "
+                f"intervals of all other solutions."
             ),
             label=(
                 "tab:accuracy_label_shift_"
@@ -4173,7 +4115,6 @@ def table_accuracy_label_shift_by_dataset(
             + latex
         )
 
-        # Same two-column-paper formatting used by Concept Drift.
         latex = latex.replace(
             "\\begin{table}",
             "\\begin{table*}",
@@ -4855,14 +4796,15 @@ if __name__ == "__main__":
     concept_experiments = [
         "concept_drift#0.1_sudden",
         "concept_drift#1.0_sudden",
-        "concept_drift#10.0_sudden",
+        # "concept_drift#10.0_sudden",
         "concept_drift#0.1_gradual",
         "concept_drift#1.0_gradual",
-        "concept_drift#10.0_gradual"
+        # "concept_drift#10.0_gradual"
     ]
 
     # Lista específica para as tabelas de Accuracy de Label Shift.
-    # Mantém a mesma ordem canônica usada em Concept Drift.
+    # Mantém a mesma ordem canônica usada em Concept Drift e inclui
+    # JS-Drift entre as soluções/baselines avaliadas.
     label_solutions = [
         "MultiFedAvg+MFP_v2",
         "MultiFedAvg+MFP_v2_dh",
@@ -4870,6 +4812,7 @@ if __name__ == "__main__":
         "MultiFedAvg+FPD",
         "MultiFedAvg",
         "MultiFedAvgRR",
+        "JS-Drift",
         "FedConD",
         "FedDCA",
         "CDA-FedAvg",
@@ -4879,10 +4822,11 @@ if __name__ == "__main__":
         "label_shift#0.1-1.0_sudden",
         "label_shift#0.1-1.0_gradual",
         # "label_shift#0.1-10.0_sudden",
-        # "label_shift#1.0-0.1_sudden",
+        "label_shift#1.0-0.1_sudden",
+        "label_shift#1.0-0.1_gradual",
         # "label_shift#1.0-10.0_sudden",
         # "label_shift#10.0-0.1_sudden",
-        # "label_shift#10.0-1.0_sudden"
+        # "label_shift#10.0-1.0_sudden",
     ]
 
     combined_experiments = [
@@ -5250,7 +5194,6 @@ if __name__ == "__main__":
             df_all=df_all,
             write_path=write_path,
             solutions=label_solutions,
-            label_config=("0.1", "1.0"),
             gradual_windows=(5, 10),
             ci=0.95,
             accuracy_rounds=ACCURACY_LABEL_ROUNDS,
@@ -5541,6 +5484,157 @@ if __name__ == "__main__":
         f"de {len(EXPERIMENT_VALIDATION)} arquivo(s)/configuração(ões) esperados."
     )
 
+    # ============================================================
+    # VERIFICAÇÃO ESPECÍFICA: 5 FOLDS COMPLETOS
+    # ============================================================
+    #
+    # Um CSV é considerado completo para esta verificação somente se:
+    #   * possuir exatamente 5 folds distintos; e
+    #   * cada um dos 5 folds possuir exatamente as rodadas 1..100.
+    #
+    # Esta verificação é independente da validação anterior de
+    # 1 fold -> 100 rodadas / >1 fold -> 500 rodadas.
+    #
+    # O objetivo é identificar explicitamente quais experimentos
+    # não possuem os 5 folds completos no CSV.
+    # ============================================================
+
+    print("\n" + "=" * 100)
+    print("EXPERIMENTOS SEM 5 FOLDS COMPLETOS NO CSV")
+    print("=" * 100)
+
+    incomplete_five_fold_records = []
+
+    for record in EXPERIMENT_VALIDATION:
+        fold_details = record.get("fold_details", {}) or {}
+        fold_ids = record.get("fold_ids", []) or []
+
+        # Um CSV só passa se tiver exatamente 5 folds distintos.
+        has_five_folds = len(fold_ids) == 5
+
+        # Cada fold deve conter todas as 100 rodadas.
+        complete_folds = [
+            fold_id
+            for fold_id, details in fold_details.items()
+            if details.get("complete", False)
+        ]
+
+        missing_folds = [
+            fold_id
+            for fold_id in fold_ids
+            if fold_id not in complete_folds
+        ]
+
+        is_five_fold_complete = (
+            record.get("status") == "complete"
+            and has_five_folds
+            and len(complete_folds) == 5
+        )
+
+        if not is_five_fold_complete:
+            incomplete_five_fold_records.append({
+                **record,
+                "has_five_folds": has_five_folds,
+                "complete_folds": complete_folds,
+                "missing_folds": missing_folds,
+            })
+
+    if incomplete_five_fold_records:
+
+        print(
+            f"Encontrados {len(incomplete_five_fold_records)} "
+            "CSV(s)/configuração(ões) sem 5 folds completos."
+        )
+
+        for record in sorted(
+            incomplete_five_fold_records,
+            key=lambda r: (
+                str(r.get("experiment_id")),
+                str(r.get("transition_window")),
+                str(r.get("solution")),
+                str(r.get("dataset")),
+                r.get("path", ""),
+            ),
+        ):
+            experiment = record.get("experiment_id", "N/A")
+            solution = record.get("solution", "N/A")
+            dataset_name = record.get("dataset", "N/A")
+            transition_window = record.get("transition_window", None)
+            status = record.get("status", "N/A")
+            fold_ids = record.get("fold_ids", []) or []
+            complete_folds = record.get("complete_folds", []) or []
+            missing_folds = record.get("missing_folds", []) or []
+
+            print("\n------------------------------------------------------------")
+            print(f"Experiment ID      : {experiment}")
+            print(f"Solução             : {solution}")
+            print(f"Dataset             : {dataset_name}")
+            print(
+                f"Transition Window   : "
+                f"{transition_window if transition_window is not None else 'N/A'}"
+            )
+            print(f"Status              : {status}")
+            print(f"Arquivo             : {record.get('path', 'N/A')}")
+            print(f"Folds encontrados   : {len(fold_ids)} -> {fold_ids}")
+            print(f"Folds completos     : {len(complete_folds)} -> {complete_folds}")
+
+            if missing_folds:
+                print(
+                    f"Folds incompletos   : "
+                    f"{len(missing_folds)} -> {missing_folds}"
+                )
+
+            if len(fold_ids) < 5:
+                print(
+                    f"Folds ausentes      : "
+                    f"o CSV possui apenas {len(fold_ids)} fold(s); "
+                    "eram esperados 5."
+                )
+            elif len(fold_ids) > 5:
+                print(
+                    f"Folds extras        : "
+                    f"o CSV possui {len(fold_ids)} folds; "
+                    "eram esperados exatamente 5."
+                )
+
+            for fold_id in sorted(fold_details.keys()):
+                details = fold_details[fold_id]
+
+                if not details.get("complete", False):
+                    missing_rounds = details.get("missing_rounds", []) or []
+                    extra_rounds = details.get("extra_rounds", []) or []
+
+                    print(
+                        f"  Fold {fold_id}: "
+                        f"{details.get('round_count', 0)} rodadas | "
+                        f"completo={details.get('complete', False)}"
+                    )
+
+                    if missing_rounds:
+                        preview = missing_rounds[:20]
+                        suffix = " ..." if len(missing_rounds) > 20 else ""
+                        print(
+                            f"    Rodadas ausentes: {preview}{suffix}"
+                        )
+
+                    if extra_rounds:
+                        preview = extra_rounds[:20]
+                        suffix = " ..." if len(extra_rounds) > 20 else ""
+                        print(
+                            f"    Rodadas extras: {preview}{suffix}"
+                        )
+
+            if record.get("error"):
+                print(f"Erro                : {record['error']}")
+
+    else:
+        print(
+            "Todos os CSVs possuem exatamente 5 folds completos, "
+            "com as 100 rodadas esperadas em cada fold."
+        )
+
+    print("=" * 100 + "\n")
+
     print(
         f"\nTolerância máxima de detecção: {MAX_DETECTION_DELAY} rodada(s) após o fim do episódio"
         if MAX_DETECTION_DELAY is not None
@@ -5554,12 +5648,23 @@ if __name__ == "__main__":
     # ============================================================
     # TABELA CONSOLIDADA DE QUALIDADE DA DETECÇÃO
     # ============================================================
+    # Somente estas soluções devem aparecer nas tabelas de detecção.
+    # As demais soluções continuam disponíveis em df_all para as
+    # outras análises/tabelas, mas não são incluídas na avaliação
+    # de qualidade da detecção.
+    detection_solutions = [
+        "MultiFedAvg+MFP_v2",
+        "JS-Drift",
+        "FedConD",
+        "FedDCA",
+        "CDA-FedAvg",
+    ]
 
     df_experimental, df_detection_table, df_overall_detection_table = (
         table_detection_quality_by_shift_type(
             df_final=df_all,
             write_path=write_path,
-            solutions=solutions,
+            solutions=detection_solutions,
             metrics=metrics,
             higher_is_better_metrics=higher_is_better_metrics,
             ci=0.95,
